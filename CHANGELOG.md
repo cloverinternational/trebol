@@ -2,6 +2,22 @@
 
 Release metadata is kept in `package.json`, `update-manifest.json`, and this file together.
 
+## [0.2.1] - 2026-09-15
+
+- Accept the Kitty keyboard protocol CSI-u encoding of Enter in the running-work
+  footer so inspection opens when Pi enables enhanced key reporting.
+- Strip ANSI/OSC escapes and hard-wrap inspection text so a wide child transcript
+  line cannot trip the editor's width validation and terminate the TUI.
+- Treat a missing child transcript as an expected cleanup race: fall back to
+  buffered output instead of surfacing a raw filesystem path, and catch rejected
+  editor promises so a closing child view cannot raise an uncaught rejection.
+- Add an optional per-user systemd unit installer for reboot-safe Paseo startup
+  on Linux.
+- Write goal-evaluation transcripts with 0600 permissions and a bounded size, and
+  reject model-supplied regexes that can backtrack catastrophically.
+- Treat combining marks and ZWJ sequences as zero-width in the metrics footer so
+  accented text and emoji are no longer truncated early.
+
 ## [0.2.0] - 2026-09-11
 
 - Harden bootstrap task handoff so generated guidance is attached through valid TaskManage operations.

@@ -205,6 +205,24 @@ hello/status/pong exchange, not merely an open port.
 
 ```
 
+For reboot-safe Linux startup, install the optional per-user systemd unit from
+the repository root after Paseo has been built:
+
+```bash
+node tools/install/paseo-service.mjs install
+systemctl --user daemon-reload
+systemctl --user enable --now paseo.service
+systemctl --user status paseo.service
+```
+
+The unit waits for `network-online.target`, checks that Tailscale is available,
+keeps the daemon supervised with bounded restart backoff, and uses the same
+`PASEO_HOME`/`PASEO_LISTEN` values as the extension. User lingering must be
+enabled for startup without an interactive login (`loginctl enable-linger
+"$USER"`). Inspect failures with `journalctl --user -u paseo.service -b`.
+The unit starts Paseo itself; run `/paseo setup apply` separately when the
+tailnet-only Serve route needs to be created or repaired.
+
 Tailscale login/permissions remain prerequisites. This integration is not a
 boot-time supervisor or a complete cross-platform installer. Fresh global Pi
 package clones do not contain a built Paseo submodule; provision the Paseo build
