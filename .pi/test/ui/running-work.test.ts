@@ -122,6 +122,21 @@ describe("running work footer interaction", () => {
     expect(safeInspectionText("\x1b]8;;https://example.test\x07linked\x1b]8;;\x07", 80)).toBe("linked");
   });
 
+  it("wraps by display cells without splitting a surrogate pair", () => {
+    const wrapped = safeInspectionText("🙂".repeat(100), 10).split("\n");
+    // Five double-width emoji fill a ten-cell budget, and no chunk may end in a lone surrogate.
+    expect(wrapped.every(line => [...line].length === 5)).toBe(true);
+    expect(wrapped.every(line => !/[\uD800-\uDBFF]$/.test(line))).toBe(true);
+  });
+
+  it("survives a readOutput callback that throws after its buffer is disposed", () => {
+    setRunningWork({ id: "bash-disposed", kind: "bash", label: "Bash", status: "running", startedAt: Date.now(), detail: "sleep 1", output: "buffered tail", readOutput: () => { throw new Error("buffer disposed"); } });
+    setRunningWorkExpanded(true);
+    const opened: string[] = [];
+    expect(() => handleRunningWorkInput("\r", { ui: { editor: (_t: string, body: string) => { opened.push(body); return Promise.resolve(undefined); } } })).not.toThrow();
+    expect(opened[0]).toContain("buffered tail");
+  });
+
   it("catches editor failures instead of creating an unhandled rejection", async () => {
     setRunningWork({ id: "agent-editor-fails", kind: "subagent", label: "Agent", status: "running", startedAt: Date.now(), detail: "task", output: "output" });
     setRunningWorkExpanded(true);

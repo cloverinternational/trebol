@@ -13,6 +13,10 @@ Release metadata is kept in `package.json`, `update-manifest.json`, and this fil
   editor promises so a closing child view cannot raise an uncaught rejection.
 - Add an optional per-user systemd unit installer for reboot-safe Paseo startup
   on Linux.
+- Write goal-evaluation transcripts with 0600 permissions and a bounded size, and
+  reject model-supplied regexes that can backtrack catastrophically.
+- Treat combining marks and ZWJ sequences as zero-width in the metrics footer so
+  accented text and emoji are no longer truncated early.
 
 ## [0.2.0] - 2026-09-11
 

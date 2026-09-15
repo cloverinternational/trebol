@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { existsSync, readFileSync } from "node:fs";
-import { grepTranscript, readTranscriptLines, registerSwarmGoal } from "../../lib/tools/swarm-goal.ts";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { boundTranscript, grepTranscript, readTranscriptLines, registerSwarmGoal } from "../../lib/tools/swarm-goal.ts";
 function harness(evaluate: any = async () => "MET") {
   const tools = new Map<string, any>(), commands = new Map<string, any>(), handlers = new Map<string, any[]>();
   const ctx = { ui: { notify: vi.fn() }, sessionManager: { getBranch: () => [] } };
@@ -54,10 +54,30 @@ describe("swarm-goal", () => {
     expect(seen[2].content.trimEnd().split("\n")).toHaveLength(2);
     expect(existsSync(seen[2].path)).toBe(false);
   });
+  it("writes the transcript privately and bounds an unbounded history", async () => {
+    const seen: { path: string; mode: number }[] = [];
+    const evaluate = vi.fn(async (_c: string, path: string) => { seen.push({ path, mode: statSync(path).mode & 0o777 }); return "MET"; });
+    const h = harness(evaluate);
+    await h.command("goal", "verify");
+    await h.emit("agent_end", { messages: [{ role: "toolResult", content: "secret token" }] });
+    // Transcripts carry prompts and tool output; other local users must not read them.
+    expect(seen[0].mode).toBe(0o600);
+
+    const rows = Array.from({ length: 50 }, (_, i) => JSON.stringify({ role: "user", content: `${i}`.padEnd(100, "x") }) + "\n");
+    const bounded = boundTranscript(rows, 1_000);
+    expect(Buffer.byteLength(bounded, "utf8")).toBeLessThan(1_400);
+    expect(bounded).toContain("earlier message(s) omitted");
+    expect(bounded).toContain("49"); // newest evidence is retained
+    expect(boundTranscript(rows, 10_000_000)).toBe(rows.join("")); // no note when everything fits
+  });
   it("grep and read helpers are bounded and injection-safe", () => {
     const lines = Array.from({ length: 300 }, (_, i) => `line ${i + 1} ${i % 2 ? "even" : "odd"}`);
     expect(grepTranscript(lines, "line 42 ")).toBe("42: line 42 even");
     expect(grepTranscript(lines, "line", 999).split("\n")).toHaveLength(50); // hard cap
+    // A model-supplied nested quantifier would otherwise stall the event loop.
+    expect(grepTranscript(lines, "(a+)+$")).toMatch(/nested quantifiers/);
+    expect(grepTranscript(lines, "x".repeat(201))).toMatch(/200 characters/);
+    expect(grepTranscript(lines, "line 4[0-9] ")).toContain("40: line 40"); // ordinary patterns still work
     expect(grepTranscript(lines, "(unclosed")).toMatch(/^invalid regex/);
     expect(grepTranscript(lines, "no such text")).toBe("no matches");
     expect(grepTranscript(["x".repeat(1000)], "x")).toContain("[clipped]");

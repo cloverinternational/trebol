@@ -83,10 +83,21 @@ export function footerVisibleWidth(text: string): number {
     const ansi = ANSI_PATTERN.exec(text.slice(i));
     if (ansi) { i += ansi[0].length; continue; }
     const code = text.codePointAt(i)!;
-    width += isWideCodePoint(code) ? 2 : 1;
+    width += cellWidth(code);
     i += code > 0xffff ? 2 : 1;
   }
   return width;
+}
+// Combining marks, variation selectors and ZWJ occupy no cell of their own; counting
+// them made `e\u0301` measure 2 and emoji ZWJ sequences measure 4+, truncating early.
+function cellWidth(code: number): number {
+  return isZeroWidthCodePoint(code) ? 0 : isWideCodePoint(code) ? 2 : 1;
+}
+function isZeroWidthCodePoint(code: number): boolean {
+  return (code >= 0x0300 && code <= 0x036f) || (code >= 0x1ab0 && code <= 0x1aff) || (code >= 0x1dc0 && code <= 0x1dff)
+    || (code >= 0x20d0 && code <= 0x20ff) || (code >= 0xfe00 && code <= 0xfe0f) || (code >= 0xfe20 && code <= 0xfe2f)
+    || code === 0x200b || code === 0x200c || code === 0x200d || code === 0xfeff
+    || (code >= 0xe0100 && code <= 0xe01ef);
 }
 function isWideCodePoint(code: number): boolean {
   return (code >= 0x1100 && code <= 0x115f) || (code >= 0x2e80 && code <= 0x9fff) || (code >= 0xac00 && code <= 0xd7a3)
@@ -109,8 +120,10 @@ export function clampFooterRow(row: string, width: number): string {
     const ansi = ANSI_PATTERN.exec(row.slice(i));
     if (ansi) { out += ansi[0]; i += ansi[0].length; hadAnsi = true; continue; }
     const code = row.codePointAt(i)!;
-    const cell = isWideCodePoint(code) ? 2 : 1;
-    if (used + cell > width) break;
+    const cell = cellWidth(code);
+    // A zero-width mark belongs to the character before it, so it must ride along
+    // rather than be dropped or counted against the budget.
+    if (cell > 0 && used + cell > width) break;
     out += String.fromCodePoint(code);
     used += cell;
     i += code > 0xffff ? 2 : 1;
@@ -166,8 +179,17 @@ class MetricsFooter {
   constructor(private readonly theme: any, private readonly onInvalidate: () => void) {}
   render(width: number): string[] {
     try { return this.renderRows(Math.max(1, Math.floor(Number(width) || 80))); }
-    catch { return []; } // A footer defect must never take down the whole TUI.
+    catch (error) {
+      // A footer defect must never take down the whole TUI, but swallowing it
+      // silently hides real regressions, so report it once per session.
+      if (!this.reportedRenderError) {
+        this.reportedRenderError = true;
+        shared.ctx?.ui?.notify?.(`Metrics footer disabled after render error: ${error instanceof Error ? error.message : error}`, "warning");
+      }
+      return [];
+    }
   }
+  private reportedRenderError = false;
   private renderRows(width: number): string[] {
     const m = shared.metrics ?? blank();
     const state = m.active ? "running" : "idle";

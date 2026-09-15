@@ -67,10 +67,29 @@ export function safeInspectionText(value: string, width = 120): string {
   const limit = Math.max(1, Math.min(120, Math.floor(Number(width) || 120)));
   return plain.split("\n").flatMap((line) => {
     if (!line) return [""];
+    // Measure display cells, not UTF-16 units: slicing by code unit can split a
+    // surrogate pair, and CJK/emoji occupy two columns each.
     const chunks: string[] = [];
-    for (let i = 0; i < line.length; i += limit) chunks.push(line.slice(i, i + limit));
-    return chunks;
+    let chunk = "";
+    let used = 0;
+    for (const char of line) {
+      const cell = isWideChar(char.codePointAt(0)!) ? 2 : 1;
+      if (used + cell > limit) { chunks.push(chunk); chunk = ""; used = 0; }
+      chunk += char;
+      used += cell;
+    }
+    if (chunk) chunks.push(chunk);
+    return chunks.length ? chunks : [""];
   }).join("\n");
+}
+function isWideChar(code: number): boolean {
+  return (code >= 0x1100 && code <= 0x115f) || (code >= 0x2e80 && code <= 0x9fff) || (code >= 0xac00 && code <= 0xd7a3)
+    || (code >= 0xf900 && code <= 0xfaff) || (code >= 0xff00 && code <= 0xff60) || (code >= 0x1f300 && code <= 0x1faff)
+    || (code >= 0x20000 && code <= 0x3fffd);
+}
+/** `readOutput` is supplied by the caller and can throw once its buffer is disposed. */
+function liveOutput(item: RunningWorkItem): string | undefined {
+  try { return item.readOutput?.() ?? item.output; } catch { return item.output; }
 }
 function openInspection(ctx: any, title: string, body: string): void {
   const safeBody = safeInspectionText(body);
@@ -109,14 +128,14 @@ export function handleRunningWorkInput(data: string, ctx?: any): boolean {
         // render and Enter. Keep the inspection useful instead of exposing a
         // raw ENOENT from the deleted transcript path.
         const transcript = readTranscript(item.transcriptPath);
-        const fallback = item.readOutput?.() ?? item.output ?? "(conversation transcript is unavailable; no buffered output remains)";
+        const fallback = liveOutput(item) ?? "(conversation transcript is unavailable; no buffered output remains)";
         const body = header + (transcript ?? fallback);
         openInspection(ctx, `${item.label} · conversation`, body);
       }
       else {
         // A running item has no final `output` yet; prefer the live snapshot
         // so inspecting an in-flight command shows what it is doing right now.
-        const live = item.readOutput?.() ?? item.output;
+        const live = liveOutput(item);
         const body = `${item.label}\nstatus: ${item.status}\ntime: ${formatRunningWorkDuration(item)}\ntokens: ${item.tokens ?? "not reported"}\n${item.kind === "bash" ? "command" : "task"}: ${item.detail}\n\n${live?.trim() ? live : "(no output yet)"}`;
         openInspection(ctx, `${item.label} · output`, body);
       }

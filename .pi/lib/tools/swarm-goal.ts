@@ -15,6 +15,10 @@ const ENTRY = "pi-swarm-goal";
 const WEEK = 7 * 24 * 3600_000;
 const MAX_TIMER = 2_147_000_000;
 const MAX_VERDICT_TOOL_TURNS = 8;
+// The judge only greps/reads this file, so an unbounded session history would
+// cost memory and disk for evidence the model never needs. Keep the most recent
+// messages, which carry the outcome a verdict depends on.
+const MAX_TRANSCRIPT_BYTES = 8 * 1024 * 1024;
 const registrations = new WeakMap<object, any>();
 const result = (value: unknown) => ({ content: [{ type: "text", text: JSON.stringify(value) }], details: value });
 const duration = (value: string) => /^\d+(?:\.\d+)?d$/.test(value) ? parseDelay(`${Number(value.slice(0, -1)) * 24}h`) : parseDelay(value);
@@ -22,10 +26,18 @@ const clip = (s: string, n: number) => s.length > n ? `${s.slice(0, n)}…[clipp
 
 /** In-process regex line scan over the transcript file; never shells out. */
 export function grepTranscript(lines: string[], pattern: string, maxMatches = 20): string {
+  // The pattern comes from the model and runs synchronously on the event loop,
+  // so a nested quantifier like (a+)+$ could stall the whole session. Reject the
+  // shapes that cause catastrophic backtracking instead of trying to time out.
+  if (pattern.length > 200) return "invalid regex: pattern must be 200 characters or fewer";
+  if (/(\([^)]*[+*][^)]*\)|\[[^\]]*\][^\s]*|\\[dws])\s*[+*]\s*[+*]|\)\s*[+*][+*]/i.test(pattern) || /\([^)]*[+*][^)]*\)\s*[+*]/.test(pattern))
+    return "invalid regex: nested quantifiers are not allowed";
   let re: RegExp; try { re = new RegExp(pattern, "i"); } catch (e) { return `invalid regex: ${e instanceof Error ? e.message : e}`; }
   const cap = Math.min(Math.max(1, Math.trunc(maxMatches) || 20), 50);
   const out: string[] = [];
-  for (let i = 0; i < lines.length && out.length < cap; i++) if (re.test(lines[i])) out.push(`${i + 1}: ${clip(lines[i], 500)}`);
+  // Bound each line too: matching is linear in input for safe patterns, but a
+  // pathological line length still multiplies the cost of every scan.
+  for (let i = 0; i < lines.length && out.length < cap; i++) if (re.test(clip(lines[i], 10_000))) out.push(`${i + 1}: ${clip(lines[i], 500)}`);
   return out.length ? out.join("\n") : "no matches";
 }
 
@@ -34,6 +46,21 @@ export function readTranscriptLines(lines: string[], startLine: number, endLine:
   if (start > lines.length) return `out of range: transcript has ${lines.length} lines`;
   const end = Math.min(lines.length, Math.trunc(endLine) || start, start + 199);
   return lines.slice(start - 1, end).map((l, i) => `${start + i}: ${clip(l, 2000)}`).join("\n");
+}
+
+/** Keep the newest rows within a byte budget, noting anything dropped. */
+export function boundTranscript(rows: string[], maxBytes = MAX_TRANSCRIPT_BYTES): string {
+  let total = 0;
+  let start = rows.length;
+  while (start > 0) {
+    const size = Buffer.byteLength(rows[start - 1], "utf8");
+    if (total + size > maxBytes) break;
+    total += size;
+    start--;
+  }
+  if (start === 0) return rows.join("");
+  const dropped = JSON.stringify({ role: "system", content: `[${start} earlier message(s) omitted: transcript exceeded ${maxBytes} bytes]` }) + "\n";
+  return dropped + rows.slice(start).join("");
 }
 
 /**
@@ -169,7 +196,10 @@ export function registerSwarmGoal(pi: any, options: SwarmGoalOptions = {}) {
         const content = Array.isArray(m.content) ? m.content.filter((p: any) => p.type !== "thinking") : m.content;
         return JSON.stringify({ role: m.role, toolName: m.toolName, content }) + "\n";
       });
-      await writeFile(transcriptPath, rows.join(""), "utf8");
+      // Transcripts hold prompts, tool arguments and tool output, which can
+      // include credentials. Create the file 0600 so other local users on a
+      // shared host cannot read it while the judge runs.
+      await writeFile(transcriptPath, boundTranscript(rows), { encoding: "utf8", mode: 0o600 });
       const verdict = await (options.evaluate ?? defaultEvaluator)(current.condition, transcriptPath, ctx);
       if (!owner() || version !== revision || goal !== current) return;
       if (!["MET", "NOT_MET", "IMPOSSIBLE"].includes(verdict)) throw new Error("invalid goal verdict");

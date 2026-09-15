@@ -24,6 +24,10 @@ describe("conversation metrics footer", () => {
   it("measures visible width ignoring ANSI styling", () => {
     expect(footerVisibleWidth("\x1b[32m●\x1b[0m  model x")).toBe("●  model x".length);
     expect(footerVisibleWidth("汉字")).toBe(4);
+    // Combining marks and ZWJ sequences render on the preceding cell.
+    expect(footerVisibleWidth("e\u0301")).toBe(1);
+    expect(footerVisibleWidth("👩\u200d💻")).toBe(4);
+    expect(clampFooterRow("e\u0301abc", 3)).toBe("e\u0301ab");
   });
 
   it("clamps styled rows to the terminal width without splitting escapes", () => {
