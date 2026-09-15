@@ -51,6 +51,37 @@ export function selectedRunningWork(): RunningWorkItem | undefined {
   const items = visibleRunningWork();
   return items.length ? items[runningWorkSelection()] : undefined;
 }
+/** Enter can arrive as CR/LF or Kitty keyboard protocol CSI-u when Pi enables enhanced key reporting. */
+export function isRunningWorkEnter(data: string): boolean {
+  return data === "\r" || data === "\n" || data === "\x1b[13u" || /^\x1b\[13;[1-9]u$/.test(data);
+}
+/** Keep inspection text safe for Pi's strict line-width renderer. */
+export function safeInspectionText(value: string, width = 120): string {
+  // Child transcripts and shell output can contain OSC hyperlinks/ANSI color
+  // sequences. They are useful in a pipe but unsafe in editor prefill text:
+  // Pi's editor validates visible width and can terminate the TUI on a line
+  // that is only a few cells over the terminal boundary.
+  const plain = String(value)
+    .replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "")
+    .replace(/\x1b\[[0-?]*[ -\/]*[@-~]/g, "");
+  const limit = Math.max(1, Math.min(120, Math.floor(Number(width) || 120)));
+  return plain.split("\n").flatMap((line) => {
+    if (!line) return [""];
+    const chunks: string[] = [];
+    for (let i = 0; i < line.length; i += limit) chunks.push(line.slice(i, i + limit));
+    return chunks;
+  }).join("\n");
+}
+function openInspection(ctx: any, title: string, body: string): void {
+  const safeBody = safeInspectionText(body);
+  try {
+    if (typeof ctx?.ui?.editor === "function") {
+      // Catch both synchronous UI failures and rejected editor promises. A
+      // missing/closing child view must never become an uncaught rejection.
+      Promise.resolve(ctx.ui.editor(title, safeBody)).catch(() => ctx?.ui?.notify?.("Unable to open work inspection", "warning"));
+    } else ctx?.ui?.notify?.(safeBody, "info");
+  } catch { ctx?.ui?.notify?.("Unable to open work inspection", "warning"); }
+}
 export function handleRunningWorkInput(data: string, ctx?: any): boolean {
   if (data === "\x02") {
     const detach = (globalThis as any)[Symbol.for("pi-swarm-background-bash-detach")];
@@ -67,24 +98,27 @@ export function handleRunningWorkInput(data: string, ctx?: any): boolean {
   if (down) { moveRunningWorkSelection(1); return true; }
   if (up) { moveRunningWorkSelection(-1); return true; }
   if (data === "\x1b") { setRunningWorkExpanded(false); return true; }
-  if (data === "\r" || data === "\n") {
+  if (isRunningWorkEnter(data)) {
     const item = selectedRunningWork();
     if (item) {
       // Re-read the transcript on every open so inspecting a running
       // sub-agent shows its current conversation, not a stale snapshot.
       if (item.transcriptPath) {
         const header = `${item.label}\nstatus: ${item.status}\ntime: ${formatRunningWorkDuration(item)}\ntask: ${item.detail}\n\n`;
-        const body = header + readTranscript(item.transcriptPath);
-        if (typeof ctx?.ui?.editor === "function") void ctx.ui.editor(`${item.label} · conversation`, body);
-        else ctx?.ui?.notify?.(body, "info");
+        // A child can finish or clean up its session file between the footer
+        // render and Enter. Keep the inspection useful instead of exposing a
+        // raw ENOENT from the deleted transcript path.
+        const transcript = readTranscript(item.transcriptPath);
+        const fallback = item.readOutput?.() ?? item.output ?? "(conversation transcript is unavailable; no buffered output remains)";
+        const body = header + (transcript ?? fallback);
+        openInspection(ctx, `${item.label} · conversation`, body);
       }
       else {
         // A running item has no final `output` yet; prefer the live snapshot
         // so inspecting an in-flight command shows what it is doing right now.
         const live = item.readOutput?.() ?? item.output;
         const body = `${item.label}\nstatus: ${item.status}\ntime: ${formatRunningWorkDuration(item)}\ntokens: ${item.tokens ?? "not reported"}\n${item.kind === "bash" ? "command" : "task"}: ${item.detail}\n\n${live?.trim() ? live : "(no output yet)"}`;
-        if (typeof ctx?.ui?.editor === "function") void ctx.ui.editor(`${item.label} · output`, body);
-        else ctx?.ui?.notify?.(body, "info");
+        openInspection(ctx, `${item.label} · output`, body);
       }
     }
     return true;
@@ -95,7 +129,7 @@ export function handleRunningWorkInput(data: string, ctx?: any): boolean {
   if (runningWorkExpanded()) setRunningWorkExpanded(false);
   return false;
 }
-function readTranscript(path: string): string {
+function readTranscript(path: string): string | undefined {
   try {
     const rows = readFileSync(path, "utf8").split("\n").filter(Boolean).slice(-160);
     const out: string[] = [];
@@ -108,7 +142,12 @@ function readTranscript(path: string): string {
       } catch { /* ignore partial records */ }
     }
     return out.length ? out.join("\n\n────────────────────────────────────────\n\n") : "(conversation transcript is empty)";
-  } catch (error) { return `Unable to read child conversation: ${error instanceof Error ? error.message : String(error)}`; }
+  } catch (error) {
+    // ENOENT is an expected cleanup race for completed/extinct children. Do
+    // not render an absolute path or filesystem exception in the TUI.
+    if ((error as NodeJS.ErrnoException)?.code === "ENOENT") return undefined;
+    return `(conversation transcript unavailable: ${error instanceof Error ? error.message : String(error)})`;
+  }
 }
 export function formatRunningWorkDuration(item: RunningWorkItem, now = Date.now()): string {
   const seconds = Math.max(0, Math.floor(((item.endedAt ?? now) - item.startedAt) / 1000));

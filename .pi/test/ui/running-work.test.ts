@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   handleRunningWorkInput,
+  isRunningWorkEnter,
+  safeInspectionText,
   moveRunningWorkSelection,
   removeRunningWork,
   runningWorkExpanded,
@@ -87,5 +89,46 @@ describe("running work footer interaction", () => {
   it("Enter on an empty drawer is a no-op without crashing", () => {
     expect(selectedRunningWork()).toBeUndefined();
     expect(handleRunningWorkInput("\r", {})).toBe(false);
+  });
+
+  it("accepts Kitty CSI-u Enter sequences used by enhanced terminal input", () => {
+    expect(isRunningWorkEnter("\x1b[13u")).toBe(true);
+    expect(isRunningWorkEnter("\x1b[13;2u")).toBe(true);
+    expect(isRunningWorkEnter("x")).toBe(false);
+  });
+
+  it("falls back cleanly when a child transcript was removed before Enter", () => {
+    setRunningWork({
+      id: "agent-missing-transcript",
+      kind: "subagent",
+      label: "Agent missing-transcript",
+      status: "completed",
+      startedAt: Date.now(),
+      detail: "finished child",
+      transcriptPath: "/definitely/missing/child.jsonl",
+      output: "final buffered result",
+    });
+    setRunningWorkExpanded(true);
+    const opened: string[] = [];
+    handleRunningWorkInput("\r", { ui: { editor: (_title: string, body: string) => { opened.push(body); return Promise.resolve(undefined); } } });
+    expect(opened[0]).toContain("final buffered result");
+    expect(opened[0]).not.toContain("Unable to read child conversation");
+    expect(opened[0]).not.toContain("ENOENT");
+  });
+
+  it("wraps hostile long output before handing it to the editor", () => {
+    const longLine = "x".repeat(500);
+    expect(safeInspectionText(longLine, 181).split("\n").every(line => line.length <= 120)).toBe(true);
+    expect(safeInspectionText("\x1b]8;;https://example.test\x07linked\x1b]8;;\x07", 80)).toBe("linked");
+  });
+
+  it("catches editor failures instead of creating an unhandled rejection", async () => {
+    setRunningWork({ id: "agent-editor-fails", kind: "subagent", label: "Agent", status: "running", startedAt: Date.now(), detail: "task", output: "output" });
+    setRunningWorkExpanded(true);
+    const notices: string[] = [];
+    expect(() => handleRunningWorkInput("\r", { ui: { editor: () => Promise.reject(new Error("view closed")), notify: (text: string) => notices.push(text) } })).not.toThrow();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(notices).toContain("Unable to open work inspection");
   });
 });
