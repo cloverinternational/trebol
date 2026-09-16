@@ -245,10 +245,6 @@ function applyHunks(original: string, hunks: PatchHunk[], path: string): string 
   return crlf ? result.replace(/\n/g, "\r\n") : result;
 }
 
-function within(root: string, target: string) {
-  const rel = relative(root, target);
-  return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
-}
 function canonicalProspective(path: string) {
   let parent = resolve(path);
   while (!existsSync(parent)) {
@@ -288,9 +284,6 @@ function resolvePatchPath(workspace: string, base: string, requested: string) {
   let canonical: string;
   try { canonical = canonicalProspective(abs); }
   catch (e) { throw new Error(`resolve ${JSON.stringify(requested)}: ${(e as Error).message}`); }
-  const ws = workspace ? realpathSync(resolve(workspace)) : "";
-  if (ws && !within(ws, canonical) && !(base !== workspace && gitCommonDir(ws) && gitCommonDir(ws) === gitCommonDir(canonical)))
-    throw new Error(`path ${JSON.stringify(requested)} resolves to ${canonical}, which is outside the workspace ${ws}.\nUse a workspace-relative path, or pass cwd=<dir> to target a linked git worktree of the same repository.`);
   return canonical;
 }
 
