@@ -10,7 +10,7 @@ const SCOPE = { workspace: "/repo", session: "s" };
 function harness(cwd: string, retriever?: (task: string) => string) {
   const tools = new Map<string, any>(); const spawned: any[] = []; let start: any;
   const pi: any = { registerTool: (t: any) => tools.set(t.name, t), registerCommand: () => {}, appendEntry: () => {}, on: (e: string, h: any) => { if (e === "session_start") start = h; } };
-  if (retriever) pi.agents = { spawn: (spec: any) => { spawned.push(spec); return { wait: async () => ({ status: "completed", output: retriever(spec.task) }) }; } };
+  if (retriever) pi.exec = async (_command: string, commandArgs: string[]) => { const task = String(commandArgs.at(-1)); spawned.push({ task }); return { code: 0, stdout: retriever(task), stderr: "" }; };
   swarmContextExtension(pi);
   start?.({}, { cwd, sessionManager: { getSessionFile: () => "s", getEntries: () => [] }, models: { list: () => ["anthropic/claude-3-5-haiku-latest"] }, ui: { notify: () => {} } });
   return { spawned, call: async (name: string, params: any) => { const out = await tools.get(name).execute("id", params); return { isError: out.isError === true, details: out.details as any, text: out.content[0].text }; } };

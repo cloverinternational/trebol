@@ -2,7 +2,7 @@ import { it, expect } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { memoryGate, memorySystemPrompt } from "../../lib/context/memory-ceremony.ts";
+import { MEMORY_CEREMONY, memoryGate, memorySystemPrompt } from "../../lib/context/memory-ceremony.ts";
 import { writeBootstrapSettings } from "../../../packages/runtime/bootstrap/src/store.ts";
 
 it("persists enforcement and adds the instruction exactly once; off removes it", () => {
@@ -21,4 +21,9 @@ it("gates all ordinary tools without blocking recovery, and releases after succe
   for (const name of ["bootstrap", "ask_user_question", "exit_plan_mode"]) expect(memoryGate(true, false, name)).toBeUndefined();
   expect(memoryGate(true, true, "Bash")).toBeUndefined();
   expect(memoryGate(false, false, "Bash")).toBeUndefined();
+});
+
+it("does not request duplicate task drafting after combined bootstrap", () => {
+  expect(MEMORY_CEREMONY).not.toContain("In combined mode, draft initial tasks");
+  expect(MEMORY_CEREMONY).toContain("Inspect taskPlan in either mode");
 });

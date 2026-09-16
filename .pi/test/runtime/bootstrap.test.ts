@@ -30,3 +30,12 @@ describe("bootstrap runtime", () => {
     expect(readBootstrapSettings(cwd).model).toBeUndefined();
   });
 });
+
+it("bootstrap handoff describes completed skill loads rather than requesting duplicate invocation", () => {
+  const source = readFileSync(new URL("../../extensions/00-runtime/bootstrap.ts", import.meta.url), "utf8");
+  expect(source).not.toContain("Afterwards invoke recommended skills");
+  expect(source).not.toContain("invokeSkills:");
+  expect(source).toContain("loadedSkillNames: loadedSkills.map(s => s.name)");
+  expect(source).toContain("Follow loadedSkills instructions already returned here");
+  expect(source).toContain("Verify repository facts before implementing");
+});
