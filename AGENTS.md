@@ -75,6 +75,7 @@ address in each tree.
 | `packages/tools/` | `agents`, `taskmanage`, `mcp`, `schedule`, `codemode`. |
 | `tests/parity/` | Cross-runtime parity suite (`node --test`). |
 | `tools/parity/` | Pi ↔ Swarm probes, fixtures, generators; `plexus/` holds the A/B harness. |
+| `tools/experiments/bootstrap-agent/` | Opt-in bootstrap experiments; `planning-contract.mjs` provides experimental prompt variants and strict plan validation. Private history replays stay in ignored artifacts; planning scores do not prove execution or memory retrieval. |
 | `tools/integration/` | Postgres integration runner and cache dogfood. |
 | `tools/install/` | `doctor.mjs`: global-install health check (`npm run doctor`). |
 | `tools/repo/` | Repository maintenance: `rewrite-imports.mjs` re-targets relative specifiers after moves and has a `--check` mode. |
@@ -126,6 +127,13 @@ Important UI locations:
   a process-wide boolean: `/reload` re-evaluates modules with a fresh `pi`
   while `globalThis` survives, and a boolean guard silently skips registration.
 - **Inline hook rows:** `.pi/lib/runtime/hook-render-bridge.ts` and `.pi/lib/runtime/hook-presenter.ts`.
+- **Windows image paste:** `.pi/extensions/50-ui/swarm-image-paste.ts` with
+  `.pi/lib/ui/windows-clipboard.ts`. It registers `ctrl+v` and `/paste-image`
+  on win32 only, because Pi binds `app.clipboard.pasteImage` to `alt+v` there
+  and its clipboard reader falls back to PowerShell only under WSL. Extension
+  shortcuts are dispatched before built-in keybindings and `ctrl+v` is not a
+  reserved binding, so Pi's `alt+v` keeps working. Do not register on other
+  platforms: Pi's own `ctrl+v` is correct there.
 - **Themes:** `.pi/themes/*.json`.
 
 The detailed design references are
@@ -181,7 +189,7 @@ When changing discovery, preserve these invariants:
 | `20-policy` | `swarm-disk-hooks` |
 | `30-tools` | `annoyed/`, `codemode`, `control-task-tools`, `exa-search`, `history-search`, `ask-user/`, `paseo`, `research-tools`, `swarm-goal`, `swarm-agent-tools`, `swarm-background-bash`, `swarm-bash`, `swarm-fs-tools`, `swarm-history-vault-tools`, `swarm-search`, `taskmanage`, `vault` |
 | `40-state` | `memory-history`, `swarm-conversation-metadata` |
-| `50-ui` | `control-panel`, `conversation-metrics`, `swarm-themes`, `swarm-tools-status`, `swarm-btw` |
+| `50-ui` | `control-panel`, `conversation-metrics`, `swarm-themes`, `swarm-tools-status`, `swarm-btw`, `swarm-image-paste` |
 
 The list in each layer's `package.json` is authoritative; this table mirrors
 it. Adding an extension means adding the file *and* its manifest entry.
@@ -206,7 +214,7 @@ belongs in `packages/policy/policy`, and rendering belongs in the extension/rend
 | `task_create`, `task_update`, `task_get`, `task_list`, `task_delete`, `task_claim`, `task_note`, `task_plan`, `task_complete`, `task_reopen`, `task_block`, `task_unblock`, `task_focus`, `task_unfocus`, `task_status`, `run_status` | `.pi/extensions/30-tools/taskmanage.ts`, `.pi/extensions/30-tools/control-task-tools.ts` | `packages/tools/taskmanage/src/task-manage.ts`, `packages/tools/taskmanage/src/workflow.ts`, `packages/tools/taskmanage/src/persistence.ts`, `packages/runtime/runtime-contracts/src/control-task.ts`; do not duplicate task state in extensions. |
 | `HistorySearch`, `HistoryGet` | `.pi/extensions/30-tools/swarm-history-vault-tools.ts` and `.pi/extensions/30-tools/history-search.ts` | `.pi/lib/tools/swarm-history-tools.ts`; history search/read is deliberately read-only, bounded, and redacted. |
 | `memory_history` | `.pi/extensions/40-state/memory-history.ts` | `.pi/lib/state/shared-memory.ts`: repository-default immutable records under `~/.swarm/memory` (override `PI_SWARM_MEMORY_DIR`), Git-common-dir repository identity, worktree overlay and explicit global scope. Legacy session scope remains readable. Redact before writes. |
-| `bootstrap` tool, `/bootstrap`, native `/settings` → Bootstrap model | `.pi/extensions/00-runtime/bootstrap.ts` | `packages/runtime/bootstrap/src/`; parallel/combined/off strategies, read-only model consultations, streaming tool renderer and startup guidance. Model inherits the current session unless overridden. Settings use Git common dir with non-Git `.swarm` fallback. Handoff invokes active Skill/TaskManage definitions through the registered policy hooks; parallel commits a draft task and records `pi-swarm-bootstrap-task` for retry dedup; combined leaves task drafting to main. `.pi/lib/ui/bootstrap-settings.ts` augments the native SettingsList through an isolated, shape-checked compatibility adapter; no replacement `/settings` command or host-file edits. Recheck this adapter against Pi UI upgrades. |
+| `bootstrap` tool, `/bootstrap`, native `/settings` → Bootstrap model | `.pi/extensions/00-runtime/bootstrap.ts` | `packages/runtime/bootstrap/src/`; parallel/combined/off strategies, read-only model consultations, streaming tool renderer and startup guidance. Model inherits the current session unless overridden. Settings use Git common dir with non-Git `.swarm` fallback. Handoff invokes active Skill/TaskManage definitions through the registered policy hooks; both modes propose task reconciliation and load selected skills through the registered handoff; task changes require `commitTasks=true`, with `pi-swarm-bootstrap-task` recording retry dedup. Returned `loadedSkills` contains the instructions; `next.loadedSkillNames` identifies already-loaded skills, not work to invoke again. Plans remain proposals requiring repository verification. `.pi/lib/ui/bootstrap-settings.ts` augments the native SettingsList through an isolated, shape-checked compatibility adapter; no replacement `/settings` command or host-file edits. Recheck this adapter against Pi UI upgrades. |
 | `skills_list`, `skill_view` | `.pi/extensions/10-context/swarm-skills.ts` | `packages/context/skills/src/index.ts` and `.pi/lib/context/swarm-skill-registry.ts`; skill bodies/support files stay on disk. |
 | `Skill`, `SkillManage` | skill/autogen integration via `.pi/extensions/10-context/swarm-skills.ts`, `.pi/extensions/10-context/autogenskills.ts` | `packages/context/autogenskills/src/index.ts`; mutate skills only through the vault/revision API. |
 | `websearch` | `.pi/extensions/30-tools/exa-search.ts` | Exa HTTP adapter; credentials/config must remain outside tool arguments. |
@@ -223,6 +231,13 @@ belongs in `packages/policy/policy`, and rendering belongs in the extension/rend
 | `vault` | `.pi/extensions/30-tools/vault.ts` | `.pi/lib/tools/swarm-vault-tools.ts`; transparent global credential storage, with explicit user-risk warning. |
 | `mcp__<server>__<tool>` | `.pi/extensions/00-runtime/swarm-runtime.ts` / `packages/tools/mcp/src/index.ts` | `packages/tools/mcp/src/index.ts`; manifests, allowlists, transport, and auth are the seam. |
 | `annoyed` | `.pi/extensions/30-tools/annoyed/index.ts` | `.pi/extensions/30-tools/annoyed/store.ts`; issue persistence is separate from the nudge hook. |
+
+Model-facing workflow wording is adapted by
+`packages/context/prompt/src/workflow-guidance.ts` in prompt presets, Forge
+assembly, and tool-description loading. Upstream prompt assets and tool captures
+remain reference snapshots; local wording intentionally differs where blanket
+workflow restrictions would prevent useful work. Preserve tool limits, approval
+requirements, and data-integrity rules when changing this adapter.
 
 Names may be filtered by active-tool policy. `swarm-tools-status` and
 `system-inspector` show the runtime's actual registered/active surface; use
@@ -248,6 +263,39 @@ automatic stealing. This is not yet an unattended cross-platform
 installer or boot-time service. Fresh global package clones do not include a
 built Paseo submodule. Validate with `npx vitest run .pi/test/tools/paseo.test.ts`;
 those tests do not prove process supervision or cross-device connectivity.
+
+The PageIndex-style context adapter registers `context_index`, `context_remember`,
+`context_reindex`, `context_search`, `context_outline`, `context_read`,
+`context_inspect`, and `context_delete`; these are retained by the default tool
+surface. Session reload accepts Pi custom-entry envelopes. Retrieval consultations
+use tool-disabled Pi subprocesses; selected sections are materialized by the
+parent. `context-consult.ts` limits elapsed time and accepted output, but Pi's
+exec API buffers child output internally (peak memory is not streaming-bounded).
+The context index still has session scope; cross-session knowledge integration
+is unfinished. `.pi/lib/state/knowledge-store.ts` and
+`.pi/lib/context/knowledge-capture.ts` are tested integration components. Bootstrap now uses
+`knowledge-recall.ts` to project verified durable records into cited PageIndex
+reads; candidate records are excluded, storage failure is distinct from no match,
+and recall currently scans at most 100 records per scope. Automatic lifecycle
+capture and shared-memory write compatibility integration remain unfinished. Store path checks reject
+existing symlinks; hostile concurrent ancestor replacement is outside its current
+filesystem guarantees. No live backfill is implied by these library tests.
+
+Memory/skill semantics are shared in `.pi/lib/context/memory-guidance.ts`.
+Memory stores project/domain knowledge, decisions and rationale, preferences,
+and contextual facts (including how a project operates); skills store reusable
+agent procedures. Mixed observations must be separated, not copied wholesale.
+Repository is the shared-memory default; worktree holds unmerged facts, session
+holds local context, and global requires explicitly shareable cross-project
+knowledge. Do not automatically duplicate facts across scopes. The PageIndex-style
+context extension currently retains its namespace/workspace/session boundary.
+
+Bootstrap shared-memory recall uses task-token ranking across text and tags before
+its candidate cap (`recallShared`); explicit memory search retains substring
+semantics. Bootstrap handoff asks for evidence-backed knowledge enrichment after
+verification, not automatic transcript ingestion. No new learning is a valid
+outcome. Historical backfills must be reviewed, scoped, and redacted before
+promotion; experimental stores use `PI_SWARM_MEMORY_DIR`.
 
 `/mem on|off|status` persists bootstrap enforcement per repository. On adds a
 memory ceremony to the final assembled system prompt and blocks ordinary tool

@@ -1,9 +1,9 @@
-# Pi-Swarm
+# Trebol v2.0
 
-Pi-Swarm is a Pi extension pack that brings the Swarm development model to
-Pi: structured prompt and context assembly, policy and hooks, durable state,
-tasks, subagents, skills, research tools, parity checks, and a Swarm-oriented
-terminal experience.
+Trebol v2.0 is the successor to the original Swarm Go agent harness. It brings
+the Swarm development model to Pi as an extension pack: structured prompt and
+context assembly, policy and hooks, durable state, tasks, subagents, skills,
+research tools, parity checks, and a Swarm-oriented terminal experience.
 
 > **Status:** Active development. The repository is evolving quickly and some
 > interfaces are still experimental.
@@ -16,14 +16,14 @@ tasks, memory, and verification—but it also meant maintaining a separate agent
 runtime and user experience.
 
 We decided to move the integration to **Pi**. Pi already provides the provider
-and agent loop, session management, native tools, and terminal UI. Pi-Swarm now
+and agent loop, session management, native tools, and terminal UI. Trebol now
 adds the Swarm capabilities as extensions instead of maintaining a second agent
 runtime. This keeps the boundary clear:
 
 ```text
 Pi owns the agent loop, provider, sessions, native tools, and TUI
         ↓
-Pi-Swarm extensions add Swarm context, policy, tools, state, and UI
+Trebol extensions add Swarm context, policy, tools, state, and UI
 ```
 
 The migration is not a rewrite of the Swarm model. It is an adaptation of that
