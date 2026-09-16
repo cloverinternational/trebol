@@ -27,7 +27,7 @@ export function rememberShared(cwd: string, scope: SharedScope, text: string, ta
   writeFileSync(temporary, JSON.stringify(record), { flag: "wx", mode: 0o600 }); renameSync(temporary, target);
   return record;
 }
-export function searchShared(cwd: string, query = "", scopes: SharedScope[] = ["repository", "worktree", "global"], limit = 20, namespace = "default"): SharedMemory[] {
+export function searchShared(cwd: string, query = "", scopes: SharedScope[] = ["repository", "worktree", "global"], limit = 20, namespace = "default", ranked = false): SharedMemory[] {
   namespace = namespace.trim() || "default";
   const records: SharedMemory[] = [];
   for (const scope of scopes) {
@@ -37,9 +37,18 @@ export function searchShared(cwd: string, query = "", scopes: SharedScope[] = ["
       try {
         const path = join(dir, file); if (statSync(path).size > 40_000) continue;
         const value = JSON.parse(readFileSync(path, "utf8"));
-        if (value.scope === scope && (value.namespace || "default") === namespace && typeof value.text === "string" && value.text.toLowerCase().includes(query.toLowerCase())) records.push(value);
+        if (value.scope === scope && (value.namespace || "default") === namespace && typeof value.text === "string" && typeof value.createdAt === "string" && (ranked || `${value.text} ${(Array.isArray(value.tags) ? value.tags : []).join(" ")}`.toLowerCase().includes(query.toLowerCase()))) records.push(value);
       } catch { /* A corrupt entry cannot make all recall unavailable. */ }
     }
   }
-  return records.sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, Math.max(0, Math.min(100, limit)));
+  const terms = [...new Set(query.toLowerCase().match(/[a-z0-9_]{3,}/g) ?? [])].filter(word => !["the", "and", "for", "with", "from", "this", "that", "into"].includes(word));
+  const score = (record: SharedMemory) => { const words = new Set(`${record.text} ${(Array.isArray(record.tags) ? record.tags : []).join(" ")}`.toLowerCase().match(/[a-z0-9_]{3,}/g) ?? []); return terms.reduce((n, term) => n + Number(words.has(term)), 0); };
+  return records.filter(record => !ranked || !terms.length || score(record) > 0)
+    .sort((a, b) => (ranked ? score(b) - score(a) : 0) || b.createdAt.localeCompare(a.createdAt))
+    .slice(0, Math.max(0, Math.min(100, limit)));
+}
+
+/** Task-aware lexical recall; scopes and scan/output bounds match shared search. */
+export function recallShared(cwd: string, task: string, limit = 60): SharedMemory[] {
+  return searchShared(cwd, task, ["repository", "worktree", "global"], limit, "default", true);
 }
