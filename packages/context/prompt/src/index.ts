@@ -1,3 +1,5 @@
+import { applyWorkflowGuidance } from "./workflow-guidance.js";
+export { applyWorkflowGuidance } from "./workflow-guidance.js";
 import { readFileSync } from "node:fs";
 
 /**
@@ -43,13 +45,13 @@ export interface SwarmPromptPreset {
 export const swarmPromptPresets: readonly SwarmPromptPreset[] = Object.freeze([
   Object.freeze({
     name: "Accumulated Context Engineering",
-    content: forgeSwarmSystemPrompt,
+    content: applyWorkflowGuidance(forgeSwarmSystemPrompt),
     workspaceContext: true,
     constant: "forgeSwarmSystemPrompt",
   }),
   Object.freeze({
     name: "SwarmForge",
-    content: swarmForgeSystemPrompt,
+    content: applyWorkflowGuidance(swarmForgeSystemPrompt),
     workspaceContext: true,
     constant: "swarmForgeSystemPrompt",
   }),

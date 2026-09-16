@@ -1,3 +1,4 @@
+import { applyWorkflowGuidance } from "../../../packages/context/prompt/src/workflow-guidance.ts";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
@@ -212,11 +213,11 @@ export function buildSkillsGuidance(existingSkillNames: readonly string[]): stri
   let b = "## Skill System\n\n";
   b += "Skills are reusable instruction sets for recurring tasks. They follow the Hermes on-demand model: you see only a compact index (name + description) in the system prompt. Full instructions are loaded on demand by calling SkillManage(action=\"view\", name=\"...\"). Never guess what a skill does from its description alone — always view it.\n\n";
   b += "### When to check skills (BEFORE starting work)\n\n";
-  b += "At the start of any task requiring 3 or more distinct steps, call SkillManage(action=\"list\") to check for relevant skills. If the index shows a plausible match, view it immediately and follow its instructions as the primary approach for this task. Do not begin tool calls before checking — skills encode patterns that prevent repeating expensive discovery work.\n\n";
+  b += "Use the available skill index to find relevant guidance; call SkillManage(action=\"list\") when discovery is needed. Load relevant instructions before relying on them. Do not repeat discovery or loading when the guidance is already in context.\n\n";
   b += "### Consult multiple skills, not just one\n\n";
   b += "After finding one relevant skill, ask: does this task span more than one domain? If so, check for complementary skills too. Example: a task that requires both fixing Go code and updating a Linear issue should check for skills matching both domains. Read each relevant skill in full before deciding how to proceed. The index description is a hint — not a substitute for the full instructions.\n\n";
   b += "### SkillManage tool actions\n\n";
-  b += "- `list`: Discover available skills with name, version, and description. Always check before starting a complex task.\n";
+  b += "- `list`: Discover available skills with name, version, and description. Check when relevant skills are not already known.\n";
   b += "- `view`: Load the full SKILL.md body. When you view a skill, follow its instructions for the current task. If it needs updating, patch it before continuing.\n";
   b += "- `create`: Last resort for a genuinely new class-level workflow. Never create merely because a task took several tool calls.\n";
   b += "- `patch`: Update a skill immediately when you find it incomplete, outdated, or wrong. Do not wait to be asked. Stale skills cause repeated mistakes.\n\n";
@@ -320,7 +321,7 @@ export function assembleForgePrompt(_base: string, options: PromptAssemblyOption
   const add = (section: string, content: string, origin: string, ref = "", raw = false) => { const value = raw ? content : clean(content); if (!value) return; sections.push(value); provenance.push({ section, origin, ref, hash: hash(value), bytes: Buffer.byteLength(value) }); };
   if (options.interactive || options.headlessForge === true) {
     add("workspace", renderWorkspaceContext(workspace), "runtime", "workspace", true);
-    // Keep Forge's upstream body and delegation guidance intact, but place the
+    // Adapt upstream workflow wording and place the
     // root-agent reporting contract between them. Child-worker reporting rules
     // must not be the only source of structured final-output behavior.
     // Keep the vendored upstream asset unchanged for parity tests, while
@@ -332,9 +333,9 @@ export function assembleForgePrompt(_base: string, options: PromptAssemblyOption
       upstreamConfidentiality,
       safeDiagnostics,
     );
-    add("forge", transparentForgePrompt, "forge", `${UPSTREAM_SOURCE}#forgeSwarmSystemPrompt`, true);
+    add("forge", applyWorkflowGuidance(transparentForgePrompt), "forge", `${UPSTREAM_SOURCE}#forgeSwarmSystemPrompt`, true);
     add("reporting", MAIN_REPORTING_DIRECTIVE, "runtime", "pi-swarm-main-reporting-directive", true);
-    add("delegation", swarmForgeDelegationAddendum, "forge", `${UPSTREAM_SOURCE}#swarmForgeDelegationAddendum`, true);
+    add("delegation", applyWorkflowGuidance(swarmForgeDelegationAddendum), "forge", `${UPSTREAM_SOURCE}#swarmForgeDelegationAddendum`, true);
   } else {
     add("headless", headlessBasePrompt(options.autogenSkills ?? [], options.autogenEnabled ?? autogenMode(root) !== "never"), "runtime", "sdk_integration_provider.go+autogenskills/guidance.go", true);
   }

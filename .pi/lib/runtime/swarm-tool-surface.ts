@@ -1,8 +1,9 @@
+import { applyWorkflowGuidance } from "../../../packages/context/prompt/src/workflow-guidance.ts";
 /**
  * Canonical model-facing tool surface, captured from `swarm -p` on the wire
  * (tools/parity/fixtures/swarm-tools.json). For any Pi tool that shares a name
  * with a Swarm tool, the description and JSON Schema the model sees must be
- * byte-identical to Swarm's. Runtime input validation stays inside each tool
+ * identical to Swarm's except for explicit local workflow wording overrides. Runtime input validation stays inside each tool
  * implementation; only the advertised contract is overlaid here.
  *
  * Wrap the extension API once at registration time:
@@ -26,7 +27,7 @@ const INTERACTIVE_FIXTURE = resolve(FIXTURES, "swarm-interactive-tools.json");
 let cache: Map<string, CanonicalTool> | undefined;
 let conditionalCache: Map<string, CanonicalTool> | undefined;
 
-const readFixture = (path: string) => new Map((JSON.parse(readFileSync(path, "utf8")) as Array<{ function: CanonicalTool }>).map((entry) => [entry.function.name, entry.function]));
+const readFixture = (path: string) => new Map((JSON.parse(readFileSync(path, "utf8")) as Array<{ function: CanonicalTool }>).map((entry) => [entry.function.name, { ...entry.function, description: applyWorkflowGuidance(entry.function.description) }]));
 
 /** The always-on Swarm tool surface (29 tools, including the unified vault adapter). */
 export function loadSwarmToolSurface(path = FIXTURE): Map<string, CanonicalTool> {
