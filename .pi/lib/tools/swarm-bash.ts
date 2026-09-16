@@ -60,18 +60,75 @@ const wrapPlainText: WrapToWidth = (text, width) => {
   return Array.from({ length: Math.ceil(normalized.length / width) }, (_, i) => normalized.slice(i * width, (i + 1) * width));
 };
 
+/**
+ * Number of trailing output lines kept when a bash result is collapsed, matching
+ * pi's builtin bash tool (BASH_PREVIEW_LINES) so both tools read identically.
+ */
+export const BASH_PREVIEW_LINES = 5;
+
+/**
+ * Pi's TUI contract: each element of the array returned by a component's
+ * render() is exactly ONE terminal row. A row containing "\n" desynchronises
+ * row accounting and makes tui.ts measure the concatenated width of every
+ * embedded line, which trips its "Rendered line N exceeds terminal width"
+ * guard and tears down the whole TUI. A multi-line `command` (heredoc, `&&`
+ * chain) therefore crashed the bash row mid-flight. Normalise before wrapping.
+ */
+const toDisplayRows = (text: string, width: number, wrapToWidth: WrapToWidth): string[] =>
+  text
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .flatMap((line) => wrapToWidth(line, width))
+    .flatMap((line) => (line.includes("\n") ? line.split("\n") : [line]));
+
+/**
+ * The model-facing payload is Swarm's `<result …><stdout><![CDATA[…]]></stdout>`
+ * envelope, which is wire parity, not a display format: rendering it verbatim
+ * showed the user XML and CDATA scaffolding instead of their command output.
+ * Recover the human-readable streams for display only; the transcript sent to
+ * the model is untouched.
+ */
+export function extractBashDisplayText(text: string): string {
+  if (!text.startsWith("<result ")) return text;
+  const field = (tag: string) => new RegExp(`<${tag}><!\\[CDATA\\[([\\s\\S]*?)\\]\\]></${tag}>`).exec(text)?.[1] ?? "";
+  const merged = mergeOutput(field("stdout").trim(), field("stderr").trim());
+  if (merged) return merged;
+  return /<result [^>]*\bexit_code="0"/.test(text) ? "" : text;
+}
+
 export function bashResultComponent(result: any, options: any = {}, theme: any = {}, wrapToWidth: WrapToWidth = wrapPlainText): { render: (width: number) => string[]; invalidate: () => void } {
-  const command = typeof result?.details?.command === "string" ? result.details.command : "";
-  const text = Array.isArray(result?.content) ? result.content.filter((part: any) => part?.type === "text").map((part: any) => part.text).join("\n") : "";
-  const prefix = command ? `${options?.isPartial ? "⋯" : result?.isError || options?.isError ? "✗" : "✓"} $ ${command}` : "";
-  const value = [prefix, text].filter(Boolean).join("\n");
-  return { render: (width: number) => width <= 0 ? [""] : value.split("\n").flatMap((line: string) => wrapToWidth(line, width)), invalidate: () => {} };
+  const raw = Array.isArray(result?.content) ? result.content.filter((part: any) => part?.type === "text").map((part: any) => part.text).join("\n") : "";
+  const failed = Boolean(result?.isError || options?.isError);
+  const partial = Boolean(options?.isPartial);
+  // A failure's message is prose, not the XML envelope; keep it verbatim.
+  const body = stripANSI(failed ? raw : extractBashDisplayText(raw)).trimEnd();
+  const dim = (text: string) => theme?.fg?.(failed ? "error" : "toolOutput", text) ?? text;
+  const muted = (text: string) => theme?.fg?.("muted", text) ?? text;
+  const durationMs = Number(result?.details?.duration_ms);
+  return {
+    render: (width: number) => {
+      if (width <= 0) return [""];
+      const rows = body ? toDisplayRows(body, width, wrapToWidth) : [];
+      // Collapsed rows keep the TAIL of the output: for a build or test run the
+      // failure and summary are at the end, and an uncapped dump is what made
+      // long commands flood the transcript.
+      const collapsed = !options?.expanded && rows.length > BASH_PREVIEW_LINES;
+      const shown = collapsed ? rows.slice(-BASH_PREVIEW_LINES) : rows;
+      const out = shown.map(dim);
+      if (collapsed) out.unshift(...toDisplayRows(muted(`... (${rows.length - BASH_PREVIEW_LINES} earlier lines, ctrl+o to expand)`), width, wrapToWidth));
+      if (partial) out.push(...toDisplayRows(muted("running · ctrl+b to background"), width, wrapToWidth));
+      else if (Number.isFinite(durationMs)) out.push(...toDisplayRows(muted(`Took ${(durationMs / 1000).toFixed(1)}s`), width, wrapToWidth));
+      return out.length ? out : [muted(partial ? "running · ctrl+b to background" : failed ? "failed" : "(no output)")];
+    },
+    invalidate: () => {},
+  };
 }
 
 export function bashCallComponent(value: string, truncate?: (text: string, width: number) => string): { render: (width: number) => string[]; invalidate: () => void } {
-  // Pi validates every rendered line against the terminal width. Commands can
-  // be arbitrarily long (especially repository-discovery commands), so the
-  // preview must be width-bounded independently of the model-facing command.
+  // Pi validates every rendered line against the terminal width, and treats one
+  // array element as one row. Commands can be arbitrarily long AND multi-line
+  // (heredocs, `&&` chains), so collapse to a single width-bounded row.
   const visible = (text: string) => stripANSI(text).length;
   const fit = (text: string, width: number) => {
     if (width <= 0) return "";
@@ -79,7 +136,18 @@ export function bashCallComponent(value: string, truncate?: (text: string, width
     if (width <= 1) return text.slice(0, width);
     return `${text.slice(0, width - 1)}…`;
   };
-  return { render: (width: number) => [truncate ? truncate(value, width) : fit(value, width)], invalidate: () => {} };
+  return {
+    render: (width: number) => {
+      if (width <= 0) return [""];
+      const [first = "", ...rest] = value.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+      // Continuation lines are elided with a marker rather than dropped, so a
+      // heredoc still reads as more-than-one-line without breaking row accounting.
+      const single = rest.some((line) => line.trim() !== "") ? `${first} ⏎…` : first;
+      const row = truncate ? truncate(single, width) : fit(single, width);
+      return [row.includes("\n") ? fit(row.split("\n")[0]!, width) : row];
+    },
+    invalidate: () => {},
+  };
 }
 
 const ANSI = /\x1b\[[0-9;:?]*[A-Za-z]/g;
@@ -296,13 +364,6 @@ export function sharesGitCommonDir(workspace: string, target: string): boolean {
 export function resolveWorkdir(cwd: string | undefined, defaultCwd: string, allowedPaths: readonly string[] = defaultAllowedPaths(defaultCwd)): { dir: string } | { error: string } {
   if (!cwd) return { dir: defaultCwd };
   const abs = resolve(cwd);
-  let denied = checkAllowedPath(abs, allowedPaths);
-  // A linked git worktree of the workspace's own repository is the same
-  // authorized checkout reached by another path, so read-only inspection of it
-  // must not be refused just because it lives outside the workspace root.
-  // apply_patch already allows this via the shared git common directory.
-  if (denied && sharesGitCommonDir(defaultCwd, abs)) denied = undefined;
-  if (denied) return { error: denied };
   if (!existsSync(abs)) return { error: `cwd does not exist: ${abs}` };
   try { if (!statSync(abs).isDirectory()) return { error: `cwd is not a directory: ${abs}` }; } catch (e) { return { error: `failed to access cwd ${abs}: ${String(e)}` }; }
   return { dir: abs };

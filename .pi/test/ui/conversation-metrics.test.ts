@@ -14,7 +14,9 @@ describe("conversation metrics footer", () => {
 
   it("builds a two-row identity and metrics layout", () => {
     expect(footerIdentityLine("running", "openai/gpt-test")).toBe("●  model openai/gpt-test");
-    expect(footerMetricsLine("1m 02s", 1234, ["Autogen 2/5"], "Ctrl+B background Bash")).toContain("↓ 1,234 tok");
+    expect(footerMetricsLine("1m 02s", 1234, ["Autogen 2/5"])).toContain("↓ 1,234 tok");
+    // The Ctrl+B affordance is rendered by the in-flight bash row, not the footer.
+    expect(footerMetricsLine("1m 02s", 1234, ["Autogen 2/5"])).not.toContain("Ctrl+B");
   });
 
   it("uses a clear fallback when model context is unavailable", () => {

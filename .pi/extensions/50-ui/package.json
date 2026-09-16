@@ -1,14 +1,15 @@
 {
   "name": "@pi-swarm/ext-ui",
   "private": true,
-  "description": "Pi-Swarm extension layer 50-ui: control panel, metrics widgets, themes, tools-status command. Load order within the layer is this list; layers load in numeric prefix order.",
+  "description": "Pi-Swarm extension layer 50-ui: control panel, metrics widgets, themes, tools-status command, Windows image paste. Load order within the layer is this list; layers load in numeric prefix order.",
   "pi": {
     "extensions": [
       "control-panel.ts",
       "conversation-metrics.ts",
       "swarm-themes.ts",
       "swarm-tools-status.ts",
-      "swarm-btw.ts"
+      "swarm-btw.ts",
+      "swarm-image-paste.ts"
     ]
   }
 }
