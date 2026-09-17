@@ -13,9 +13,13 @@ describe("memory_history knowledge integration", () => {
   const call = (tool: any, params: any) => tool.execute("id", params).then((result: any) => JSON.parse(result.content[0].text));
   it("writes durable candidates, reloads, corrects and tombstones without legacy duplication", async () => {
     const root = mkdtempSync(join(tmpdir(), "memory-history-")); roots.push(root); process.env.PI_SWARM_MEMORY_DIR = join(root, "store");
-    const tool = harness(root); const first = await call(tool, { operation: "remember", scope: "repository", text: "durable fact", evidence: [{ ref: "test:1" }] });
+    const tool = harness(root); const first = await call(tool, { operation: "remember", scope: "repository", text: "durable fact", id: "", expectedRevision: "", evidence: [{ ref: "test:1" }] });
     expect(first.knowledge[0].status).toBe("candidate"); expect(first.legacy).toEqual([]);
     const reloaded = harness(root); const found = await call(reloaded, { operation: "search", scope: "repository", query: "durable" }); expect(found.knowledge).toHaveLength(1);
+    expect((await call(reloaded, { operation: "search", status: "verified" })).knowledge).toEqual([]);
+    const review = await call(reloaded, { operation: "get", id: found.knowledge[0].id });
+    expect(review.knowledge[0].evidence).toEqual([{ ref: "test:1" }]);
+    expect(review.review).toContain("later corrections");
     const corrected = await call(reloaded, { operation: "correct", scope: "repository", id: found.knowledge[0].id, expectedRevision: found.knowledge[0].revision, text: "corrected fact", evidence: [{ ref: "test:2" }] });
     await call(reloaded, { operation: "delete", scope: "repository", id: corrected.knowledge[0].id, expectedRevision: corrected.knowledge[0].revision });
     expect((await call(reloaded, { operation: "search", scope: "repository", query: "fact" })).knowledge).toEqual([]);

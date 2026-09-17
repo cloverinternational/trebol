@@ -188,7 +188,7 @@ When changing discovery, preserve these invariants:
 | `10-context` | `autogenskills`, `prompt-context-configure`, `swarm-plan-mode`, `swarm-prompt`, `swarm-skills`, `swarm-thinking`, `system-inspector`, `system-prompts` |
 | `20-policy` | `swarm-disk-hooks` |
 | `30-tools` | `annoyed/`, `codemode`, `control-task-tools`, `exa-search`, `history-search`, `ask-user/`, `paseo`, `research-tools`, `swarm-goal`, `swarm-agent-tools`, `swarm-background-bash`, `swarm-bash`, `swarm-fs-tools`, `swarm-history-vault-tools`, `swarm-search`, `taskmanage`, `vault` |
-| `40-state` | `memory-history`, `swarm-conversation-metadata` |
+| `40-state` | `memory-history`, `knowledge-enrichment`, `swarm-conversation-metadata` |
 | `50-ui` | `control-panel`, `conversation-metrics`, `swarm-themes`, `swarm-tools-status`, `swarm-btw`, `swarm-image-paste` |
 
 The list in each layer's `package.json` is authoritative; this table mirrors
@@ -276,8 +276,22 @@ is unfinished. `.pi/lib/state/knowledge-store.ts` and
 `.pi/lib/context/knowledge-capture.ts` are tested integration components. Bootstrap now uses
 `knowledge-recall.ts` to project verified durable records into cited PageIndex
 reads; candidate records are excluded, storage failure is distinct from no match,
-and recall currently scans at most 100 records per scope. Automatic lifecycle
-capture and shared-memory write compatibility integration remain unfinished. Store path checks reject
+and recall currently scans at most 100 records per scope. `memory_history` supports `get` by scoped ID and status-filtered search for
+candidate review. Review instructions require source evidence and later
+corrections before revision-checked verification; extraction alone is not proof.
+New non-session `memory_history` writes now use this store; legacy records remain
+readable and labeled unverified. Correction/deletion require revision checks.
+Agent global writes fail closed. `/memory-promote repository|worktree ID [namespace]`
+requires interactive confirmation of a verified record and rechecks its revision
+before making an explicitly approved global copy; the project record stays intact. Lifecycle candidate capture is registered in `knowledge-enrichment.ts`: on
+`agent_end` and `session_before_compact`, it processes new visible evidence,
+persists a `pi-swarm-knowledge-enrichment` cursor, and saves cited candidates.
+It excludes reasoning/runtime reminders and suppresses child-agent capture.
+`/memory-capture on|off|status` controls this per session;
+`PI_SWARM_MEMORY_CAPTURE=off` disables it initially. Consultations are awaited
+and may add up to their timeout to turn completion. Extracted candidates are
+not automatically verified or included in bootstrap recall; automatic promotion
+and reviewed historical backfill remain unfinished. Store path checks reject
 existing symlinks; hostile concurrent ancestor replacement is outside its current
 filesystem guarantees. No live backfill is implied by these library tests.
 
@@ -289,6 +303,13 @@ Repository is the shared-memory default; worktree holds unmerged facts, session
 holds local context, and global requires explicitly shareable cross-project
 knowledge. Do not automatically duplicate facts across scopes. The PageIndex-style
 context extension currently retains its namespace/workspace/session boundary.
+
+Bootstrap selects at most two distinct skills (preferring one), enforces the cap
+in selector validation and orchestration, and invokes them before task drafting.
+The planner receives bounded, explicitly truncated instruction excerpts; the
+main agent receives up to 12,000 characters per skill with explicit truncation
+and an exact full-output spill file for further reads, without another invocation.
+This preview limit does not cap orchestrator tool calls or continued investigation.
 
 Bootstrap shared-memory recall uses task-token ranking across text and tags before
 its candidate cap (`recallShared`); explicit memory search retains substring
@@ -436,7 +457,7 @@ anywhere — the extensions import `.pi/lib`, `packages/*/src`, and
 # dev box: link this checkout (no copy; dedupes against .pi/ by absolute path)
 pi install /home/swarm/Work/Pi-Swarm
 # any other machine (pin a tag or commit; `pi update` reconciles the ref)
-pi install git:github.com/cloverinternational/swarm-pi@<tag>
+pi install git:github.com/cloverinternational/trebol@<tag>
 # from the installed checkout: PATH, versions, dist, deps, models.json, theme, packages[]
 npm run doctor
 ```
@@ -481,3 +502,14 @@ rather than editing specifiers by hand.
   under `vendor/` (formerly `upstream/`). Read it for reference and implement
   local changes in packages, extensions, tools, or docs. If a vendored change
   appears necessary, stop and ask for explicit approval.
+
+### Compact TaskManage completion questions
+
+Tasks may carry 1–12 `questions: [{id,text}]` (IDs ≤64, text ≤240).
+Complete them with `answers: [{question,answer,evidence}]` in the same update;
+answers are ≤240 characters, evidence references ≤512. Use workspace-local
+`file.md#heading` or `file#Lx-Ly` references for detailed proof. Missing answers,
+unknown IDs and unavailable evidence reject completion. Reference availability
+is not semantic verification. Legacy questionless tasks remain compatible.
+Bootstrap carries questions into task proposals and committed operations. No
+separate question lifecycle or follow-up tool-call limit is introduced.

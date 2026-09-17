@@ -5,6 +5,7 @@
   "pi": {
     "extensions": [
       "memory-history.ts",
+      "knowledge-enrichment.ts",
       "swarm-conversation-metadata.ts"
     ]
   }

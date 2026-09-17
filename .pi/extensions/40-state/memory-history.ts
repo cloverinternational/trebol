@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { rememberShared, searchShared } from "../../lib/state/shared-memory.ts";
 import { openKnowledgeStore, redactKnowledge, type EvidenceRef, type KnowledgeKind, type KnowledgeStatus } from "../../lib/state/knowledge-store.ts";
 import { sharedMemoryRoot } from "../../lib/state/shared-memory.ts";
+import { promoteGlobalKnowledge } from "../../lib/state/knowledge-promotion.ts";
 import { withDefaultToolRenderer } from "../../../packages/runtime/core/src/tool-renderer.ts";
 
 export const MEMORY_ENTRY_TYPE = "pi-swarm-memory";
@@ -117,26 +118,43 @@ export class MemoryHistory {
   }
 }
 
-const schema = { type: "object", required: ["operation"], additionalProperties: false, properties: { operation: { type: "string", enum: ["remember", "search", "replay", "migrate", "correct", "delete"] }, text: { type: "string" }, query: { type: "string" }, tags: { type: "array", items: { type: "string" } }, evidence: { type: "array", items: { type: "object", required: ["ref"], additionalProperties: false, properties: { ref: { type: "string" }, quote: { type: "string" } } } }, status: { type: "string", enum: ["candidate", "verified"] }, kind: { type: "string", enum: ["fact", "decision", "process", "context"] }, source: { type: "string" }, id: { type: "string" }, expectedRevision: { type: "string" }, namespace: { type: "string" }, limit: { type: "number" } } } as const;
+const schema = { type: "object", required: ["operation"], additionalProperties: false, properties: { operation: { type: "string", enum: ["remember", "search", "replay", "migrate", "correct", "delete", "get"] }, text: { type: "string" }, query: { type: "string" }, tags: { type: "array", items: { type: "string" } }, evidence: { type: "array", items: { type: "object", required: ["ref"], additionalProperties: false, properties: { ref: { type: "string" }, quote: { type: "string" } } } }, status: { type: "string", enum: ["candidate", "verified"] }, kind: { type: "string", enum: ["fact", "decision", "process", "context"] }, source: { type: "string" }, id: { type: "string" }, expectedRevision: { type: "string" }, namespace: { type: "string" }, limit: { type: "number" } } } as const;
 
 export default function memoryHistoryExtension(pi: any): void {
   const history = new MemoryHistory();
   let cwd = process.cwd();
   let scope = scopeOf();
   let sessionEntries: unknown[] = [];
+  let generation = 0;
   pi.on?.("session_start", (_event: any, ctx: any) => {
+    generation++;
     cwd = ctx?.cwd ?? process.cwd();
     const session = ctx?.sessionManager?.getSessionFile?.() ?? ctx?.sessionManager?.sessionFile ?? "current";
     scope = scopeOf({ workspace: cwd, session: String(session) }, cwd);
     sessionEntries = ctx?.sessionManager?.getEntries?.() ?? [];
     history.load(sessionEntries.map((e: any) => e.type === "custom" ? { type: e.customType, data: e.data } : e));
   });
-  pi.registerTool?.(withDefaultToolRenderer({ name: "memory_history", label: "Memory History", description: `Recall and enrich durable redacted memory. ${MEMORY_KNOWLEDGE_GUIDANCE} ${MEMORY_SCOPE_GUIDANCE} Search before saving to avoid duplicates. Include evidence references; exclude secrets and raw transcripts. Defaults to repository scope. Search scope all includes repository/worktree/global. Writes default to candidate; verified records require evidence references (verification is an attributed claim, not automatic proof). correct/delete require id and expectedRevision. Global writes are unavailable until trusted approval is wired; reads remain available.`, parameters: { ...schema, properties: { ...schema.properties, scope: { type: "string", enum: ["repository", "worktree", "global", "session", "all"] } } }, async execute(_id: string, params: any) {
+  pi.on?.("session_shutdown", () => { generation++; });
+  pi.registerCommand?.("memory-promote", {
+    description: "Review and explicitly promote verified project knowledge: repository|worktree ID [namespace]",
+    handler: async (args: string, ctx: any) => {
+      const ownGeneration = generation;
+      try {
+        const [selected, id, namespace, ...extra] = args.trim().split(/\s+/);
+        if (!["repository", "worktree"].includes(selected) || !id || extra.length) throw new Error("Usage: /memory-promote repository|worktree ID [namespace]");
+        if (!ctx.hasUI || typeof ctx.ui?.confirm !== "function") throw new Error("Global promotion requires interactive confirmation; no write performed");
+        const result = await promoteGlobalKnowledge({ cwd: ctx.cwd, scope: selected as "repository" | "worktree", id, namespace,
+          confirm: (title, body) => ctx.ui.confirm(title, body), isCurrent: () => ownGeneration === generation });
+        if (ownGeneration === generation) ctx.ui.notify(result.status === "promoted" ? `Global knowledge saved: ${result.record.id}` : "Promotion declined; no write performed", "info");
+      } catch (error) { if (ownGeneration === generation) ctx.ui?.notify?.(error instanceof Error ? error.message : "Promotion failed", "warning"); }
+    },
+  });
+  pi.registerTool?.(withDefaultToolRenderer({ name: "memory_history", label: "Memory History", description: `Recall and enrich durable redacted memory. ${MEMORY_KNOWLEDGE_GUIDANCE} ${MEMORY_SCOPE_GUIDANCE} Search before saving to avoid duplicates. Include evidence references; exclude secrets and raw transcripts. Defaults to repository scope. Search scope all includes repository/worktree/global. Use search with status candidate to find pending knowledge, then get by id to inspect its full evidence. Review source evidence and later corrections before using correct to mark a candidate verified; leave unsupported claims pending. Writes default to candidate; verified records require evidence references (verification is an attributed claim, not automatic proof). correct/delete require id and expectedRevision. Agent tool calls cannot write global memory. Ask the user to review an existing verified record with /memory-promote repository|worktree ID [namespace]; global reads remain available.`, parameters: { ...schema, properties: { ...schema.properties, scope: { type: "string", enum: ["repository", "worktree", "global", "session", "all"] } } }, async execute(_id: string, params: any) {
     try {
-      if (!["remember", "search", "replay", "migrate", "correct", "delete"].includes(params.operation)) throw new Error("Unknown memory operation");
+      if (!["remember", "search", "replay", "migrate", "correct", "delete", "get"].includes(params.operation)) throw new Error("Unknown memory operation");
       const selectedScope = params.scope ?? "repository";
       if (!["repository", "worktree", "global", "session", "all"].includes(selectedScope)) throw new Error("Invalid memory scope");
-      if (selectedScope === "session" && ["correct", "delete"].includes(params.operation)) throw new Error("Legacy session memory does not support correction/deletion; use scoped knowledge records");
+      if (selectedScope === "session" && ["correct", "delete", "get"].includes(params.operation)) throw new Error("Legacy session memory does not support correction/deletion; use scoped knowledge records");
       if (params.operation === "correct" && (!params.id || !params.expectedRevision)) throw new Error("correct requires id and expectedRevision");
       const limit = params.limit === undefined ? 20 : params.limit;
       if (!Number.isInteger(limit) || limit < 0 || limit > 100) throw new Error("limit must be an integer from 0 to 100");
@@ -144,14 +162,20 @@ export default function memoryHistoryExtension(pi: any): void {
         if (["remember", "correct", "delete"].includes(params.operation) && selectedScope === "all") throw new Error("Choose a single write scope");
         const scopes = selectedScope === "all" ? ["repository", "worktree", "global"] as const : [selectedScope] as const;
         const namespace = params.namespace ?? "default";
+        if (params.operation === "get") {
+          if (!params.id || selectedScope === "all") throw new Error("get requires id and one scope");
+          const record = openKnowledgeStore({ cwd, scope: selectedScope, namespace }).read(params.id);
+          return { content: [{ type: "text", text: JSON.stringify({ knowledge: record ? [record] : [], legacy: [],
+            review: record?.status === "candidate" ? "Inspect cited evidence and later corrections before deciding. Confirm project knowledge rather than procedural advice. If supported, correct this exact id/revision with status verified and evidence; otherwise leave candidate or delete with revision. Do not certify from the extraction alone." : undefined }) }], details: {} };
+        }
         const storeRecords = scopes.flatMap((storeScope) => openKnowledgeStore({ cwd, scope: storeScope, root: sharedMemoryRoot(), namespace }).list(100));
         const query = String(params.operation === "replay" ? "" : params.query ?? "").trim().toLocaleLowerCase();
-        const knowledge = storeRecords.filter(record => !query || `${record.text} ${record.tags.join(" ")}`.toLocaleLowerCase().includes(query));
+        const knowledge = storeRecords.filter(record => (!params.status || record.status === params.status) && (!query || `${record.text} ${record.tags.join(" ")}`.toLocaleLowerCase().includes(query)));
         if (["remember", "correct"].includes(params.operation)) {
           const store = openKnowledgeStore({ cwd, scope: selectedScope, root: sharedMemoryRoot(), namespace });
           if (params.operation === "correct" && !store.read(params.id)) throw new Error("Cannot correct an unknown knowledge record");
           const evidence: EvidenceRef[] = Array.isArray(params.evidence) ? params.evidence.map((item: any) => ({ ref: redactKnowledge(String(item?.ref ?? "")), ...(item?.quote ? { quote: redactKnowledge(String(item.quote)) } : {}) })) : [];
-          const record = store.put({ id: params.id, expectedRevision: params.expectedRevision, text: redactKnowledge(params.text ?? ""), tags: (params.tags ?? []).map((s: string) => redactKnowledge(String(s))), evidence, status: (params.status ?? "candidate") as KnowledgeStatus, kind: (params.kind ?? "fact") as KnowledgeKind, source: redactKnowledge(params.source ?? "memory_history") });
+          const record = store.put({ id: params.id || undefined, expectedRevision: params.expectedRevision || undefined, text: redactKnowledge(params.text ?? ""), tags: (params.tags ?? []).map((s: string) => redactKnowledge(String(s))), evidence, status: (params.status ?? "candidate") as KnowledgeStatus, kind: (params.kind ?? "fact") as KnowledgeKind, source: redactKnowledge(params.source ?? "memory_history") });
           return { content: [{ type: "text", text: JSON.stringify({ knowledge: [record], legacy: [] }) }], details: {} };
         }
         if (params.operation === "delete") {
