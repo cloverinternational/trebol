@@ -114,3 +114,70 @@ describe("bash result rendering", () => {
     expect(extractBashDisplayText("plain text")).toBe("plain text");
   });
 });
+
+/**
+ * `app.tools.expand` (ctrl+o) is a GLOBAL toggle: interactive-mode.ts calls
+ * setExpanded(this.toolOutputExpanded) on every tool row, which re-invokes
+ * renderResult with fresh options. Toggling must therefore be idempotent and
+ * must never produce an unrenderable row in either state.
+ */
+describe("bash result collapse/expand toggling", () => {
+  const lines = Array.from({ length: 40 }, (_, i) => `line ${i}`).join("\n");
+  const xml = buildResultXML({ exitCode: 0, durationMs: 1200, stdout: lines, stderr: "", timedOut: false, requestedSecs: 60, effectiveSecs: 60 });
+  const result = { content: [{ type: "text", text: xml }], details: { command: "seq", duration_ms: 1200 } };
+  const rowsAt = (expanded: boolean, width = 80) => bashResultComponent(result, { expanded }, theme).render(width);
+
+  it("returns to a byte-identical view after a full toggle cycle", () => {
+    const collapsed = rowsAt(false);
+    const expanded = rowsAt(true);
+    for (let i = 0; i < 3; i++) {
+      expect(rowsAt(false)).toEqual(collapsed);
+      expect(rowsAt(true)).toEqual(expanded);
+    }
+    expect(expanded.length).toBeGreaterThan(collapsed.length);
+  });
+
+  it("keeps every row renderable in both states across terminal resizes", () => {
+    for (const width of [20, 50, 120, 200]) {
+      for (const expanded of [false, true]) expectRenderable(rowsAt(expanded, width), width);
+    }
+  });
+
+  it("shows the expand hint only while collapsed, and the tail in both states", () => {
+    expect(rowsAt(false).some((r) => r.includes("ctrl+o to expand"))).toBe(true);
+    expect(rowsAt(true).some((r) => r.includes("ctrl+o to expand"))).toBe(false);
+    // The tail carries the failure/summary, so it must survive collapsing.
+    expect(rowsAt(false).some((r) => r.includes("line 39"))).toBe(true);
+    expect(rowsAt(true).some((r) => r.includes("line 39"))).toBe(true);
+    expect(rowsAt(true).some((r) => r.includes("line 0"))).toBe(true);
+  });
+
+  it("re-renders stably through invalidate() without caching a stale view", () => {
+    const component = bashResultComponent(result, {}, theme);
+    const before = component.render(80);
+    component.invalidate();
+    expect(component.render(80)).toEqual(before);
+    // A different width on the same instance must reflow, not replay.
+    expect(component.render(30).every((r) => r.length <= 30)).toBe(true);
+  });
+
+  it("survives a mid-stream toggle and always previews the newest output", () => {
+    let streamed = "";
+    for (let i = 0; i < 30; i++) {
+      streamed += `chunk ${i} ${"q".repeat(i * 7)}\n`;
+      const partial = { content: [{ type: "text", text: streamed }], details: { command: "build", stream: "stdout" } };
+      for (const expanded of [false, true]) {
+        expectRenderable(bashResultComponent(partial, { isPartial: true, expanded }, theme).render(80), 80);
+      }
+    }
+    const rows = bashResultComponent({ content: [{ type: "text", text: streamed }], details: { command: "build" } }, { isPartial: true }, theme).render(80);
+    expect(rows.some((r) => r.includes("chunk 29"))).toBe(true);
+    expect(rows.some((r) => r.startsWith("chunk 0 "))).toBe(false);
+  });
+
+  it("renders a short result identically collapsed and expanded", () => {
+    const small = buildResultXML({ exitCode: 0, durationMs: 10, stdout: "a\nb", stderr: "", timedOut: false, requestedSecs: 60, effectiveSecs: 60 });
+    const short = { content: [{ type: "text", text: small }], details: { command: "x", duration_ms: 10 } };
+    expect(bashResultComponent(short, {}, theme).render(80)).toEqual(bashResultComponent(short, { expanded: true }, theme).render(80));
+  });
+});
