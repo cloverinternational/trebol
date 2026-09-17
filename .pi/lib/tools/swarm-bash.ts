@@ -17,6 +17,7 @@ import { spawn } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, openSync, closeSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { constants as osConstants, homedir, tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve, isAbsolute } from "node:path";
+import { checkAllowedPath, defaultAllowedPaths, resolvePathForCheck, pathWithinRoot } from "./path-guard.ts";
 
 export const SWARM_BASH_DESCRIPTION =
   "Execute a shell command and capture stdout, stderr, exit code, duration, and timeout status. Pipes and redirections are supported.\n\nSet timeout_seconds for every command; values below the enforced 60-second minimum are raised automatically. Use cwd instead of cd.";
@@ -60,18 +61,75 @@ const wrapPlainText: WrapToWidth = (text, width) => {
   return Array.from({ length: Math.ceil(normalized.length / width) }, (_, i) => normalized.slice(i * width, (i + 1) * width));
 };
 
+/**
+ * Number of trailing output lines kept when a bash result is collapsed, matching
+ * pi's builtin bash tool (BASH_PREVIEW_LINES) so both tools read identically.
+ */
+export const BASH_PREVIEW_LINES = 5;
+
+/**
+ * Pi's TUI contract: each element of the array returned by a component's
+ * render() is exactly ONE terminal row. A row containing "\n" desynchronises
+ * row accounting and makes tui.ts measure the concatenated width of every
+ * embedded line, which trips its "Rendered line N exceeds terminal width"
+ * guard and tears down the whole TUI. A multi-line `command` (heredoc, `&&`
+ * chain) therefore crashed the bash row mid-flight. Normalise before wrapping.
+ */
+const toDisplayRows = (text: string, width: number, wrapToWidth: WrapToWidth): string[] =>
+  text
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .flatMap((line) => wrapToWidth(line, width))
+    .flatMap((line) => (line.includes("\n") ? line.split("\n") : [line]));
+
+/**
+ * The model-facing payload is Swarm's `<result …><stdout><![CDATA[…]]></stdout>`
+ * envelope, which is wire parity, not a display format: rendering it verbatim
+ * showed the user XML and CDATA scaffolding instead of their command output.
+ * Recover the human-readable streams for display only; the transcript sent to
+ * the model is untouched.
+ */
+export function extractBashDisplayText(text: string): string {
+  if (!text.startsWith("<result ")) return text;
+  const field = (tag: string) => new RegExp(`<${tag}><!\\[CDATA\\[([\\s\\S]*?)\\]\\]></${tag}>`).exec(text)?.[1] ?? "";
+  const merged = mergeOutput(field("stdout").trim(), field("stderr").trim());
+  if (merged) return merged;
+  return /<result [^>]*\bexit_code="0"/.test(text) ? "" : text;
+}
+
 export function bashResultComponent(result: any, options: any = {}, theme: any = {}, wrapToWidth: WrapToWidth = wrapPlainText): { render: (width: number) => string[]; invalidate: () => void } {
-  const command = typeof result?.details?.command === "string" ? result.details.command : "";
-  const text = Array.isArray(result?.content) ? result.content.filter((part: any) => part?.type === "text").map((part: any) => part.text).join("\n") : "";
-  const prefix = command ? `${options?.isPartial ? "⋯" : result?.isError || options?.isError ? "✗" : "✓"} $ ${command}` : "";
-  const value = [prefix, text].filter(Boolean).join("\n");
-  return { render: (width: number) => width <= 0 ? [""] : value.split("\n").flatMap((line: string) => wrapToWidth(line, width)), invalidate: () => {} };
+  const raw = Array.isArray(result?.content) ? result.content.filter((part: any) => part?.type === "text").map((part: any) => part.text).join("\n") : "";
+  const failed = Boolean(result?.isError || options?.isError);
+  const partial = Boolean(options?.isPartial);
+  // A failure's message is prose, not the XML envelope; keep it verbatim.
+  const body = stripANSI(failed ? raw : extractBashDisplayText(raw)).trimEnd();
+  const dim = (text: string) => theme?.fg?.(failed ? "error" : "toolOutput", text) ?? text;
+  const muted = (text: string) => theme?.fg?.("muted", text) ?? text;
+  const durationMs = Number(result?.details?.duration_ms);
+  return {
+    render: (width: number) => {
+      if (width <= 0) return [""];
+      const rows = body ? toDisplayRows(body, width, wrapToWidth) : [];
+      // Collapsed rows keep the TAIL of the output: for a build or test run the
+      // failure and summary are at the end, and an uncapped dump is what made
+      // long commands flood the transcript.
+      const collapsed = !options?.expanded && rows.length > BASH_PREVIEW_LINES;
+      const shown = collapsed ? rows.slice(-BASH_PREVIEW_LINES) : rows;
+      const out = shown.map(dim);
+      if (collapsed) out.unshift(...toDisplayRows(muted(`... (${rows.length - BASH_PREVIEW_LINES} earlier lines, ctrl+o to expand)`), width, wrapToWidth));
+      if (partial) out.push(...toDisplayRows(muted("running · ctrl+b to background"), width, wrapToWidth));
+      else if (Number.isFinite(durationMs)) out.push(...toDisplayRows(muted(`Took ${(durationMs / 1000).toFixed(1)}s`), width, wrapToWidth));
+      return out.length ? out : [muted(partial ? "running · ctrl+b to background" : failed ? "failed" : "(no output)")];
+    },
+    invalidate: () => {},
+  };
 }
 
 export function bashCallComponent(value: string, truncate?: (text: string, width: number) => string): { render: (width: number) => string[]; invalidate: () => void } {
-  // Pi validates every rendered line against the terminal width. Commands can
-  // be arbitrarily long (especially repository-discovery commands), so the
-  // preview must be width-bounded independently of the model-facing command.
+  // Pi validates every rendered line against the terminal width, and treats one
+  // array element as one row. Commands can be arbitrarily long AND multi-line
+  // (heredocs, `&&` chains), so collapse to a single width-bounded row.
   const visible = (text: string) => stripANSI(text).length;
   const fit = (text: string, width: number) => {
     if (width <= 0) return "";
@@ -79,7 +137,18 @@ export function bashCallComponent(value: string, truncate?: (text: string, width
     if (width <= 1) return text.slice(0, width);
     return `${text.slice(0, width - 1)}…`;
   };
-  return { render: (width: number) => [truncate ? truncate(value, width) : fit(value, width)], invalidate: () => {} };
+  return {
+    render: (width: number) => {
+      if (width <= 0) return [""];
+      const [first = "", ...rest] = value.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+      // Continuation lines are elided with a marker rather than dropped, so a
+      // heredoc still reads as more-than-one-line without breaking row accounting.
+      const single = rest.some((line) => line.trim() !== "") ? `${first} ⏎…` : first;
+      const row = truncate ? truncate(single, width) : fit(single, width);
+      return [row.includes("\n") ? fit(row.split("\n")[0]!, width) : row];
+    },
+    invalidate: () => {},
+  };
 }
 
 const ANSI = /\x1b\[[0-9;:?]*[A-Za-z]/g;
@@ -210,50 +279,7 @@ export function invalidCwdMessage(reason: string, errorId = newErrorID()): strin
  * ~/.swarmos] (the TUI overrides path_guard.go defaultAllowedPaths; note the
  * legacy `.swarmos` spelling). `--allow-all-paths` makes the list empty.
  */
-export function defaultAllowedPaths(workspaceRoot = process.cwd(), home = homedir()): string[] {
-  return [resolve(workspaceRoot), "/tmp", join(home, ".swarmos")];
-}
-
-/** path_guard.go resolvePathForCheck: EvalSymlinks via the nearest existing ancestor. */
-export function resolvePathForCheck(absPath: string): string {
-  const cleaned = resolve(absPath);
-  if (!isAbsolute(cleaned)) throw new Error("path must be absolute");
-  try { return realpathSync(cleaned); } catch (e: any) { if (e?.code !== "ENOENT") throw e; }
-  let current = cleaned;
-  for (;;) {
-    let exists = false;
-    try { statSync(current); exists = true; } catch (e: any) { if (e?.code !== "ENOENT") throw e; }
-    if (exists) {
-      const resolvedCurrent = realpathSync(current);
-      if (current === cleaned) return resolvedCurrent;
-      return join(resolvedCurrent, relative(current, cleaned));
-    }
-    const parent = dirname(current);
-    if (parent === current) return cleaned;
-    current = parent;
-  }
-}
-
-const pathWithinRoot = (root: string, target: string) => {
-  const rel = relative(root, target);
-  if (rel === "") return true;
-  if (rel === "..") return false;
-  return !rel.startsWith(`..${"/"}`) && !isAbsolute(rel);
-};
-
-/** path_guard.go checkAllowedPath: undefined when allowed, else Swarm's error text. */
-export function checkAllowedPath(absPath: string, allowedPaths: readonly string[]): string | undefined {
-  if (allowedPaths.length === 0) return undefined;
-  let resolvedTarget: string;
-  try { resolvedTarget = resolvePathForCheck(absPath); } catch (e) { return `failed to resolve path: ${String((e as Error).message ?? e)}`; }
-  for (const allowed of allowedPaths) {
-    if (!allowed) continue;
-    let resolvedAllowed: string;
-    try { resolvedAllowed = resolvePathForCheck(resolve(allowed)); } catch { continue; }
-    if (pathWithinRoot(resolvedAllowed, resolvedTarget)) return undefined;
-  }
-  return `Path not allowed (not_allowed): ${absPath}`;
-}
+export { checkAllowedPath, defaultAllowedPaths, resolvePathForCheck, pathWithinRoot } from "./path-guard.ts";
 
 /**
  * `git rev-parse --git-common-dir` without spawning git: the shared directory
@@ -296,13 +322,10 @@ export function sharesGitCommonDir(workspace: string, target: string): boolean {
 export function resolveWorkdir(cwd: string | undefined, defaultCwd: string, allowedPaths: readonly string[] = defaultAllowedPaths(defaultCwd)): { dir: string } | { error: string } {
   if (!cwd) return { dir: defaultCwd };
   const abs = resolve(cwd);
-  let denied = checkAllowedPath(abs, allowedPaths);
-  // A linked git worktree of the workspace's own repository is the same
-  // authorized checkout reached by another path, so read-only inspection of it
-  // must not be refused just because it lives outside the workspace root.
-  // apply_patch already allows this via the shared git common directory.
-  if (denied && sharesGitCommonDir(defaultCwd, abs)) denied = undefined;
-  if (denied) return { error: denied };
+  const denied = checkAllowedPath(abs, allowedPaths);
+  // Git worktrees are deliberately permitted: they are repository-controlled
+  // sibling directories, not arbitrary escapes from the selected workspace.
+  if (denied && !sharesGitCommonDir(defaultCwd, abs)) return { error: denied };
   if (!existsSync(abs)) return { error: `cwd does not exist: ${abs}` };
   try { if (!statSync(abs).isDirectory()) return { error: `cwd is not a directory: ${abs}` }; } catch (e) { return { error: `failed to access cwd ${abs}: ${String(e)}` }; }
   return { dir: abs };
@@ -343,7 +366,7 @@ export function killProcessTree(child: { pid?: number; kill: (s: NodeJS.Signals)
 export function runSwarmBash(params: BashParams, options: RunOptions): Promise<BashOutcome | { error: string }> {
   const requestedSecs = Number.isFinite(params.timeout_seconds) ? Math.trunc(params.timeout_seconds as number) : 0;
   const effectiveSecs = requestedSecs > 0 ? Math.max(requestedSecs, 60) : 60;
-  const wd = resolveWorkdir(params.cwd, options.defaultCwd);
+  const wd = resolveWorkdir(params.cwd, options.defaultCwd, defaultAllowedPaths(options.defaultCwd, homedir()));
   if ("error" in wd) return Promise.resolve({ error: invalidCwdMessage(wd.error) });
   const env: NodeJS.ProcessEnv = { ...process.env, TERM: "dumb", DEBIAN_FRONTEND: "noninteractive", CI: "true", PS1: "", PROMPT_COMMAND: "", ...(params.env ?? {}) };
   return new Promise((resolveP) => {

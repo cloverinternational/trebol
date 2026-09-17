@@ -7,6 +7,13 @@ export type Status = "pending" | "in_progress" | "completed" | "deleted";
 export type NoteType = typeof NOTE_TYPES[number];
 export type Mode = "sequential" | "atomic";
 export type Ref = string | { ref: string; field?: "taskId" };
+export const MAX_TASK_QUESTIONS = 12;
+export const MAX_QUESTION_ID_LENGTH = 64;
+export const MAX_QUESTION_TEXT_LENGTH = 240;
+export const MAX_ANSWER_LENGTH = 240;
+export const MAX_EVIDENCE_LENGTH = 512;
+export interface TaskQuestion { id: string; text: string }
+export interface TaskAnswer { question: string; answer: string; evidence: string }
 
 /**
  * Swarm's TaskManage (internal/tools/ii/task_operation.go) renders the batch
@@ -49,6 +56,7 @@ export interface Task {
   id: string; subject: string; description?: string; activeForm?: string; category?: Category; priority: Priority;
   metadata?: Record<string, unknown>; parentTaskId?: string; owner_id?: string; status: Status;
   active?: boolean; dependsOn: string[]; notes: string[]; createdAt: string; updatedAt: string;
+  questions?: TaskQuestion[]; answers?: TaskAnswer[];
   typed_notes?: TaskNote[]; audit_events?: AuditEvent[];
   /** Swarm TodoManager per-owner sequence counter (shared_state.go AddTodo). */
   sequence?: number;
@@ -58,6 +66,7 @@ export interface Operation {
   description?: string; activeForm?: string; category?: Category; priority?: Priority; metadata?: Record<string, unknown>;
   parentTaskId?: Ref; owner_id?: string; status?: Status; active?: boolean; limit?: number; offset?: number;
   addBlocks?: Ref[]; addBlockedBy?: Ref[]; addNote?: string; noteType?: NoteType; include_audit?: boolean;
+  questions?: TaskQuestion[]; answers?: TaskAnswer[];
 }
 export interface Params { operations: Operation[]; mode?: Mode }
 export interface Failure { code: string; message: string; retryable: boolean }
@@ -70,9 +79,12 @@ export interface OperationEvent {
 import { replayLatest, snapshot, type VersionedSnapshot } from "./persistence.js";
 import { goNow, normalizeTaskManageParams, swarmValidateTaskManageParams } from "./swarm-validate.js";
 import { randomBytes } from "node:crypto";
+import { readFileSync, statSync, realpathSync } from "node:fs";
+import { resolve as resolvePath, relative as relativePath, isAbsolute } from "node:path";
 
 export type JournalEntry = { type: "pi-swarm-task-state"; data: VersionedSnapshot<State> | State } | OperationEvent;
 export interface State { nextId: number; tasks: Task[]; keys: Record<string, string> }
+export interface TaskManagerOptions { workspaceRoot?: string; resolveEvidence?: (reference: string) => boolean | string }
 export interface TaskMetrics { mutations: number; reads: number; failures: number; lastRevision: number }
 
 const fail = (code: string, message: string, retryable = false): Failure => ({ code, message, retryable });
@@ -97,7 +109,9 @@ export const taskManageSchema = {
         addBlocks: { type: "array", items: { oneOf: [{ type: "string" }, { type: "object", required: ["ref"], additionalProperties: false, properties: { ref: { type: "string" }, field: { type: "string", enum: ["taskId"] } } }] } },
         addBlockedBy: { type: "array", items: { oneOf: [{ type: "string" }, { type: "object", required: ["ref"], additionalProperties: false, properties: { ref: { type: "string" }, field: { type: "string", enum: ["taskId"] } } }] } },
         addNote: { type: "string" },
-        noteType: { type: "string", enum: NOTE_TYPES }, include_audit: { type: "boolean" }
+        noteType: { type: "string", enum: NOTE_TYPES }, include_audit: { type: "boolean" },
+        questions: { type: "array", minItems: 1, maxItems: MAX_TASK_QUESTIONS, items: { type: "object", required: ["id", "text"], additionalProperties: false, properties: { id: { type: "string", minLength: 1, maxLength: MAX_QUESTION_ID_LENGTH }, text: { type: "string", minLength: 1, maxLength: MAX_QUESTION_TEXT_LENGTH } } } },
+        answers: { type: "array", minItems: 1, maxItems: MAX_TASK_QUESTIONS, items: { type: "object", required: ["question", "answer", "evidence"], additionalProperties: false, properties: { question: { type: "string", minLength: 1, maxLength: MAX_QUESTION_ID_LENGTH }, answer: { type: "string", minLength: 1, maxLength: MAX_ANSWER_LENGTH }, evidence: { type: "string", minLength: 1, maxLength: MAX_EVIDENCE_LENGTH } } } }
       }
     }}
   }
@@ -294,6 +308,7 @@ export class TaskManager {
   constructor(
     private readonly persist?: (entry: JournalEntry) => void,
     private readonly emitOperation?: (event: OperationEvent) => void,
+    private readonly options: TaskManagerOptions = {},
   ) {}
   snapshot(): State { return clone(this.state); }
   metrics(): TaskMetrics { return { ...this.stats }; }
@@ -327,6 +342,8 @@ export class TaskManager {
       normalized.category = CATEGORIES.includes(normalized.category as Category) ? normalized.category : "acting";
       normalized.dependsOn = Array.isArray(normalized.dependsOn) ? [...new Set(normalized.dependsOn.filter(id => typeof id === "string" && id !== normalized.id))] : [];
       normalized.notes = Array.isArray(normalized.notes) ? normalized.notes.filter(note => typeof note === "string") : [];
+      normalized.questions = Array.isArray(normalized.questions) ? normalized.questions.filter(question => this.validQuestion(question)) : undefined;
+      normalized.answers = Array.isArray(normalized.answers) ? normalized.answers.filter(answer => this.validAnswer(answer)) : undefined;
       normalized.active = normalized.status === "in_progress" && normalized.active === true;
       if (normalized.parentTaskId === normalized.id || typeof normalized.parentTaskId !== "string") delete normalized.parentTaskId;
       normalized.audit_events = Array.isArray(normalized.audit_events) ? normalized.audit_events.filter(event =>
@@ -407,8 +424,8 @@ export class TaskManager {
     if (!isObj(op) || typeof op.key !== "string" || !op.key || !["create","update","get","list"].includes(op.op))
       return fail("validation_failed", `operation ${index} must contain a valid key and op`);
     const allowed: Record<Operation["op"], string[]> = {
-      create: ["key","op","subject","description","activeForm","category","priority","metadata","parentTaskId","owner_id","status","active","addBlocks","addBlockedBy","addNote","noteType"],
-      update: ["key","op","taskId","subject","description","activeForm","category","priority","metadata","status","active","parentTaskId","addBlocks","addBlockedBy","addNote","noteType"],
+      create: ["key","op","subject","description","activeForm","category","priority","metadata","parentTaskId","owner_id","status","active","addBlocks","addBlockedBy","addNote","noteType","questions"],
+      update: ["key","op","taskId","subject","description","activeForm","category","priority","metadata","status","active","parentTaskId","addBlocks","addBlockedBy","addNote","noteType","questions","answers"],
       get: ["key","op","taskId","include_audit"],
       list: ["key","op","subject","category","status","active","limit","offset"],
     };
@@ -431,6 +448,10 @@ export class TaskManager {
     }
     if (op.metadata !== undefined && (!isObj(op.metadata) || !this.isJSONValue(op.metadata)))
       return fail("validation_failed", `operation ${op.key}: metadata must be a JSON-compatible object`);
+    const questionError = this.validateQuestions(op.questions, op.key);
+    if (questionError) return questionError;
+    const answerError = this.validateAnswers(op.answers, op.key);
+    if (answerError) return answerError;
     for (const field of ["active", "include_audit"] as const) {
       if ((op as Record<string, unknown>)[field] !== undefined && typeof (op as Record<string, unknown>)[field] !== "boolean")
         return fail("validation_failed", `operation ${op.key}: ${field} must be a boolean`);
@@ -441,6 +462,7 @@ export class TaskManager {
     if (op.category !== undefined && !CATEGORIES.includes(op.category)) return fail("validation_failed", `operation ${op.key}: invalid category ${op.category}`);
     if (op.priority !== undefined && !PRIORITIES.includes(op.priority)) return fail("validation_failed", `operation ${op.key}: invalid priority ${op.priority}`);
     if (op.status !== undefined && !["pending","in_progress","completed","deleted"].includes(op.status)) return fail("validation_failed", `operation ${op.key}: invalid status ${op.status}`);
+    if (op.op === "create" && op.status === "completed" && op.questions?.length) return fail("validation_failed", `operation ${op.key}: question-bearing tasks cannot be created completed`);
     if (op.noteType !== undefined && !NOTE_TYPES.includes(op.noteType)) return fail("validation_failed", `operation ${op.key}: invalid noteType ${op.noteType}`);
     if (op.limit !== undefined && (!Number.isInteger(op.limit) || op.limit < 1 || op.limit > 500)) return fail("validation_failed", `operation ${op.key}: limit must be 1..500`);
     if (op.offset !== undefined && (!Number.isInteger(op.offset) || op.offset < 0)) return fail("validation_failed", `operation ${op.key}: offset must be non-negative`);
@@ -470,6 +492,52 @@ export class TaskManager {
       Object.keys(value).some(key => key !== "ref" && key !== "field"))
       return fail("validation_failed", `${field} must be a task ID or {ref, field:"taskId"} reference`);
     return undefined;
+  }
+  private validQuestion(value: unknown): value is TaskQuestion {
+    return isObj(value) && Object.keys(value).every(key => key === "id" || key === "text") && typeof value.id === "string" && value.id.trim().length > 0 && value.id.length <= MAX_QUESTION_ID_LENGTH && typeof value.text === "string" && value.text.trim().length > 0 && value.text.length <= MAX_QUESTION_TEXT_LENGTH;
+  }
+  private validAnswer(value: unknown): value is TaskAnswer { return isObj(value) && Object.keys(value).every(key => key === "question" || key === "answer" || key === "evidence") && typeof value.question === "string" && value.question.trim().length > 0 && value.question.length <= MAX_QUESTION_ID_LENGTH && typeof value.answer === "string" && value.answer.trim().length > 0 && value.answer.length <= MAX_ANSWER_LENGTH && (typeof value.evidence === "string" && value.evidence.trim().length > 0 && value.evidence.length <= MAX_EVIDENCE_LENGTH); }
+  private validateQuestions(questions: unknown, key: string): Failure | undefined {
+    if (questions === undefined) return;
+    if (!Array.isArray(questions) || questions.length < 1 || questions.length > MAX_TASK_QUESTIONS || questions.some(q => !this.validQuestion(q)) || new Set(questions.map(q => (q as TaskQuestion).id)).size !== questions.length) return fail("validation_failed", `operation ${key}: questions must contain 1..${MAX_TASK_QUESTIONS} unique {id,text} items within bounds`);
+  }
+  private validateAnswers(answers: unknown, key: string): Failure | undefined {
+    if (answers === undefined) return;
+    if (!Array.isArray(answers) || answers.length < 1 || answers.length > MAX_TASK_QUESTIONS || answers.some(a => !this.validAnswer(a)) || new Set(answers.map(a => (a as TaskAnswer).question)).size !== answers.length) return fail("validation_failed", `operation ${key}: answers must contain unique bounded {question,answer,evidence} items`);
+  }
+  private completionError(task: Task, op: Operation): Failure | undefined {
+    if (task.status === "completed" && op.questions !== undefined && (op.status === undefined || op.status === "completed")) return fail("validation_failed", "reopen task before changing questions");
+    if (op.status !== "completed" || !task.questions?.length) return;
+    if (op.questions !== undefined) return fail("validation_failed", "cannot replace or drop questions while completing a task");
+    const answers = op.answers ?? [];
+    const ids = new Set(task.questions.map(q => q.id));
+    const seen = new Set<string>();
+    for (const answer of answers) {
+      if (seen.has(answer.question)) return fail("validation_failed", `duplicate answer for question id: ${answer.question}`);
+      seen.add(answer.question);
+      if (!ids.has(answer.question)) return fail("validation_failed", `unknown question id: ${answer.question}`);
+    }
+    for (const question of task.questions) if (!seen.has(question.id)) return fail("validation_failed", `missing answer for question id: ${question.id}`);
+    for (const answer of answers) if (answer.evidence && !this.resolveEvidence(answer.evidence)) return fail("validation_failed", `evidence reference is unavailable: ${answer.evidence}`);
+  }
+  private resolveEvidence(reference: string): boolean {
+    if (this.options.resolveEvidence) return this.options.resolveEvidence(reference) === true;
+    const match = /^([^#]+)#(L\d+-L\d+|[^#\s].*)$/.exec(reference);
+    if (!match || !this.options.workspaceRoot) return false;
+    const root = resolvePath(this.options.workspaceRoot), file = resolvePath(root, match[1]);
+    const rel = relativePath(root, file);
+    if (isAbsolute(rel) || rel === ".." || rel.startsWith("../")) return false;
+    try {
+      const physical = relativePath(realpathSync(root), realpathSync(file));
+      if (isAbsolute(physical) || physical === ".." || physical.startsWith("../")) return false;
+      const stat = statSync(file); if (!stat.isFile() || stat.size > 1024 * 1024) return false;
+      const text = readFileSync(file, "utf8"), section = match[2];
+      if (/^L\d+-L\d+$/.test(section)) {
+        const parts = section.match(/^L(\d+)-L(\d+)$/)!.slice(1).map(Number); return parts[0] >= 1 && parts[1] >= parts[0] && parts[1] <= text.split("\n").length;
+      }
+      if (!/\.md$/i.test(file)) return false;
+      return text.split("\n").some(line => /^#{1,6}\s+/.test(line) && (line.replace(/^#{1,6}\s+/, "").trim() === section || line.replace(/^#{1,6}\s+/, "").trim().toLowerCase().replace(/[^\p{L}\p{N} _-]/gu, "").replace(/ /g, "-") === section));
+    } catch { return false; }
   }
   execute(params: Params, signal?: AbortSignal): Batch {
     if (!isObj(params) || Object.keys(params).some(key => key !== "operations" && key !== "mode"))
@@ -569,7 +637,7 @@ export class TaskManager {
       for (const d of blocks as string[]) if (!this.find(d)) return {key:op.key,op:op.op,status:"failed",error:fail("not_found",`task ${d} not found`)};
       const owner = op.owner_id ?? "";
       const sequence = this.state.tasks.filter(t => (t.owner_id ?? "") === owner).reduce((max, t) => Math.max(max, t.sequence ?? 0), 0) + 1;
-      const now = goNow(), task: Task = { id:String(this.state.nextId++), subject:op.subject!.trim(), description:op.description, activeForm:op.activeForm, category:op.category ?? this.inferCategory(`${op.subject} ${op.description ?? ""}`), priority:op.priority ?? "medium", metadata:op.metadata&&clone(op.metadata), parentTaskId:parentId, owner_id:op.owner_id, status:op.status === "in_progress" || op.status === "completed" ? op.status : "pending", active:op.status === "in_progress" || op.active === true, dependsOn:[...new Set(deps as string[])], notes:op.addNote ? [op.addNote] : [], typed_notes: op.addNote && op.noteType ? [{text:op.addNote,type:op.noteType,at:now}] : undefined, audit_events:[{action:"created",at:now}], createdAt:now, updatedAt:now, sequence };
+      const now = goNow(), task: Task = { id:String(this.state.nextId++), subject:op.subject!.trim(), description:op.description, activeForm:op.activeForm, category:op.category ?? this.inferCategory(`${op.subject} ${op.description ?? ""}`), priority:op.priority ?? "medium", metadata:op.metadata&&clone(op.metadata), parentTaskId:parentId, owner_id:op.owner_id, questions: op.questions ? clone(op.questions) : undefined, answers: undefined, status:op.status === "in_progress" || op.status === "completed" ? op.status : "pending", active:op.status === "in_progress" || op.active === true, dependsOn:[...new Set(deps as string[])], notes:op.addNote ? [op.addNote] : [], typed_notes: op.addNote && op.noteType ? [{text:op.addNote,type:op.noteType,at:now}] : undefined, audit_events:[{action:"created",at:now}], createdAt:now, updatedAt:now, sequence };
       this.state.tasks.push(task);
       if (task.status === "in_progress") for (const other of this.state.tasks) if (other.id !== task.id) other.active = false;
       for (const d of blocks as string[]) {
@@ -593,6 +661,8 @@ export class TaskManager {
     if (typeof id !== "string") return {key:op.key,op:op.op,status:"failed",error:id};
     const task=this.find(id); if (!task) return {key:op.key,op:op.op,status:"failed",error:fail("not_found",`task ${id} not found`)};
     if (op.op==="get") return {key:op.key,op:op.op,status:"succeeded",data:{task:this.outputTask(task, op.include_audit)}};
+    const completionError = this.completionError(task, op);
+    if (completionError) return {key:op.key,op:op.op,status:"failed",error:completionError};
     if (op.active === true && op.status === undefined && task.status !== "in_progress")
       return {key:op.key,op:op.op,status:"failed",error:fail("validation_failed",`cannot focus task ${id}: active task must be in_progress`)};
     if (op.status === "deleted") {
@@ -632,7 +702,8 @@ export class TaskManager {
     const parentTaskId = op.parentTaskId === undefined
       ? task.parentTaskId
       : target(op.parentTaskId) || undefined;
-    Object.assign(task, { subject:op.subject?.trim()||task.subject, description:op.description??task.description, activeForm:op.activeForm??task.activeForm, category:op.category??task.category, priority:op.priority??task.priority, metadata:mergedMetadata, status:op.status??task.status, active:op.active??task.active, parentTaskId, dependsOn:deps, updatedAt:goNow() });
+    const questionsChanged = op.questions !== undefined && JSON.stringify(op.questions) !== JSON.stringify(task.questions);
+    Object.assign(task, { subject:op.subject?.trim()||task.subject, description:op.description??task.description, activeForm:op.activeForm??task.activeForm, category:op.category??task.category, priority:op.priority??task.priority, metadata:mergedMetadata, questions:op.questions ? clone(op.questions) : task.questions, answers:questionsChanged || (op.status !== undefined && op.status !== "completed") ? undefined : (op.answers ? clone(op.answers) : task.answers), status:op.status??task.status, active:op.active??task.active, parentTaskId, dependsOn:deps, updatedAt:goNow() });
     if (op.status === "in_progress") {
       for (const other of this.state.tasks) other.active = other.id === id;
       // Explicit false is applied after the focus transition.
@@ -652,7 +723,7 @@ export class TaskManager {
     return {key:op.key,op:op.op,status:"succeeded",data:{task:this.updateAck(op, task)}};
   }
   private createAck(task: Task): Record<string, unknown> {
-    return {id:task.id, subject:task.subject, status:task.status, active:task.active, parent_id:task.parentTaskId ?? ""};
+    return {id:task.id, subject:task.subject, status:task.status, active:task.active, parent_id:task.parentTaskId ?? "", ...(task.questions?.length ? {questions: clone(task.questions)} : {}), ...(task.answers?.length ? {answers: clone(task.answers)} : {})};
   }
   private updateAck(op: Operation, task: Task): Record<string, unknown> {
     const ack: Record<string, unknown> = {...this.createAck(task)};
@@ -689,6 +760,8 @@ export class TaskManager {
       ...(task.dependsOn.length ? {depends_on: [...task.dependsOn]} : {}),
       ...(this.blockedBy(task.id).length ? {blocks: this.blockedBy(task.id)} : {}),
       ...(task.owner_id !== undefined ? {owner_id: task.owner_id} : {}),
+      ...(task.questions?.length ? {questions: clone(task.questions)} : {}),
+      ...(task.answers?.length ? {answers: clone(task.answers)} : {}),
       ...(task.sequence ? {sequence: task.sequence} : {}),
       ...(task.parentTaskId !== undefined ? {parent_id: task.parentTaskId} : {}),
       ...(task.notes.length ? {notes: [...task.notes]} : {}),
@@ -720,10 +793,11 @@ export class TaskManager {
   }
 }
 
-export function registerTaskManage(pi: { registerTool(tool: unknown): void; appendEntry(type: string, data: unknown): void; on(event: string, handler: (event: unknown, ctx: {sessionManager?: {getEntries(): readonly unknown[]; getBranch?(): readonly unknown[]}; ui?: {setWidget(key: string, content: unknown): void}})=>void): void }, presentation = taskManageRenderers): TaskManager {
+export function registerTaskManage(pi: { registerTool(tool: unknown): void; appendEntry(type: string, data: unknown): void; on(event: string, handler: (event: unknown, ctx: {sessionManager?: {getEntries(): readonly unknown[]; getBranch?(): readonly unknown[]}; ui?: {setWidget(key: string, content: unknown): void}})=>void): void }, presentation = taskManageRenderers, options: TaskManagerOptions = {}): TaskManager {
   const manager = new TaskManager(
     entry => pi.appendEntry(entry.type, entry.data),
     event => pi.appendEntry(event.type, event.data),
+    options,
   );
   let ui: {setWidget(key: string, content: unknown): void} | undefined;
   const refreshWidget = (ctx?: {ui?: {setWidget(key: string, content: unknown): void}}) => {
@@ -739,13 +813,14 @@ export function registerTaskManage(pi: { registerTool(tool: unknown): void; appe
     manager.rehydrate((ctx.sessionManager?.getBranch?.() ?? ctx.sessionManager?.getEntries() ?? []) as JournalEntry[]);
     refreshWidget(ctx);
   });
-  pi.registerTool({ name:"TaskManage", label:"Manage tasks", description:"Manage ordered tasks. sequential commits the successful prefix; atomic commits all or rolls back.", parameters:taskManageSchema,
+  pi.registerTool({ name:"TaskManage", label:"Manage tasks", description:"Manage ordered tasks. Optional compact questions {id,text}; answer each with {question,answer,evidence} in the same completed update. Evidence uses workspace file#heading or file#Lx-Ly. Keep detail in files. sequential commits the successful prefix; atomic commits all or rolls back.", parameters:taskManageSchema,
     renderShell: "self",
     promptSnippet: "TaskManage: track multi-step work with durable ordered tasks.",
     promptGuidelines: ["Use TaskManage for multi-step work; keep exactly one active task when working sequentially; before starting work set the selected task status=\"in_progress\" and active=true; after verifying a task's acceptance criteria, explicitly update it with status=\"completed\" and activate the next unblocked task."],
     renderCall: presentation.renderCall,
     renderResult: presentation.renderResult,
-    execute: async (_id:string, params:Params, signal?:AbortSignal, _onUpdate?: unknown, ctx?: {ui?: {setWidget(key: string, content: unknown): void}}) => {
+    execute: async (_id:string, params:Params, signal?:AbortSignal, _onUpdate?: unknown, ctx?: {cwd?: string; ui?: {setWidget(key: string, content: unknown): void}}) => {
+      if (ctx?.cwd) options.workspaceRoot = ctx.cwd;
       // registry_impl.go runs TaskManageTool.Validate before Execute and
       // reports failures as a tool error, not a failed batch.
       const normalizedParams = normalizeTaskManageParams(params) as Params;

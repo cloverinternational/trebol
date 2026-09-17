@@ -23,6 +23,7 @@ export interface BootstrapTask {
   dependsOn?: string[];
   /** Concise memory/skill-derived direction attached as a learning note. */
   guidance?: string;
+  questions?: Array<{ id: string; text: string }>;
   category?: string;
   priority?: string;
 }

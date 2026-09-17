@@ -20,3 +20,20 @@ it("shares repository notes across worktrees, isolates worktree notes, and expos
     expect(searchShared(repo, "", undefined, 0)).toEqual([]);
   } finally { if (old === undefined) delete process.env.PI_SWARM_MEMORY_DIR; else process.env.PI_SWARM_MEMORY_DIR = old; rmSync(root, { recursive: true, force: true }); }
 });
+
+it("ranks task matches before newer unrelated records and searches tags", async () => {
+  const { recallShared } = await import("../../lib/state/shared-memory.ts");
+  const root = mkdtempSync(join(tmpdir(), "memory-recall-"));
+  const old = process.env.PI_SWARM_MEMORY_DIR;
+  process.env.PI_SWARM_MEMORY_DIR = join(root, "store");
+  try {
+    rememberShared(root, "repository", "Paseo locks require ownership verification", ["reboot"]);
+    for (let i = 0; i < 65; i++) rememberShared(root, "repository", `Unrelated release note ${i}`);
+    expect(recallShared(root, "Paseo reboot locks", 1)[0].text).toContain("ownership");
+    expect(recallShared(root, "astronomy")).toEqual([]);
+    expect(searchShared(root, "reboot")).toHaveLength(1);
+  } finally {
+    if (old === undefined) delete process.env.PI_SWARM_MEMORY_DIR; else process.env.PI_SWARM_MEMORY_DIR = old;
+    rmSync(root, { recursive: true, force: true });
+  }
+});

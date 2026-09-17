@@ -14,6 +14,7 @@ import {
 import { dirname, basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { tmpdir } from "node:os";
 import { goQuote } from "./swarm-bash.ts";
+import { checkAllowedPath } from "./path-guard.ts";
 
 export type PatchKind = "add" | "update" | "delete";
 export interface PatchChunk { ctxOffset: number; del: string[]; ins: string[] }
@@ -245,10 +246,6 @@ function applyHunks(original: string, hunks: PatchHunk[], path: string): string 
   return crlf ? result.replace(/\n/g, "\r\n") : result;
 }
 
-function within(root: string, target: string) {
-  const rel = relative(root, target);
-  return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
-}
 function canonicalProspective(path: string) {
   let parent = resolve(path);
   while (!existsSync(parent)) {
@@ -288,9 +285,8 @@ function resolvePatchPath(workspace: string, base: string, requested: string) {
   let canonical: string;
   try { canonical = canonicalProspective(abs); }
   catch (e) { throw new Error(`resolve ${JSON.stringify(requested)}: ${(e as Error).message}`); }
-  const ws = workspace ? realpathSync(resolve(workspace)) : "";
-  if (ws && !within(ws, canonical) && !(base !== workspace && gitCommonDir(ws) && gitCommonDir(ws) === gitCommonDir(canonical)))
-    throw new Error(`path ${JSON.stringify(requested)} resolves to ${canonical}, which is outside the workspace ${ws}.\nUse a workspace-relative path, or pass cwd=<dir> to target a linked git worktree of the same repository.`);
+  const denied = checkAllowedPath(canonical, [workspace]);
+  if (denied) throw new Error(denied);
   return canonical;
 }
 
@@ -439,6 +435,7 @@ export async function undoFile(path: string, workspacePath = process.cwd()): Pro
     rmSync(abs, { force: true });
     message = `Successfully deleted ${abs} (was a newly created file — no prior state to restore)`;
   } else {
+    mkdirSync(dirname(abs), { recursive: true, mode: 0o755 });
     writeFileSync(abs, readFileSync(bak), { mode: 0o644 });
     message = `Successfully reverted ${abs}`;
   }

@@ -27,7 +27,7 @@ export const INTERACTIVE_ONLY_TOOLS = ["ask_user_question", "enter_plan_mode", "
 export const HEADLESS_ONLY_TOOLS = ["bash"] as const;
 export const XAI_TOOLS = ["x_search", "xai_web_search"] as const;
 /** Global Pi policy requires this tool before mutations such as apply_patch. */
-export const REQUIRED_PI_EXTENSION_TOOLS = ["change_context"] as const;
+export const REQUIRED_PI_EXTENSION_TOOLS = ["change_context", "context_index", "context_remember", "context_reindex", "context_search", "context_outline", "context_read", "context_inspect", "context_delete"] as const;
 
 export interface GatingEnvironment {
   interactive: boolean;

@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { AgentManager, type Runner } from "../../../packages/tools/agents/src/index.ts";
 import { SwarmAgentTools } from "../../lib/tools/swarm-agent-tools.ts";
 import { registerSwarmAgentTools } from "../../extensions/30-tools/swarm-agent-tools.ts";
+import { applyWorkflowGuidance } from "../../../packages/context/prompt/src/workflow-guidance.ts";
 
 const root = resolve(import.meta.dirname, "../../..");
 const names = ["BackgroundTask", "Subagent", "SubagentOutput", "TaskOutput", "Delegate", "DelegateOutput", "multi_agent_wait", "wait_for_agent"];
@@ -43,7 +44,8 @@ describe("Swarm agent orchestration tools", () => {
     expect(tools.map(t => t.name)).toEqual(names);
     for (const tool of tools) {
       const fixture: any = fixtures.get(tool.name);
-      expect(tool.description).toBe(fixture.description);
+      // Local workflow guidance intentionally adapts selected upstream prose.
+      expect(tool.description).toBe(applyWorkflowGuidance(fixture.description));
       expect(tool.parameters).toEqual(PERMISSIVE_PARAMETERS);
       expect(JSON.stringify(overlaySwarmToolSchemas({ tools: [{ type: "function", function: { name: tool.name, description: tool.description, parameters: tool.parameters } }] })!.tools[0].function.parameters)).toBe(JSON.stringify(fixture.parameters));
     }

@@ -141,8 +141,8 @@ export function footerIdentityLine(state: "running" | "idle", model?: string): s
   return `${state === "running" ? "●" : "○"}  ${model ? `model ${model}` : "model unavailable"}`;
 }
 
-export function footerMetricsLine(walltime: string, outputTokens: number, segments: readonly string[] = [], hint?: string): string {
-  return [walltime, `↓ ${outputTokens.toLocaleString()} tok`, ...segments, hint].filter(Boolean).join("  ·  ");
+export function footerMetricsLine(walltime: string, outputTokens: number, segments: readonly string[] = []): string {
+  return [walltime, `↓ ${outputTokens.toLocaleString()} tok`, ...segments].filter(Boolean).join("  ·  ");
 }
 
 function styleIdentityLine(line: string, state: "running" | "idle", theme: any): string {
@@ -202,9 +202,10 @@ class MetricsFooter {
     }
     const work = visibleRunningWork();
     if (!runningWorkExpanded() || !work.length) {
-      const activeBash = work.some(item => item.kind === "bash" && item.status === "running");
       const identity = footerIdentityLine(state, model) + (codeModeEnabled() ? "  CODE" : "");
-      const metrics = footerMetricsLine(formatWalltime(currentWalltime()), m.outputTokens, segments, activeBash ? "Ctrl+B background Bash" : undefined);
+      // The Ctrl+B affordance belongs to the running bash row (the tool renders
+      // it inline while in flight), not to the global footer.
+      const metrics = footerMetricsLine(formatWalltime(currentWalltime()), m.outputTokens, segments);
       return [
         ...wrapFooterText(identity, width).map((row) => styleIdentityLine(row, state, this.theme)),
         ...wrapFooterText(metrics, width).map((row) => styleMetricsLine(row, this.theme)),

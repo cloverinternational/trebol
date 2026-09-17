@@ -23,13 +23,21 @@ const text = (v: unknown) => ({ content: [{ type: "text", text: typeof v === "st
 const parameters = { type: "object", properties: { action: { type: "string", enum: ["status", "update", "build", "start", "stop", "pair", "setup", "health", "serve", "logs"] }, listen: { type: "string" }, apply: { type: "boolean", description: "Explicitly authorize hostname and Tailscale Serve changes. Default: inspect only." }, inspect: { type: "boolean" }, lines: { type: "integer", minimum: 1, maximum: 500 } }, required: ["action"] };
 export { defaultListen, paseoSetup, paseoStatus, paseoStart, paseoStop, paseoUpdate, paseoBuild, paseoPair };
 export default function paseoExtension(pi: Pi) {
+  let generation = 0;
+  pi.on?.("session_shutdown", () => { generation++; });
   pi.on?.("session_start", async (_e, ctx: SessionContext) => {
+    const started = ++generation;
+    const notify = (message: string, level: string) => {
+      if (started !== generation) return;
+      try { ctx?.ui?.notify?.(message, level); } catch { /* Session may already be invalidated. */ }
+    };
     // Startup never changes network exposure; setup requires an explicit action.
     void paseoStart(pi).then(async (r) => {
-      if (!r.success) { ctx?.ui?.notify?.(`Paseo auto-start skipped: ${r.error}`, "warning"); return; }
+      if (started !== generation) return;
+      if (!r.success) { notify(`Paseo auto-start skipped: ${r.error}`, "warning"); return; }
       process.env.PASEO_HOST ||= `http://${r.listen}`;
-      ctx?.ui?.notify?.(r.alreadyRunning ? `Paseo connected on ${r.listen}.` : `Paseo started on ${r.listen}.`, "info");
-    }).catch(() => ctx?.ui?.notify?.("Paseo startup failed; inspect daemon status.", "warning"));
+      notify(r.alreadyRunning ? `Paseo connected on ${r.listen}.` : `Paseo started on ${r.listen}.`, "info");
+    }).catch(() => notify("Paseo startup failed; inspect daemon status.", "warning"));
   });
   pi.registerTool?.(withDefaultToolRenderer({
     name: "paseo", label: "Paseo daemon", description: "Manage the vendored Paseo install and Tailscale setup.", parameters,

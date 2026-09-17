@@ -13,9 +13,10 @@ const MINIMAL_CREATE = `{"key":"<your-key>","op":"create","subject":"<short impe
 const CATEGORIES = new Set(["researching", "planning", "acting", "verifying", "debugging", "documenting"]);
 const PRIORITIES = new Set(["low", "medium", "high"]);
 const NOTE_TYPES = new Set(["decision", "blocker", "learning", "milestone", "question", "observation", "other"]);
+const MAX_TASK_QUESTIONS = 12, MAX_QUESTION_ID_LENGTH = 64, MAX_QUESTION_TEXT_LENGTH = 240, MAX_ANSWER_LENGTH = 240, MAX_EVIDENCE_LENGTH = 512;
 const ALLOWED: Record<string, string[]> = {
-  create: ["subject", "description", "activeForm", "category", "priority", "metadata", "parentTaskId", "owner_id", "status", "active", "addBlocks", "addBlockedBy"],
-  update: ["taskId", "status", "category", "priority", "subject", "description", "activeForm", "active", "parentTaskId", "metadata", "addBlocks", "addBlockedBy", "addNote", "noteType"],
+  create: ["subject", "description", "activeForm", "category", "priority", "metadata", "parentTaskId", "owner_id", "status", "active", "addBlocks", "addBlockedBy", "questions"],
+  update: ["taskId", "status", "category", "priority", "subject", "description", "activeForm", "active", "parentTaskId", "metadata", "addBlocks", "addBlockedBy", "addNote", "noteType", "questions", "answers"],
   get: ["taskId", "include_audit"],
   list: ["category", "status", "active", "limit", "offset", "subject"],
 };
@@ -60,6 +61,23 @@ function targets(value: unknown, field: string): void {
   (value as unknown[]).forEach((raw, i) => target(raw, `${field}[${i}]`));
 }
 
+function validateQuestions(value: unknown): void {
+  if (!Array.isArray(value) || value.length < 1 || value.length > MAX_TASK_QUESTIONS) fail(`questions must contain 1-${MAX_TASK_QUESTIONS} items`);
+  const ids = new Set<string>();
+  for (const item of value as unknown[]) {
+    if (!isObj(item) || typeof item.id !== "string" || !item.id.trim() || item.id.length > MAX_QUESTION_ID_LENGTH || typeof item.text !== "string" || !item.text.trim() || item.text.length > MAX_QUESTION_TEXT_LENGTH || Object.keys(item).some(k => k !== "id" && k !== "text")) fail("questions must contain bounded {id,text} items");
+    if (isObj(item) && typeof item.id === "string" && ids.has(item.id)) fail("question ids must be unique"); if (isObj(item) && typeof item.id === "string") ids.add(item.id);
+  }
+}
+function validateAnswers(value: unknown): void {
+  if (!Array.isArray(value) || value.length < 1 || value.length > MAX_TASK_QUESTIONS) fail(`answers must contain 1-${MAX_TASK_QUESTIONS} items`);
+  const ids = new Set<string>();
+  for (const item of value as unknown[]) {
+    if (!isObj(item) || typeof item.question !== "string" || !item.question.trim() || item.question.length > MAX_QUESTION_ID_LENGTH || typeof item.answer !== "string" || !item.answer.trim() || item.answer.length > MAX_ANSWER_LENGTH || typeof item.evidence !== "string" || !item.evidence.trim() || item.evidence.length > MAX_EVIDENCE_LENGTH || Object.keys(item).some(k => !["question", "answer", "evidence"].includes(k))) fail("answers must contain bounded {question,answer,evidence} items");
+    if (isObj(item) && typeof item.question === "string") ids.add(item.question);
+  }
+}
+
 function parseOperation(raw: Record<string, unknown>, index: number): { key: string; kind: string } {
   let key = "";
   try { key = requiredString(raw, "key"); } catch (e) { if (e instanceof Failure) fail(`operation ${index}: ${e.message}`); throw e; }
@@ -98,9 +116,12 @@ function parseOperation(raw: Record<string, unknown>, index: number): { key: str
     optionalString(raw, "addNote");
     noteType = optionalString(raw, "noteType") ?? "";
     if ("include_audit" in raw && typeof raw.include_audit !== "boolean") fail("include_audit must be a boolean");
+    if ("questions" in raw) validateQuestions(raw.questions);
+    if ("answers" in raw) validateAnswers(raw.answers);
   });
   // validateTaskOperation
   if (kind === "create" && subject.trim() === "") fail(`operation ${q(key)}: op:"create" requires a non-blank "subject". A minimal valid create is ${MINIMAL_CREATE} — "description" is optional and is never required. Retry this operation with "subject" set to a short imperative title.`);
+  if (kind === "create" && status === "completed" && Array.isArray(raw.questions) && raw.questions.length) fail(`operation ${q(key)}: question-bearing tasks cannot be created completed`);
   if (category !== "" && !CATEGORIES.has(category)) fail(`operation ${q(key)}: invalid category ${q(category)}`);
   if (priority !== "" && !PRIORITIES.has(priority)) fail(`operation ${q(key)}: invalid priority ${q(priority)}`);
   if (status !== "" && !["pending", "in_progress", "completed", "deleted"].includes(status)) fail(`operation ${q(key)}: invalid status ${q(status)}`);

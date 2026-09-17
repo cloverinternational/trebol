@@ -984,7 +984,7 @@
   },
   {
     "function": {
-      "description": "Edit files with a V4A patch. The ONLY tool for creating, updating, deleting, or moving files.\n\n*** Begin Patch\n*** Update File: relative/or/absolute/path\n[*** Move to: new/path]\n@@ optional anchor (class/function line) to disambiguate\n context line (space prefix)\n-removed line\n+added line\n context line\n*** Add File: new/file (every body line starts with '+')\n*** Delete File: old/file\n*** End Patch\n\nRules: 3 lines of context around each change; use @@ anchors when context repeats; no line numbers. Multiple files may be combined — the patch applies atomically (all operations succeed or none are written).",
+      "description": "Edit files with a V4A patch. Use it for creating, updating, deleting, or moving files.\n\n*** Begin Patch\n*** Update File: relative/or/absolute/path\n[*** Move to: new/path]\n@@ optional anchor (class/function line) to disambiguate\n context line (space prefix)\n-removed line\n+added line\n context line\n*** Add File: new/file (every body line starts with '+')\n*** Delete File: old/file\n*** End Patch\n\nRules: 3 lines of context around each change; use @@ anchors when context repeats; no line numbers. Multiple files may be combined — the patch applies atomically (all operations succeed or none are written).",
       "name": "apply_patch",
       "parameters": {
         "properties": {

@@ -1,0 +1,7 @@
+services:
+  main:
+    volumes:
+      - /usr/bin/FEXInterpreter:/opt/fex/FEXInterpreter:ro
+      - /usr/bin/FEXServer:/opt/fex/FEXServer:ro
+      - /lib/aarch64-linux-gnu:/lib/aarch64-linux-gnu:ro
+      - /lib/ld-linux-aarch64.so.1:/lib/ld-linux-aarch64.so.1:ro

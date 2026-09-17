@@ -8,7 +8,7 @@ import {
   type BackgroundBashParams,
   type ReadBackgroundParams,
 } from "../../lib/tools/swarm-bgprocess.ts";
-import { bashCallComponent, formatBashCall } from "../../lib/tools/swarm-bash.ts";
+import { bashCallComponent, bashResultComponent, formatBashCall } from "../../lib/tools/swarm-bash.ts";
 import { withDefaultToolRenderer } from "../../../packages/runtime/core/src/tool-renderer.ts";
 
 type Pi = any;
@@ -73,6 +73,13 @@ export function registerSwarmBackgroundBash(inputPi: Pi): void {
     parameters: { ...PERMISSIVE_PARAMETERS },
     renderCall(args: BackgroundBashParams, theme: any) {
       return bashCallComponent(formatBashCall(args, theme));
+    },
+    // Without this the generic renderer dumped the whole payload in one go.
+    // Share the `bash` renderer so both bash surfaces read identically. Width
+    // measurement falls back to the module's built-in wrapper rather than
+    // importing pi-tui, which only resolves inside the live pi runtime.
+    renderResult(result: any, options: any, theme: any) {
+      return bashResultComponent(result, options, theme);
     },
     async execute(_id: string, params: BackgroundBashParams, signal: AbortSignal | undefined, _update: unknown, ctx: any) {
       try {

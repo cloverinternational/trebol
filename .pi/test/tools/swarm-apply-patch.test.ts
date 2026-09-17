@@ -97,6 +97,18 @@ describe("Swarm apply_patch parity", () => {
     expect(readImage(file, ws)).toEqual([{ type: "text", text: `ERROR: Read handles image files only (.gif, .jpeg, .jpg, .png, .webp). For text use the shell, e.g. \`sed -n '1,200p' ${file}\` to view a slice or \`rg PATTERN ${file}\` to search it.` }]);
   });
 
+  it("rejects explicit paths outside the workspace", async () => {
+    const ws = root(), outside = root(), file = join(outside, "outside.txt");
+    writeFileSync(file, "old\n");
+    const patch = `*** Begin Patch
+*** Update File: ${file}
+-old
++new
+*** End Patch`;
+    await expect(applyPatch(patch, { workspacePath: ws })).rejects.toThrow(/Path not allowed/);
+    expect(readFileSync(file, "utf8")).toBe("old\n");
+  });
+
   it("registers byte-identical fixture descriptions and parameters", () => {
     const tools: any[] = []; extension({ registerTool: (tool: any) => tools.push(tool), getCwd: () => process.cwd() });
     for (const name of ["apply_patch", "Undo", "Read"]) {

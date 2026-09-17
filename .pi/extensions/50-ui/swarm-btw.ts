@@ -42,7 +42,7 @@ export default function swarmBtw(pi: ExtensionAPI) {
 			noPromptTemplates: true,
 			noThemes: true,
 			systemPrompt: prompt.customPrompt,
-			appendSystemPrompt: [prompt.appendSystemPrompt, SIDE_PROMPT].filter(Boolean).join("\n\n"),
+			appendSystemPrompt: [prompt.appendSystemPrompt, SIDE_PROMPT].filter((value): value is string => Boolean(value)),
 		});
 		await loader.reload();
 		const manager = SessionManager.inMemory(ctx.cwd);

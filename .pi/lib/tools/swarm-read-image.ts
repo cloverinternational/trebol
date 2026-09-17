@@ -1,6 +1,6 @@
 import { readFileSync, statSync } from "node:fs";
-import { homedir } from "node:os";
 import { basename, extname, isAbsolute, resolve } from "node:path";
+import { checkAllowedPath } from "./path-guard.ts";
 
 const mime: Record<string, string> = {
   ".gif": "image/gif", ".jpeg": "image/jpeg", ".jpg": "image/jpeg", ".png": "image/png", ".webp": "image/webp",
@@ -18,11 +18,10 @@ export type PiContent = { type: "image"; data: string; mimeType: string } | { ty
 export function readImage(filePath: string, workspacePath = process.cwd(), approved = false): PiContent[] {
   if (typeof filePath !== "string" || filePath === "") throw new Error("cannot resolve path: empty path");
   const abs = isAbsolute(filePath) ? resolve(filePath) : resolve(workspacePath, filePath);
-  const workspace = resolve(workspacePath), swarmHome = resolve(homedir(), ".swarm");
-  // FSRead intentionally uses this lexical prefix check (rather than
-  // realpath/relative containment); preserve its behavior byte-for-byte.
-  if (workspacePath && !abs.startsWith(workspace) && abs !== swarmHome && !abs.startsWith(swarmHome + "/") && !approved)
-    throw new Error("path must be within workspace or ~/.swarm/");
+  if (!approved) {
+    const denied = checkAllowedPath(abs, [workspacePath]);
+    if (denied) throw new Error(`path must be within workspace or ~/.swarm/: ${abs}`);
+  }
   const ext = extname(abs).toLowerCase();
   if (!mime[ext]) return [{ type: "text", text: `ERROR: Read handles image files only (.gif, .jpeg, .jpg, .png, .webp). For text use the shell, e.g. \`sed -n '1,200p' ${abs}\` to view a slice or \`rg PATTERN ${abs}\` to search it.` }];
   let data: Buffer;

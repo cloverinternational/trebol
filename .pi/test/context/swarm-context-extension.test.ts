@@ -14,7 +14,7 @@ function harness(cwd: string, options: { models?: string[]; retriever?: (task: s
     appendEntry: (type: string, data: unknown) => entries.push({ type, data }),
     on: (event: string, handler: any) => { if (event === "session_start") start = handler; },
   };
-  if (options.retriever) pi.agents = { spawn: (spec: any) => { spawned.push(spec); return { wait: async () => ({ status: "completed", output: options.retriever!(spec.task) }) }; } };
+  if (options.retriever) pi.exec = async (_command: string, commandArgs: string[]) => { const task = String(commandArgs.at(-1)); spawned.push({ task, model: "anthropic/claude-3-5-haiku-latest" }); return { code: 0, stdout: options.retriever!(task), stderr: "" }; };
   swarmContextExtension(pi);
   start?.({}, { cwd, sessionManager: { getSessionFile: () => "session-1", getEntries: () => [] }, models: { list: () => options.models ?? ["anthropic/claude-3-5-haiku-latest"] }, ui: { notify: (text: string, level: string) => notices.push({ text, level }) } });
   const call = async (name: string, params: any) => { const output = await tools.get(name).execute("id", params); return { isError: output.isError === true, details: output.details as any, text: output.content[0].text }; };
@@ -26,7 +26,7 @@ const seed = () => { const cwd = mkdtempSync(join(tmpdir(), "swarm-context-")); 
 describe("swarm-context extension", () => {
   it("exposes search and outline, not a synthesized-answer tool", () => {
     const { tools, commands } = harness(process.cwd());
-    expect([...tools.keys()].sort()).toEqual(["context_delete", "context_index", "context_inspect", "context_outline", "context_reindex", "context_remember", "context_search"]);
+    expect([...tools.keys()].sort()).toEqual(["context_delete", "context_index", "context_inspect", "context_outline", "context_read", "context_reindex", "context_remember", "context_search"]);
     expect(commands.has("swarm-context")).toBe(true);
   });
 
@@ -85,14 +85,14 @@ describe("swarm-context extension", () => {
     const { call } = harness(seed(), { retriever: () => "I could not comply." });
     await call("context_index", { operation: "index", path: "adr.md" });
     const { details } = await call("context_search", { operation: "search", query: "which database" });
-    expect(details.status).toBe("no-result");
+    expect(details.status).toBe("malformed-json");
   });
 
   it("degrades to a self-service outline when no retriever exists", async () => {
     const { call } = harness(seed());
     await call("context_index", { operation: "index", path: "adr.md" });
     const { details } = await call("context_search", { operation: "search", query: "which database" });
-    expect(details.status).toBe("no-retriever");
+    expect(details.status).toBe("model-failure");
     expect(details.outline.map((e: any) => e.title)).toEqual(["Decisions", "Storage", "Transport"]);
   });
 

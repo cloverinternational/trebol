@@ -45,7 +45,7 @@ export function registerTaskManageExtension(
   if (existing) return existing;
   const bridged: any[] = [];
   const registrationPi = { ...pi, registerTool: (tool: unknown) => { registerBootstrapHandoff(tool); bridged.push(tool); pi.registerTool(tool); } };
-  const manager = registerTaskManage(registrationPi);
+  const manager = registerTaskManage(registrationPi, undefined, { workspaceRoot: process.cwd() });
   // Swarm's builtin task hooks (.pi/lib/runtime/swarm-builtin-hooks.ts) read
   // task state through this handle; the coordinator below keeps only the
   // task-audit bookkeeping so no second copy of the nudges reaches the model.
