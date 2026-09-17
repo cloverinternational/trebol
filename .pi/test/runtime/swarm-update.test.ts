@@ -19,12 +19,12 @@ describe("swarm update metadata", () => {
 
 describe("swarm update extension", () => {
   it("checks at startup and does not check again before the hourly interval", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ schemaVersion: 1, package: "@pi-swarm/integration", version: "0.2.0", releasedAt: "2026-01-01T00:00:00Z", changelog: "https://example.test/changelog", source: "git:github.com/example/repo@main", updateCommand: "pi update --extensions" }) }));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ schemaVersion: 1, package: "@pi-swarm/integration", version: "0.4.0", releasedAt: "2026-01-01T00:00:00Z", changelog: "https://example.test/changelog", source: "git:github.com/example/repo@main", updateCommand: "pi update --extensions" }) }));
     const handlers = new Map<string, (event: unknown, ctx: any) => void>(); const commands = new Map<string, any>(); const notify = vi.fn();
     const pi = { on: (event: string, handler: any) => handlers.set(event, handler), registerCommand: (name: string, command: any) => commands.set(name, command) };
     const extension = (await import("../../extensions/00-runtime/swarm-update.ts")).default(pi);
     const ctx = { ui: { notify } }; handlers.get("session_start")?.({}, ctx); await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(fetch).toHaveBeenCalledTimes(1); expect(notify).toHaveBeenCalledWith(expect.stringContaining("0.2.0"), "warning");
+    expect(fetch).toHaveBeenCalledTimes(1); expect(notify).toHaveBeenCalledWith(expect.stringContaining("0.4.0"), "warning");
     await extension.checkForUpdate(); expect(fetch).toHaveBeenCalledTimes(1);
     handlers.get("session_shutdown")?.({}, ctx); vi.unstubAllGlobals();
   });

@@ -24,7 +24,7 @@ Release metadata is kept in `package.json`, `update-manifest.json`, and this fil
 - Make Forge prompt transparency explicit for debugging and testing.
 - Clarify vault tool and command descriptions for stored connection entries.
 
-## [Unreleased]
+## [0.3.0] - 2026-09-17
 
 - Add a provider-neutral long-running monitor agent with bounded retries,
   persisted observations, and pause/resume/cancel controls.

@@ -8,7 +8,7 @@ import {
 
 describe("explicit Pi extension tool gating", () => {
   it("always allows required policy tools and keeps other extras explicit", () => {
-    expect(REQUIRED_PI_EXTENSION_TOOLS).toEqual(["change_context"]);
+    expect(REQUIRED_PI_EXTENSION_TOOLS).toEqual(["change_context", "context_index", "context_remember", "context_reindex", "context_search", "context_outline", "context_read", "context_inspect", "context_delete"]);
     expect([
       ...configuredExtraTools({
         PI_SWARM_EXTRA_TOOLS: " local_a ,,local_a ",
