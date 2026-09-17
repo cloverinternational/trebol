@@ -1,0 +1,15 @@
+# Compact task questions and completion answers
+
+## Contract
+Extend existing TaskManage; no separate question tool or per-question lifecycle calls. Tasks optionally carry short questions `{id,text}` (text may point to file#section). A completion update supplies `{question,answer,evidence}` answers. Bound inline fields; longer details live in files. Legacy tasks without questions retain existing behavior. Question-bearing tasks cannot be created already completed or drop questions in the completion call. Answers must cover required IDs exactly, with no duplicates or unknown IDs.
+
+## Implementation order
+1. Extend canonical TaskManage types, JSON schema, both validators, task serialization/reload and create/update paths in packages/tools/taskmanage. Keep existing batch rollback and compact acknowledgements.
+2. Validate answers at completion before mutation. Resolve local evidence file/section references through a workspace-aware resolver supplied by registration; reject missing files/sections and unsupported references explicitly. Reference existence establishes provenance availability, not semantic truth. Keep reads bounded. Questionless legacy tasks remain compatible.
+3. Update bootstrap proposal schema/validation and create/update mapping to carry concise questions. Update tool/prompt guidance: investigate iteratively, answer in the same completion call, cite evidence, spill detailed explanations. Do not add tool-call limits or additional ceremony.
+4. Add focused tests: legacy behavior, valid completion, missing/duplicate/unknown answers, field bounds, missing files/sections, rejected completion leaves state intact, reload, atomic rollback, schema/extension exposure, repair then complete. Update AGENTS and relevant docs.
+5. Harbor preflight: verify exact Terminal-Bench 2.1 registry identifier/version, Docker, and adapter that executes actual Pi-Swarm package. Preserve baseline harness snapshot before edits. Run installation smoke before model trials. Use same model/configuration/tasks in paired baseline/changed trials; begin with a small smoke subset and record exact task selection. Do not substitute dataset versions or use an unrelated SDK agent. If dataset/adapter/provider unavailable, report blocker and do not claim benchmark results.
+6. Preserve run manifests and raw trajectories. Read calls/results and terminal verifier outcomes; distinguish gate mechanics from task success and broad generalization. Keep hidden verifier/reference solutions away from agents and development tuning.
+
+## Risks and checks
+Alternate TaskManage validation paths can reject new keys; test every boundary. File sections can be stale or irrelevant; never call pointer validation semantic proof. Old snapshots lack new fields; preserve compatibility. Gate failures must return actionable IDs and permit investigation/repair. Baseline/changed benchmark must differ only by this change, preserving current unrelated WIP identically. No implementation or benchmark success has been established by this plan.
