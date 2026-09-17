@@ -17,6 +17,7 @@ import { spawn } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, openSync, closeSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { constants as osConstants, homedir, tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve, isAbsolute } from "node:path";
+import { checkAllowedPath, defaultAllowedPaths, resolvePathForCheck, pathWithinRoot } from "./path-guard.ts";
 
 export const SWARM_BASH_DESCRIPTION =
   "Execute a shell command and capture stdout, stderr, exit code, duration, and timeout status. Pipes and redirections are supported.\n\nSet timeout_seconds for every command; values below the enforced 60-second minimum are raised automatically. Use cwd instead of cd.";
@@ -278,50 +279,7 @@ export function invalidCwdMessage(reason: string, errorId = newErrorID()): strin
  * ~/.swarmos] (the TUI overrides path_guard.go defaultAllowedPaths; note the
  * legacy `.swarmos` spelling). `--allow-all-paths` makes the list empty.
  */
-export function defaultAllowedPaths(workspaceRoot = process.cwd(), home = homedir()): string[] {
-  return [resolve(workspaceRoot), "/tmp", join(home, ".swarmos")];
-}
-
-/** path_guard.go resolvePathForCheck: EvalSymlinks via the nearest existing ancestor. */
-export function resolvePathForCheck(absPath: string): string {
-  const cleaned = resolve(absPath);
-  if (!isAbsolute(cleaned)) throw new Error("path must be absolute");
-  try { return realpathSync(cleaned); } catch (e: any) { if (e?.code !== "ENOENT") throw e; }
-  let current = cleaned;
-  for (;;) {
-    let exists = false;
-    try { statSync(current); exists = true; } catch (e: any) { if (e?.code !== "ENOENT") throw e; }
-    if (exists) {
-      const resolvedCurrent = realpathSync(current);
-      if (current === cleaned) return resolvedCurrent;
-      return join(resolvedCurrent, relative(current, cleaned));
-    }
-    const parent = dirname(current);
-    if (parent === current) return cleaned;
-    current = parent;
-  }
-}
-
-const pathWithinRoot = (root: string, target: string) => {
-  const rel = relative(root, target);
-  if (rel === "") return true;
-  if (rel === "..") return false;
-  return !rel.startsWith(`..${"/"}`) && !isAbsolute(rel);
-};
-
-/** path_guard.go checkAllowedPath: undefined when allowed, else Swarm's error text. */
-export function checkAllowedPath(absPath: string, allowedPaths: readonly string[]): string | undefined {
-  if (allowedPaths.length === 0) return undefined;
-  let resolvedTarget: string;
-  try { resolvedTarget = resolvePathForCheck(absPath); } catch (e) { return `failed to resolve path: ${String((e as Error).message ?? e)}`; }
-  for (const allowed of allowedPaths) {
-    if (!allowed) continue;
-    let resolvedAllowed: string;
-    try { resolvedAllowed = resolvePathForCheck(resolve(allowed)); } catch { continue; }
-    if (pathWithinRoot(resolvedAllowed, resolvedTarget)) return undefined;
-  }
-  return `Path not allowed (not_allowed): ${absPath}`;
-}
+export { checkAllowedPath, defaultAllowedPaths, resolvePathForCheck, pathWithinRoot } from "./path-guard.ts";
 
 /**
  * `git rev-parse --git-common-dir` without spawning git: the shared directory
@@ -364,6 +322,10 @@ export function sharesGitCommonDir(workspace: string, target: string): boolean {
 export function resolveWorkdir(cwd: string | undefined, defaultCwd: string, allowedPaths: readonly string[] = defaultAllowedPaths(defaultCwd)): { dir: string } | { error: string } {
   if (!cwd) return { dir: defaultCwd };
   const abs = resolve(cwd);
+  const denied = checkAllowedPath(abs, allowedPaths);
+  // Git worktrees are deliberately permitted: they are repository-controlled
+  // sibling directories, not arbitrary escapes from the selected workspace.
+  if (denied && !sharesGitCommonDir(defaultCwd, abs)) return { error: denied };
   if (!existsSync(abs)) return { error: `cwd does not exist: ${abs}` };
   try { if (!statSync(abs).isDirectory()) return { error: `cwd is not a directory: ${abs}` }; } catch (e) { return { error: `failed to access cwd ${abs}: ${String(e)}` }; }
   return { dir: abs };
@@ -404,7 +366,7 @@ export function killProcessTree(child: { pid?: number; kill: (s: NodeJS.Signals)
 export function runSwarmBash(params: BashParams, options: RunOptions): Promise<BashOutcome | { error: string }> {
   const requestedSecs = Number.isFinite(params.timeout_seconds) ? Math.trunc(params.timeout_seconds as number) : 0;
   const effectiveSecs = requestedSecs > 0 ? Math.max(requestedSecs, 60) : 60;
-  const wd = resolveWorkdir(params.cwd, options.defaultCwd);
+  const wd = resolveWorkdir(params.cwd, options.defaultCwd, defaultAllowedPaths(options.defaultCwd, homedir()));
   if ("error" in wd) return Promise.resolve({ error: invalidCwdMessage(wd.error) });
   const env: NodeJS.ProcessEnv = { ...process.env, TERM: "dumb", DEBIAN_FRONTEND: "noninteractive", CI: "true", PS1: "", PROMPT_COMMAND: "", ...(params.env ?? {}) };
   return new Promise((resolveP) => {

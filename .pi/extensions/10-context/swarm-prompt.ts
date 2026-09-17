@@ -48,6 +48,10 @@ Use concise Markdown headings and bullets. Every material claim must have nearby
 const ASSEMBLED_PREFIX = "<system_information>\n<operating_system>";
 const HEADLESS_BASE_PROMPT = "You are a helpful AI assistant.";
 const assembledPromptKinds = new Map<string, "interactive" | "headless">();
+// Keep the complete prompt as an idempotence key too.  The hash cache is
+// useful for bounded memory, but the final memory-ceremony pass can vary with
+// cwd/settings between lifecycle callbacks.
+const assembledPromptValues = new Map<string, "interactive" | "headless">();
 const assembledKind = (prompt: string): "interactive" | "headless" | undefined => {
   const body = prompt.replace(/^(?:<available_skills>[\s\S]*?<\/available_skills>\n*)+/, "").trimStart();
   if (body.startsWith(ASSEMBLED_PREFIX)) return "interactive";
@@ -438,8 +442,9 @@ export function registerSwarmPrompt(pi: PromptExtensionAPI): void {
   promptRegistrations.add(pi as object);
   registerHook(pi, "swarm-prompt", "before_agent_start", (event: PromptExtensionEvent, ctx: PromptExtensionContext) => {
     const cwd = ctx.cwd ?? event.systemPromptOptions?.cwd ?? process.cwd();
-    const assemble = () => {
     const interactive = (ctx as { hasUI?: boolean }).hasUI === true;
+    if (assembledPromptValues.get(event.systemPrompt) === (interactive ? "interactive" : "headless")) return undefined;
+    const assemble = () => {
     const isolation = cliIsolation();
     const config = loadPromptContextConfig(cwd, undefined, { persistMigration: false });
     const selectedSkills = config.skills?.mode === "allowlist" ? config.skills.names : undefined;
@@ -487,6 +492,7 @@ export function registerSwarmPrompt(pi: PromptExtensionAPI): void {
     const base = assembled?.systemPrompt ?? event.systemPrompt;
     const final = memorySystemPrompt(base, cwd);
     if (assembled) assembledPromptKinds.set(hash(final), (ctx as { hasUI?: boolean }).hasUI === true ? "interactive" : "headless");
+    if (assembled) assembledPromptValues.set(final, (ctx as { hasUI?: boolean }).hasUI === true ? "interactive" : "headless");
     return assembled || final !== base ? { systemPrompt: final } : undefined;
   });
 }

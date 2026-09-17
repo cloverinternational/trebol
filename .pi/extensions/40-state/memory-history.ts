@@ -1,6 +1,6 @@
 import { MEMORY_KNOWLEDGE_GUIDANCE, MEMORY_SCOPE_GUIDANCE } from "../../lib/context/memory-guidance.ts";
 import { createHash } from "node:crypto";
-import { rememberShared, searchShared } from "../../lib/state/shared-memory.ts";
+import { searchShared } from "../../lib/state/shared-memory.ts";
 import { openKnowledgeStore, redactKnowledge, type EvidenceRef, type KnowledgeKind, type KnowledgeStatus } from "../../lib/state/knowledge-store.ts";
 import { sharedMemoryRoot } from "../../lib/state/shared-memory.ts";
 import { promoteGlobalKnowledge } from "../../lib/state/knowledge-promotion.ts";
@@ -80,7 +80,19 @@ export class MemoryHistory {
     this.records = entries.flatMap((entry: any) => {
       const data = entry?.type === MEMORY_ENTRY_TYPE ? entry.data : undefined;
       if (!data || data.version !== MEMORY_VERSION || typeof data.text !== "string") return [];
-      return [{ ...data, text: redact(data.text), tags: Array.isArray(data.tags) ? data.tags.map(String) : [] }];
+      const clean = redact(data.text).trim();
+      if (!clean || typeof data.namespace !== "string" || typeof data.workspace !== "string" || typeof data.session !== "string" || typeof data.createdAt !== "string") return [];
+      return [{
+        id: typeof data.id === "string" ? data.id : stableId(scopeOf({ namespace: data.namespace, workspace: data.workspace, session: data.session }), clean, data.createdAt),
+        version: MEMORY_VERSION,
+        namespace: normalize(data.namespace, "default"),
+        workspace: normalize(data.workspace, process.cwd()),
+        session: normalize(data.session, "current"),
+        text: clean,
+        tags: Array.isArray(data.tags) ? data.tags.map(String).map(redact).filter(Boolean) : [],
+        createdAt: data.createdAt,
+        ...(typeof data.source === "string" ? { source: redact(data.source) } : {}),
+      }];
     });
   }
 
@@ -112,7 +124,7 @@ export class MemoryHistory {
       const clean = redact(old.text).trim();
       if (!clean) return [];
       const createdAt = typeof old.createdAt === "string" ? old.createdAt : this.now().toISOString();
-      const data: MemoryRecord = { id: stableId(scope, clean, createdAt), version: MEMORY_VERSION, ...scope, text: clean, tags: Array.isArray(old.tags) ? old.tags.map(String) : [], createdAt, source: "migration" };
+      const data: MemoryRecord = { id: stableId(scope, clean, createdAt), version: MEMORY_VERSION, ...scope, text: clean, tags: Array.isArray(old.tags) ? old.tags.map(String).map(redact).filter(Boolean) : [], createdAt, source: "migration" };
       return [{ type: MEMORY_ENTRY_TYPE as typeof MEMORY_ENTRY_TYPE, data }];
     });
   }
