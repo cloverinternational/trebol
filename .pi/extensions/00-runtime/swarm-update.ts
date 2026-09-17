@@ -1,10 +1,19 @@
 import { spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 export const DEFAULT_UPDATE_URL = "https://raw.githubusercontent.com/cloverinternational/trebol/main/update-manifest.json";
 export const updateUrl = () => process.env.PI_SWARM_UPDATE_URL || DEFAULT_UPDATE_URL;
 export const CHECK_INTERVAL_MS = 60 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 5_000;
-const CURRENT_VERSION = "2.0.0";
+function installedVersion(): string {
+  try {
+    const packageJson = JSON.parse(readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "../../../package.json"), "utf8"));
+    return typeof packageJson.version === "string" ? packageJson.version : "0.0.0";
+  } catch { return "0.0.0"; }
+}
+export const CURRENT_VERSION = installedVersion();
 
 export type UpdateManifest = { schemaVersion: 1; package: string; version: string; releasedAt: string; changelog: string; source: string; updateCommand: string };
 type ParsedVersion = { numbers: [number, number, number]; prerelease: string[] };
