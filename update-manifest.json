@@ -3,7 +3,7 @@
   "package": "@pi-swarm/integration",
   "version": "0.2.1",
   "releasedAt": "2026-09-15T16:55:00Z",
-  "changelog": "https://github.com/cloverinternational/swarm-pi/blob/main/CHANGELOG.md",
-  "source": "git:github.com/cloverinternational/swarm-pi@main",
+  "changelog": "https://github.com/cloverinternational/trebol/blob/main/CHANGELOG.md",
+  "source": "git:github.com/cloverinternational/trebol@main",
   "updateCommand": "pi update --extensions"
 }

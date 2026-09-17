@@ -1,7 +1,8 @@
 # Trebol v2.0
 
-Trebol v2.0 is the successor to the original Swarm Go agent harness. It brings
-the Swarm development model to Pi as an extension pack: structured prompt and
+Trebol v2.0 is Clover's internal harness and the successor to the original
+Swarm Go agent harness. It brings the Swarm development model
+to Pi as an extension pack: structured prompt and
 context assembly, policy and hooks, durable state, tasks, subagents, skills,
 research tools, parity checks, and a Swarm-oriented terminal experience.
 

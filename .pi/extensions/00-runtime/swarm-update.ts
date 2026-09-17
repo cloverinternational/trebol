@@ -1,10 +1,10 @@
 import { spawn } from "node:child_process";
 
-export const DEFAULT_UPDATE_URL = "https://raw.githubusercontent.com/cloverinternational/swarm-pi/main/update-manifest.json";
+export const DEFAULT_UPDATE_URL = "https://raw.githubusercontent.com/cloverinternational/trebol/main/update-manifest.json";
 export const updateUrl = () => process.env.PI_SWARM_UPDATE_URL || DEFAULT_UPDATE_URL;
 export const CHECK_INTERVAL_MS = 60 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 5_000;
-const CURRENT_VERSION = "0.1.0";
+const CURRENT_VERSION = "2.0.0";
 
 export type UpdateManifest = { schemaVersion: 1; package: string; version: string; releasedAt: string; changelog: string; source: string; updateCommand: string };
 type ParsedVersion = { numbers: [number, number, number]; prerelease: string[] };
@@ -61,18 +61,18 @@ export default function swarmUpdateExtension(pi: any) {
     if (process.env.PI_OFFLINE === "1" || process.env.PI_SWARM_SKIP_UPDATE_CHECK === "1") return false;
     try {
       const manifest = await fetchManifest(updateUrl());
-      if (compareVersions(manifest.version, CURRENT_VERSION) > 0) { notify(ctx, `Pi-Swarm ${manifest.version} is available (installed ${CURRENT_VERSION}). Changelog: ${manifest.changelog}\nRun /swarm-update install to update.`, "warning"); return true; }
-      if (force) notify(ctx, `Pi-Swarm is up to date (${CURRENT_VERSION}).`);
-    } catch (error) { if (force) notify(ctx, `Could not check for Pi-Swarm updates: ${error instanceof Error ? error.message : String(error)}`, "error"); }
+      if (compareVersions(manifest.version, CURRENT_VERSION) > 0) { notify(ctx, `Trebol ${manifest.version} is available (installed ${CURRENT_VERSION}). Changelog: ${manifest.changelog}\nRun /trebol-update install to update.`, "warning"); return true; }
+      if (force) notify(ctx, `Trebol is up to date (${CURRENT_VERSION}).`);
+    } catch (error) { if (force) notify(ctx, `Could not check for Trebol updates: ${error instanceof Error ? error.message : String(error)}`, "error"); }
     return false;
   };
   const install = async (ctx: any) => {
     if (process.env.PI_OFFLINE === "1") { notify(ctx, "Offline mode is enabled; update was not started.", "error"); return; }
     const child = spawn("pi", ["update", "--extensions"], { detached: true, stdio: "ignore" });
     child.once("error", (error) => notify(ctx, `Could not start Pi update: ${error.message}. Run pi update --extensions manually.`, "error")); child.unref();
-    notify(ctx, "Pi-Swarm update started. Restart Pi when it finishes.");
+    notify(ctx, "Trebol update started. Restart Pi when it finishes.");
   };
-  pi.registerCommand?.("swarm-update", { description: "Check for or install Pi-Swarm updates", handler: async (args: string, ctx: any) => args.trim() === "install" ? install(ctx) : check(true, ctx) });
+  pi.registerCommand?.("trebol-update", { description: "Check for or install Trebol updates", handler: async (args: string, ctx: any) => args.trim() === "install" ? install(ctx) : check(true, ctx) });
   pi.on?.("session_start", (_event: any, ctx: any) => { context = ctx; if (timer) clearInterval(timer); void check(); timer = setInterval(() => void check(), CHECK_INTERVAL_MS); timer.unref?.(); });
   pi.on?.("session_shutdown", () => { if (timer) clearInterval(timer); timer = undefined; context = undefined; });
   return { checkForUpdate: check };

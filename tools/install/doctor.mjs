@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Pi-Swarm install doctor.
+ * Trebol install doctor.
  *
  * Checks that a checkout of this repository is usable as a globally installed
  * Pi package (`pi install <path>` / `pi install git:...`). Each check prints
@@ -105,8 +105,8 @@ function checkSettings() {
     report(`theme ${theme} shipped by this checkout`, existsSync(file), file, "pick a theme from .pi/themes or install this repo as a package so its themes load");
   } else report("theme", true, theme ? `${theme} (not a swarm-* theme)` : "default");
   const packages = (settings.packages ?? []).map((p) => (typeof p === "string" ? p : p?.source ?? "")).filter(Boolean);
-  const listed = packages.some((p) => resolve(dirname(path), p) === REPO || p === REPO || /pi-swarm|swarm-pi/i.test(p));
-  report("this checkout is in settings.packages", listed, listed ? packages.find((p) => resolve(dirname(path), p) === REPO || /pi-swarm|swarm-pi/i.test(p)) : `packages: ${packages.length ? packages.join(", ") : "(none)"}`, `pi install ${REPO}   # or pi install git:github.com/cloverinternational/swarm-pi@<tag>`);
+  const listed = packages.some((p) => resolve(dirname(path), p) === REPO || p === REPO || /pi-swarm|swarm-pi|trebol/i.test(p));
+  report("this checkout is in settings.packages", listed, listed ? packages.find((p) => resolve(dirname(path), p) === REPO || /pi-swarm|swarm-pi|trebol/i.test(p)) : `packages: ${packages.length ? packages.join(", ") : "(none)"}`, `pi install ${REPO}   # or pi install git:github.com/cloverinternational/trebol@<tag>`);
 }
 
 checkToolchain();
