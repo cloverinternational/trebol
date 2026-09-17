@@ -14,6 +14,7 @@
       "paseo.ts",
       "research-tools.ts",
       "swarm-monitor.ts",
+      "swarm-websearch.ts",
       "swarm-goal.ts",
       "swarm-agent-tools.ts",
       "swarm-background-bash.ts",

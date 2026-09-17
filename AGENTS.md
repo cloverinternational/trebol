@@ -229,7 +229,7 @@ belongs in `packages/policy/policy`, and rendering belongs in the extension/rend
 | Session wake-up delivery | `.pi/lib/runtime/session-wakeup.ts` | Background-agent completion and swarm-goal share custom-message delivery with triggerTurn, generation guards, and shutdown invalidation. No runtime imports from vendor. |
 | `vault_add`, `vault_approve`, `vault_exec`, `vault_list`, `vault_two_person_status` | `.pi/extensions/30-tools/swarm-history-vault-tools.ts` | `.pi/lib/tools/swarm-vault-tools.ts`; never expose secret values. |
 | `vault` | `.pi/extensions/30-tools/vault.ts` | `.pi/lib/tools/swarm-vault-tools.ts`; transparent global credential storage, with explicit user-risk warning. |
-| `mcp__<server>__<tool>` | `.pi/extensions/00-runtime/swarm-runtime.ts` / `packages/tools/mcp/src/index.ts` | `packages/tools/mcp/src/index.ts`; manifests, allowlists, transport, and auth are the seam. |
+| `mcp__<server>__<tool>` | `.pi/extensions/00-runtime/swarm-runtime.ts`, `.pi/extensions/30-tools/swarm-websearch.ts` / `packages/tools/mcp/src/index.ts` | Provider-neutral declared MCP bridge; manifests, allowlists, transport, and auth are the seam. |
 | `annoyed` | `.pi/extensions/30-tools/annoyed/index.ts` | `.pi/extensions/30-tools/annoyed/store.ts`; issue persistence is separate from the nudge hook. |
 
 Model-facing workflow wording is adapted by
