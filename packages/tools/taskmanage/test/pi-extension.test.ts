@@ -195,7 +195,7 @@ describe("root Pi TaskManage extension", () => {
     expect(result.systemPrompt.match(/You are an expert software engineering assistant/g)).toHaveLength(1);
     expect(result.systemPrompt).toContain("<current_working_directory>/workspace/project</current_working_directory>");
     // Re-processing an already assembled Forge prompt is idempotent.
-    await expect(handler({ systemPrompt: result.systemPrompt }, { hasUI: true })).resolves.toMatchObject({ systemPrompt: expect.any(String) });
+    await expect(handler({ systemPrompt: result.systemPrompt }, { hasUI: true })).resolves.toBeUndefined();
     // Headless Pi (`pi -p`) now uses the same Forge/delegation prompt as the
     // TUI; it remains headless only by omitting interactive swarm-flow text.
     const headless: any = await handler({ systemPrompt: "base", systemPromptOptions: { cwd: "/workspace/project" } }, { hasUI: false });
