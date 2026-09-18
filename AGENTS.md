@@ -188,8 +188,8 @@ When changing discovery, preserve these invariants:
 | `10-context` | `autogenskills`, `prompt-context-configure`, `swarm-plan-mode`, `swarm-prompt`, `swarm-skills`, `swarm-thinking`, `system-inspector`, `system-prompts` |
 | `20-policy` | `swarm-disk-hooks` |
 | `30-tools` | `annoyed/`, `codemode`, `control-task-tools`, `exa-search`, `history-search`, `ask-user/`, `paseo`, `research-tools`, `swarm-goal`, `swarm-agent-tools`, `swarm-background-bash`, `swarm-bash`, `swarm-fs-tools`, `swarm-history-vault-tools`, `swarm-search`, `taskmanage`, `vault` |
-| `40-state` | `memory-history`, `knowledge-enrichment`, `swarm-conversation-metadata` |
-| `50-ui` | `control-panel`, `conversation-metrics`, `swarm-themes`, `swarm-tools-status`, `swarm-btw`, `swarm-image-paste` |
+| `40-state` | `memory-history`, `knowledge-enrichment`, `jev-knowledge-audit`, `memory-maintenance`, `swarm-conversation-metadata` |
+| `50-ui` | `control-panel`, `supervisor`, `conversation-metrics`, `swarm-themes`, `swarm-tools-status`, `swarm-btw`, `swarm-image-paste` |
 
 The list in each layer's `package.json` is authoritative; this table mirrors
 it. Adding an extension means adding the file *and* its manifest entry.
@@ -276,7 +276,7 @@ is unfinished. `.pi/lib/state/knowledge-store.ts` and
 `.pi/lib/context/knowledge-capture.ts` are tested integration components. Bootstrap now uses
 `knowledge-recall.ts` to project verified durable records into cited PageIndex
 reads; candidate records are excluded, storage failure is distinct from no match,
-and recall currently scans at most 100 records per scope. `memory_history` supports `get` by scoped ID and status-filtered search for
+and recall now ranks all current scoped records from a single event-log projection before applying the response cap. `memory_history` supports `get` by scoped ID and status-filtered search for
 candidate review. Review instructions require source evidence and later
 corrections before revision-checked verification; extraction alone is not proof.
 New non-session `memory_history` writes now use this store; legacy records remain
@@ -513,3 +513,223 @@ unknown IDs and unavailable evidence reject completion. Reference availability
 is not semantic verification. Legacy questionless tasks remain compatible.
 Bootstrap carries questions into task proposals and committed operations. No
 separate question lifecycle or follow-up tool-call limit is introduced.
+
+## Jev first-finder knowledge audit (opt-in)
+
+`/jev-audit on|off|status|now` controls the session audit; environment
+`PI_SWARM_JEV_AUDIT=on` enables it initially. `TYPESAFE_API_KEY` is resolved from the environment first, then the exact vault
+credential `typesafe-api-key` through the existing internal resolver (never tool
+parameters). `PI_SWARM_JEV_CREDENTIAL_ID` overrides the ID;
+`PI_SWARM_JEV_VAULT=off` disables fallback. Values are never put in audit evidence. The state-layer adapter
+`.pi/extensions/40-state/jev-knowledge-audit.ts` counts completed Pi turns and
+audits at the next turn start after five new turns, and on agent_end for final evidence. Stop audits process one bounded batch and never wake the agent; remaining backlog is retained. Domain collection/API/review
+logic is in `.pi/lib/context/jev-knowledge-audit.ts`; mode coordination lives in
+`jev-audit-mode.ts`. Persisted `pi-swarm-jev-audit` entries hold cursor/count and
+bounded redacted pending review; `pi-swarm-jev-review` context messages are
+untrusted proposals, injected once without a wake-up turn.
+
+Jev is the first classifier, not a generator or verifier. At most three bounded
+new excerpts per audit are routed as memory, procedure, mixed, temporary, unresolved,
+or noise. Backlog remains for later audits. Main agent review and existing
+revision-checked memory_history/SkillManage tools own all actual writes. Skills
+are audited only when their visible invocation/view output is encountered; no
+whole-library automatic scan or rewrite. Mandatory instructions are not removed.
+
+Existing generative knowledge-enrichment capture defers while Jev is enabled;
+off preserves its old behavior. A three-second deadline, session cancellation,
+child suppression, exact citations and bounded request/response protect the loop.
+API failure keeps evidence retryable and never blocks ordinary work. Missing
+compacted cursors pause audit rather than guessing. `/jev-audit now` queues review
+for the next model context; it does not start a new turn. Reload/new session is
+required to load newly installed extension code.
+
+Focused validation: `npx vitest run .pi/test/context/jev-knowledge-audit.test.ts
+.pi/test/state/jev-knowledge-audit.test.ts .pi/test/state/knowledge-enrichment.test.ts`.
+Live API test is opt-in: `PI_SWARM_JEV_LIVE_TEST=1 npx vitest run
+.pi/test/context/jev-live.test.ts` with the key in the environment.
+
+## Budgeted Jev-triggered memory maintenance
+
+Enable `/jev-audit on` then `/memory-worker on`. `/memory-worker off|status`
+controls the parent-session queue. Defaults: one worker at a time, up to four
+queued Jev packets, six new child model turns, 90-second wall deadline. The main
+agent remains free to work. No Harbor or global memory/skill edits are involved.
+
+`.pi/extensions/40-state/memory-maintenance.ts` owns queue/cancellation/receipts;
+`.pi/lib/context/memory-maintenance-runner.ts` snapshots the active visible branch
+and invokes actual Pi `--fork` into a separate child session. Snapshots are
+redacted, omit reasoning, preserve source IDs, are capped at 2MB, and remain under
+ignored `.pi/agent-sessions/` for evidence links. No parent branch switch occurs.
+The child loads only `.pi/lib/state/memory-maintenance-worker.ts`, with no normal
+extensions/tools. Its allowlist is `memory_evidence` and restricted `memory_history`.
+
+The worker must search first, read cited snapshot evidence before verified writes,
+and use expectedRevision for corrections. Repository/worktree only; global/session
+writes, deletion, nested agents, shell, code edits and SkillManage are unavailable.
+Verified status is attributed agent judgment, not proof from Jev. Procedure findings
+remain unresolved skill proposals rather than autonomous skill edits. Cancellation
+revokes a write lease and terminates the subprocess; completed prior writes remain
+valid history. Interrupted/failed runs may contain partial writes: inspect before
+retrying. A filesystem lease check is not a cross-process transactional barrier.
+
+`.pi/lib/context/memory-query-budget.ts` tracks successful repository/worktree
+`memory_history` search/get/replay calls by ID and result. Successful empty lookup
+counts; failures, writes and other scopes/tools do not. After ten completed main
+turns without lookup, one soft reminder is injected. It rearms on successful lookup
+or a new interactive/RPC input; it never blocks tools or starts a new turn.
+
+Worker completion is a bounded operation receipt at the next natural context
+boundary, not an unsolicited continuation. Jev packets are reviewed by the worker
+when enabled, otherwise by the main agent. Session replacement cancels stale work.
+Reload may restart an interrupted queued item; store dedup/CAS limit repeated writes.
+
+Validation: focused `memory-maintenance*` and `memory-query-budget` Vitest tests;
+`node tools/experiments/jev-audit/memory-worker-smoke.mjs` exercises real installed
+Pi fork/evidence/write/query against a local scripted provider and isolated store.
+It does not establish unscripted reviewer accuracy or quality improvements.
+
+### Staged historical review mapping
+
+`tools/experiments/jev-backfill/project_mapping.py` uses the existing Git-common-dir
+repository/worktree identity; missing workspaces remain unresolved. Explicit alias
+files are reviewable mapping evidence, never guessed from names. `review_staged.py`
+uses the restricted memory worker with an explicit staging store, fixed six-turn/
+90-second limits, and durable max-ten-job reservation ledger. No live promotion.
+Memory maintenance uses namespace `default` only so bootstrap can discover results;
+project isolation is provided by repository/worktree identity, not model-invented
+namespaces. See `docs/reference/jev-backfill-project-review.md` for references,
+current pilot counts, provenance, and unresolved coverage limits.
+
+### Operational supervisor (initial opt-in slice)
+
+`/jev-supervisor on|off|status` adds bounded work-freshness and review-need questions
+to Jev's existing call. Findings go to the independent memory worker when enabled.
+Worker tools now additionally expose `supervisor_review` (confirm/reject/insufficient
+with read evidence) and `supervisor_task_proposal` (proposal only). Parent-owned
+reconciliation in `.pi/lib/context/supervisor-task-reconcile.ts` requires
+`PI_SWARM_SUPERVISOR_TASK_APPLY=on`, current snapshot validation, active TaskManage,
+and existing policy hooks. No completion/deletion or vault permission changes.
+
+Jev and maintenance adapters share mode/dispatch by exact session identity, not
+ExtensionAPI object identity. Autogen writes a fresh state entry on session_compact;
+this does not reset budgets. Full live compaction/reviewer reconciliation still
+needs dogfood. Skill cleanup remains an isolated preview, not a global migration.
+See `docs/architecture/jev-operational-supervisor.md` for explicit unfinished seams.
+
+Credential references for memory are projected by
+`.pi/lib/context/vault-memory-evidence.ts` only from explicit vault-list results.
+Only ID, purpose/name, scope and kind are eligible; get/add/exec values and opaque
+message details are excluded from Jev evidence and maintenance snapshots. A listed
+credential is not proof of project usage or execution authorization. No new vault
+permissions or autonomous credential inventory scans are introduced.
+
+Maintenance review policy is loaded from
+`.pi/lib/context/prompts/memory-review-policy.md` (adapted evidence-prefix review
+from Dream-RSI Appendix B.2, not a replay simulator). The runner records its hash.
+Unscripted dogfood entry: `tools/experiments/jev-audit/dogfood-integrated.mjs`, using
+configured provider authentication and isolated fixture/memory/skill state.
+A headless parent can finish before maintenance completion is reconciled; persisted
+`running` alone is not proof of live work. Inspect actual receipts/store on recovery.
+
+## Unified Supervisor surface (supersedes earlier slash-command instructions)
+
+Use only `/supervisor` for Jev audit, operational review and memory-worker controls.
+`/jev-audit`, `/jev-supervisor`, `/memory-worker` registrations are removed, not aliases.
+`/supervisor status` reports sanitized settings and adapter status. The compact
+setWidget projection does not replace the single metrics-owned footer.
+
+UI adapter: `.pi/extensions/50-ui/supervisor.ts`; shared session control:
+`.pi/lib/context/supervisor-control.ts`; validated settings: `supervisor-settings.ts`.
+Global defaults: `~/.swarm/config/supervisor.json`. Per-project overrides:
+Git-common-dir `pi-swarm/supervisor.json`, or non-Git `.swarm/supervisor.json`.
+Explicit project false overrides global true. No secret values accepted in settings.
+
+Jev credential auto resolution: configured TypeSafe provider via Pi model registry,
+then named environment variable, then named vault credential. Explicit provider/env/
+vault modes do not fall back to other sources. Default references: `typesafe`,
+`TYPESAFE_API_KEY`, `typesafe-api-key`. Endpoint remains fixed TypeSafe HTTPS.
+Reviewer inherits current session model or configured provider/model override.
+
+Panel changes apply to loaded audit/worker adapters. Pause cancels active work and
+clears pending proposals. Worker caps remain at most6turns/90s; cadence1–50turns.
+Connection test is explicit paid bounded call; credential presence is not health.
+Skill mutation remains preview-only in this panel; no fake enable switch.
+Existing session enabled entries no longer override persisted settings. Legacy
+PI_SWARM_JEV_AUDIT=on boot flag applies only when no global/project master setting
+exists. New code needs reload. Tests: supervisor-settings, jev-credential, UI
+supervisor, and audit/maintenance lifecycle suites.
+
+### Task enforcement correction
+
+The canonical TaskManage hook pipeline now defaults to `block`, not `off`:
+acting tools require a focused in-progress task; TaskManage, planning, interaction,
+skill and read-only recovery paths remain available. The secondary coordinator
+stays silent to avoid duplicate hooks. Explicit hook-off policy remains honored.
+`node tools/experiments/jev-audit/task-enforcement-smoke.mjs` proves actual Pi
+blocked write -> TaskManage create -> successful write in a temporary workspace.
+
+Supervisor operational-review settings now also control reviewed parent task
+application; the hidden PI_SWARM_SUPERVISOR_TASK_APPLY flag is no longer required.
+Independent confirmation, live snapshot checks and owning TaskManage hooks remain
+mandatory. Project `enabled:false` still disables audit/worker, not the normal
+task-enforcement hooks. Reload is required for already-running sessions.
+
+### Durable skill-budget enforcement
+
+Autogen `gateTool` enforcement no longer depends on `modelContext`: disabling
+manager-generated prose in the Pi adapter does not disable execution gating.
+In auto mode, after task focus, the durable manager charges non-exempt calls
+(including Bash), blocks the next call at5 onboarding/90 working calls, and
+resets through actual successful Skill invocation. SkillManage list/view alone
+cannot refill this budget. Recovery/task/interaction/read tools remain exempt.
+Existing runtime lifecycle nudges still run; this fix does not consolidate their
+separate advisory counters. Explicit autogen manual/off modes remain distinct.
+Verify real host: `node tools/experiments/jev-audit/skill-budget-smoke.mjs`.
+
+### Human handoff on unfinished stop
+
+ask_user_question no longer auto-dismisses. Legacy timeout input is accepted but
+ignored on text, overlay and fallback dialog paths; explicit user cancellation,
+abort and shutdown remain distinct. No default answer is synthesized.
+
+After observed work and a normal stop, taskmanage's canonical turn_end hook now
+considers unowned pending/in-progress tasks (including blocked tasks), reconciles
+actual progress, and instructs one ask_user_question call about remaining work.
+A prose question alone does not replace the tool. The once-per-external-request
+allowance, abort/error/user-interaction/background-work/shutdown and plan/child
+suppression remain. No auto-completion, deletion, or infinite continuation.
+Headless unavailable interaction must be reported with pending tasks retained.
+
+### Bootstrap task-first recovery
+
+Bootstrap now establishes an active task before fallible model consultation, or
+reuses the existing active task. It commits validated task reconciliation by default;
+legacy commitTasks is accepted but no longer disables task creation. Deterministic
+request keys avoid duplicate seed tasks on retry. Model failure does not prove
+bootstrap readiness; it leaves the created task and a visible error for recovery.
+
+The memory ceremony exempts TaskManage and normalized ask_user_question/ask_user
+interaction names, plus bootstrap and plan controls. Other gates still apply.
+Bootstrap renderer falls back for empty details rather than printing undefined.
+This renderer fix alone does not diagnose why a particular provider consultation
+failed. Reload required; inspect the returned explicit bootstrap failure if it persists.
+
+### Temporary runtime review logs
+Bootstrap and Jev write bounded metadata under the active Git worktree root's
+`.swarmpi/execution/` and `.swarmpi/jev/` (cwd for non-Git projects). Bootstrap
+records correlated starts/stages/results/failure stage, selected memory IDs and
+skills/task mappings. Jev records attempt/outcome counts, not raw evidence or
+credentials. Best-effort writes must never break execution. Seven-day retention
+on next write, 500 files/category, 32KiB/file. Gitignored, safe to delete; logs are
+not memory and do not backfill earlier runs. Reload required for instrumentation.
+
+### Memory capture quality, first curation batch
+Lifecycle capture supplies project identity and a bounded sample of existing
+records to discourage semantic duplicates. Its prompt excludes transient execution
+history and asks for explicit project ownership. These are model guidance, not a
+semantic enforcement guarantee. Saved candidates emit metadata receipts under
+.swarmpi/execution. Restricted reviewer policy uses the same durability filter.
+First code-reviewed worktree records document verified-only recall and the exact
+supervisor configuration location; tools/experiments/memory-curation/save-reviewed.ts
+writes them through the canonical store and checks production recall. This does not
+bulk-clean existing candidates, enable supervisor, or certify unrelated records.

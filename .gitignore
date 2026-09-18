@@ -17,3 +17,6 @@ artifacts/
 # Pi project-scope package installs (pi install -l)
 .pi/git/
 .pi/npm/
+
+# Temporary runtime diagnostics (not project memory)
+.swarmpi/
