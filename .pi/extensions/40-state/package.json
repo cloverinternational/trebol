@@ -6,6 +6,8 @@
     "extensions": [
       "memory-history.ts",
       "knowledge-enrichment.ts",
+      "jev-knowledge-audit.ts",
+      "memory-maintenance.ts",
       "swarm-conversation-metadata.ts"
     ]
   }

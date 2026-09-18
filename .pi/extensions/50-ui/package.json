@@ -5,6 +5,7 @@
   "pi": {
     "extensions": [
       "control-panel.ts",
+      "supervisor.ts",
       "conversation-metrics.ts",
       "swarm-themes.ts",
       "swarm-tools-status.ts",
