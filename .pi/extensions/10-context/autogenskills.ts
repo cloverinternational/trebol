@@ -1,3 +1,4 @@
+import { registerSupervisorBudget } from "../../lib/context/supervisor-live-state.ts";
 import { registerAutoSkills, type Config } from "../../../packages/context/autogenskills/src/index.ts";
 import { fileURLToPath } from "node:url";
 import { join, resolve } from "node:path";
@@ -71,7 +72,7 @@ export function registerAutoSkillsExtension(pi: any, options: AutoSkillsExtensio
     }
     : undefined);
   const registrationPi = new Proxy(pi, { get(target, key) { if (key === "registerTool") return (tool: any) => { registerBootstrapHandoff(tool); target.registerTool(tool); }; const value = target[key]; return typeof value === "function" ? value.bind(target) : value; } });
-  return registerAutoSkills(registrationPi, {
+  const manager = registerAutoSkills(registrationPi, {
     ...options,
     budgetWidget: undefined,
     // Model-visible budget blocks and skill-review nudges are emitted by the
@@ -89,6 +90,9 @@ export function registerAutoSkillsExtension(pi: any, options: AutoSkillsExtensio
       return { skill: skill.name, version: skill.source === "autogen" ? "autogen" : "external", path: skill.filePath, instructions: skill.instructions, text: skill.text };
     },
   });
+  pi.on("session_start", (_event:unknown,ctx:any)=>registerSupervisorBudget(ctx,()=>manager.budgetStatus()));
+  pi.on("session_switch", (_event:unknown,ctx:any)=>registerSupervisorBudget(ctx,()=>manager.budgetStatus()));
+  return manager;
 }
 
 export default function autogenskillsExtension(pi: any) {

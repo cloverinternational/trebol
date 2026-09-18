@@ -32,3 +32,12 @@ describe("over-budget tool_call probe", () => {
     expect(manager.budgetStatus().used).toBe(3);
   });
 });
+
+it("modelContext false suppresses prose, not the durable execution budget",()=>{
+ const manager=new AutoSkillManager({mode:"auto",modelContext:false,dir:mkdtempSync(join(tmpdir(),"autogen-no-prose-")),toolCallBudget:2});
+ manager.observeTool(true,"TaskManage",{status:"in_progress",active:true});
+ manager.observeToolAttempt("bash",{},"one");manager.observeToolAttempt("bash",{},"two");
+ expect(manager.gateTool("bash",{})).toMatchObject({block:true});
+ manager.observeTool(true,"SkillManage",{action:"list"},"list");expect(manager.gateTool("bash",{})).toMatchObject({block:true});
+ manager.observeTool(true,"Skill",{skill:"reviewed-skill"},"invoke");expect(manager.gateTool("bash",{})).toBeUndefined();
+});

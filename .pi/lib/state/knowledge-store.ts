@@ -136,6 +136,14 @@ export class KnowledgeStore {
   delete(id: string, expectedRevision: string): void { requireId(id); if (this.scope === "global" && !this.options.allowGlobal) throw new Error("Global knowledge mutation requires explicit approval"); this.lock(() => { const old = this.current().get(id); if (!old || old.deleted || old.revision !== expectedRevision) throw new Error("Expected revision does not match"); const now = new Date().toISOString(), revision = digest(id + now); this.append({ type: "tombstone", record: { ...old, deleted: true, updatedAt: now, revision }, revision, at: now }); }); }
   private append(event: KnowledgeEvent) { validateEvent(event); requireId(event.record.id); const count = this.events().length; const file = join(this.directory, `${String(count).padStart(16, "0")}-${event.record.id}.json`), tmp = `${file}.${randomUUID()}.tmp`; writeFileSync(tmp, JSON.stringify(event), { flag: "wx", mode: 0o600 }); renameSync(tmp, file); }
   read(id: string): KnowledgeRecord | undefined { requireId(id); const record = this.current().get(id); return record && !record.deleted ? record : undefined; }
+  /** Capture one consistent projection of the event log. Callers may paginate
+   * this array without rereading (and potentially mixing) later events. */
+  snapshot(): KnowledgeRecord[] { return [...this.current().values()]; }
+  page(snapshot: readonly KnowledgeRecord[], offset = 0, limit = 50): KnowledgeRecord[] {
+    const start = Math.max(0, offset), count = Math.max(0, limit);
+    return snapshot.filter(x => !x.deleted).slice(start, start + count);
+  }
+  listPage(snapshot: readonly KnowledgeRecord[], offset = 0, limit = 50): KnowledgeRecord[] { return this.page(snapshot, offset, limit); }
   list(limit = 50): KnowledgeRecord[] { return [...this.current().values()].filter(x => !x.deleted).slice(0, Math.min(MAX_READ, Math.max(0, limit))); }
   sources(limit = 50): PageIndexSource[] { return this.list(limit).map(r => ({ id: r.id, title: r.text.slice(0, 100), section: r.kind, text: r.text, revision: r.revision, status: r.status, evidence: r.evidence })); }
   readSource(id: string, maxChars = 4000): PageIndexSource | undefined { const r = this.read(id); return r && { id: r.id, title: r.text.slice(0, 100), section: r.kind, text: r.text.slice(0, Math.max(0, Math.min(maxChars, 20_000))), revision: r.revision, status: r.status, evidence: r.evidence }; }

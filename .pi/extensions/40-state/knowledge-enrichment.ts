@@ -1,3 +1,5 @@
+import { executionLog } from "../../lib/context/execution-log.ts";
+import { jevAuditEnabled, bindJevAuditMode } from "../../lib/context/jev-audit-mode.ts";
 import { captureEvidence, knowledgeCapturePrompt, parseKnowledgeCandidates } from "../../lib/context/knowledge-capture.ts";
 import { consultWithPi } from "../../lib/context/context-consult.ts";
 import { openKnowledgeStore } from "../../lib/state/knowledge-store.ts";
@@ -19,7 +21,7 @@ export default function knowledgeEnrichment(pi: any): void {
   let status = "idle";
   const invalidate = () => { generation++; controller?.abort(); controller = undefined; busy = undefined; };
   pi.on("session_start", (_event: unknown, ctx: any) => {
-    invalidate(); cursor = undefined; status = "idle";
+    invalidate(); bindJevAuditMode(pi,ctx); cursor = undefined; status = "idle";
     const entries = ctx.sessionManager?.getBranch?.() ?? ctx.sessionManager?.getEntries?.() ?? [];
     const saved = [...entries].reverse().find((entry: any) => entry.type === "custom" && entry.customType === ENRICHMENT_ENTRY && entry.data?.version === 1);
     if (typeof saved?.data?.cursor === "string") cursor = saved.data.cursor;
@@ -36,7 +38,7 @@ export default function knowledgeEnrichment(pi: any): void {
     },
   });
   const run = (ctx: any): Promise<void> => {
-    if (!enabled || process.env.PI_SWARM_SUBAGENT === "1") return Promise.resolve();
+    if (jevAuditEnabled(pi) || !enabled || process.env.PI_SWARM_SUBAGENT === "1") return Promise.resolve();
     if (busy) return busy;
     const ownGeneration = generation;
     const ownController = new AbortController(); controller = ownController;
@@ -47,18 +49,19 @@ export default function knowledgeEnrichment(pi: any): void {
         if (batch.status === "cursor-missing") { status = "cursor-missing: capture paused"; return; }
         if (!batch.evidence.length) return;
         status = "extracting";
-        const response = await consultWithPi(pi, { prompt: knowledgeCapturePrompt(batch.evidence), cwd: ctx.cwd, model: ctx.model, signal: ownController.signal, generation: ownGeneration, currentGeneration: () => generation });
+        const response = await consultWithPi(pi, { prompt: knowledgeCapturePrompt(batch.evidence, ctx.cwd, ["repository", "worktree"].flatMap(scope => openKnowledgeStore({ cwd: ctx.cwd, scope: scope as "repository" | "worktree" }).snapshot().filter(r => !r.deleted).slice(-40).map(r => ({ id: r.id, text: r.text.slice(0, 500) })))), cwd: ctx.cwd, model: ctx.model, signal: ownController.signal, generation: ownGeneration, currentGeneration: () => generation });
         if (response.status !== "completed") { if (generation === ownGeneration) status = response.status; return; }
         const candidates = parseKnowledgeCandidates(JSON.stringify(response.value), batch.evidence);
-        if (ownController.signal.aborted || generation !== ownGeneration) return;
+        if (ownController.signal.aborted || generation !== ownGeneration || jevAuditEnabled(pi)) return;
         const session = String(ctx.sessionManager?.getSessionFile?.() ?? "session");
         for (const candidate of candidates) {
           // Do not persist large raw evidence excerpts; IDs resolve back to the
           // original transcript. Partial retries deduplicate identical facts.
-          openKnowledgeStore({ cwd: ctx.cwd, scope: candidate.scope }).put({
+          const record = openKnowledgeStore({ cwd: ctx.cwd, scope: candidate.scope }).put({
             text: candidate.text, tags: [candidate.title], status: "candidate",
             evidence: candidate.evidenceIds.map(id => ({ ref: `${session}#${id}` })), source: "lifecycle-extraction",
           });
+          executionLog(ctx.cwd, "execution", "memory-candidate-saved", {recordId:record.id, revision:record.revision, scope:record.scope, evidenceIds:candidate.evidenceIds});
         }
         pi.appendEntry(ENRICHMENT_ENTRY, { version: 1, cursor: batch.cursor, candidateCount: candidates.length });
         cursor = batch.cursor; status = candidates.length ? `captured ${candidates.length} candidates` : "no new knowledge";

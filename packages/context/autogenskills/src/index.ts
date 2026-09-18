@@ -158,7 +158,8 @@ export class AutoSkillManager {
   metrics(): Metrics { return { turns: this.state.turns, toolCalls: this.state.toolCalls, errors: this.state.errors, resolved: this.state.resolved, nudges: this.state.nudges, nudgeIgnores: this.state.nudgeIgnores, reviews: this.state.reviews, mutations: this.state.mutations, skilled: this.state.skilled, budgetCalls: this.state.budgetCalls, reviewRequired: this.state.reviewRequired }; }
   activeSkillName(): string | undefined { return this.state.activeSkill && !this.state.skills[this.state.activeSkill]?.archived ? this.state.activeSkill : undefined; }
   rehydrate(entries: readonly unknown[]) { this.state = defaultState(); const e = [...entries].reverse().find((x: any) => x?.type === "pi-swarm-autogen-state" || x?.type === "custom" && x?.customType === "pi-swarm-autogen-state") as SkillEntry | undefined; if (e?.data) this.restore(e.data); this.mergeCuratorState(); }
-  private commit() { this.persist?.({ type: "pi-swarm-autogen-state", data: this.snapshot() }); }
+  commit() { this.persist?.({ type: "pi-swarm-autogen-state", data: this.snapshot() }); }
+  resetCallDeduplication() { this.chargedCalls.clear(); }
   private curatorStatePath() { return join(this.config.dir, ".history", "curator-state.json"); }
   private mergeCuratorState() {
     const path = this.curatorStatePath();
@@ -1093,7 +1094,7 @@ export class AutoSkillManager {
     // Bash has no command-level exemption. Every Bash invocation counts.
   }
   gateTool(toolName: string, input: any = {}): { block?: true; message?: string; reason?: string } | undefined {
-    if (this.config.mode !== "auto" || !this.config.modelContext) return;
+    if (this.config.mode !== "auto") return;
     const n = String(toolName ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
     if (!n || this.isExempt(toolName, input)) return;
     // No Bash command filter: even read-only Bash calls are budgeted.
@@ -1281,11 +1282,22 @@ export function registerAutoSkills(pi: any, config: Config = {}) {
     curator.idle();
     return nudge ? { message: nudge } : undefined;
   });
+  register("session_compact", (_e: any, ctx: any) => {
+    // Compaction removes the old prefix of the session tree. Re-append the
+    // reducer state after Pi has committed the compaction so budget usage and
+    // review gates survive the next branch reload. Do not clear chargedCalls:
+    // a late duplicate event from the pre-compaction turn is still a duplicate.
+    manager.commit();
+    updateBudgetWidget(ctx);
+  });
   register("session_start", (_e: any, ctx: any) => {
     // getEntries() includes the whole session tree and can resurrect state
     // from a sibling branch. Only the active branch is authoritative.
     const branch = ctx.sessionManager?.getBranch?.();
     manager.rehydrate(Array.isArray(branch) ? branch : []);
+    // A new session may legitimately reuse a tool-call id; deduplication is
+    // scoped to one session, while rehydrate restores the durable counters.
+    manager.resetCallDeduplication();
     updateBudgetWidget(ctx);
     installFooter(ctx);
     curator.idle();

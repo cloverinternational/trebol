@@ -33,3 +33,9 @@ it("rejects invented citations and global promotion and never trusts a model's v
   expect(() => parseKnowledgeCandidates(JSON.stringify({ candidates: [{ ...candidate, evidenceIds: ["invented"] }] }), evidence)).toThrow();
   expect(knowledgeCapturePrompt(evidence)).toContain("do not infer personal traits");
 });
+
+it("provides ownership and duplicate context without promoting candidates",()=>{
+ const prompt=knowledgeCapturePrompt([],"/project",[{id:"known",text:"Existing fact"}]);
+ expect(prompt).toContain("PROJECT OWNERSHIP");expect(prompt).toContain("branch listings");
+ expect(prompt).toContain("Existing fact");expect(prompt).toContain("do not label them verified");
+});
