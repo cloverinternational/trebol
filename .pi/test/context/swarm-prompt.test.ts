@@ -27,6 +27,7 @@ describe("Forge prompt assembly", () => {
     expect(result.prompt.startsWith("<system_information>\n<operating_system>")).toBe(true);
     expect(result.prompt.indexOf("## Core Principles:")).toBeLessThan(result.prompt.indexOf("# Delegation (the Task tool)"));
     expect(result.prompt).toContain(MAIN_REPORTING_DIRECTIVE);
+    expect(result.prompt).toContain("# Conversation startup\nWhen starting a conversation, call bootstrap first, then use TaskManage.");
     expect(result.prompt.indexOf(MAIN_REPORTING_DIRECTIVE)).toBeLessThan(result.prompt.indexOf("# Delegation (the Task tool)"));
     expect(result.prompt).toContain("<swarmos_cached_context>\nAs you answer the user's questions, you can use the following context:\n<context name=\"agentsMd\">\nworkspace instructions\n</context>");
     expect(result.prompt).toContain("stay in workspace");

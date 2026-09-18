@@ -27,6 +27,9 @@ export { UPSTREAM_SOURCE, forgeSwarmSystemPrompt, swarmForgeSystemPrompt };
  */
 export const MAIN_REPORTING_DIRECTIVE = `[REPORTING DIRECTIVE]
 
+# Conversation startup
+When starting a conversation, call bootstrap first, then use TaskManage.
+
 For every substantive final response, produce an evidence-based structured report:
 
 1. Outcome — answer the user's question or state exactly what changed.

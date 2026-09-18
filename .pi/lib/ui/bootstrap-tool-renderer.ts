@@ -1,3 +1,4 @@
+import { redactKnowledge } from "../state/knowledge-store.ts";
 /** Presentation-only renderer for the streaming bootstrap tool.
  *
  * The bootstrap tool owns execution and emits `BootstrapToolDetails` through
@@ -36,6 +37,8 @@ export interface BootstrapToolDetails {
   citations?: BootstrapCitation[];
   /** Set by the tool when the user requested expanded provenance. */
   showCitations?: boolean;
+  /** Final execution brief is visible even in collapsed/default mode. */
+  brief?: string;
 }
 
 export interface BootstrapRenderOptions {
@@ -75,7 +78,7 @@ export function formatBootstrapTool(details: BootstrapToolDetails | undefined, o
   const running = details.status === "running";
   const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
   const mark = running && details.elapsedMs !== undefined ? frames[Math.floor(details.elapsedMs / 250) % frames.length] : statusMark(details.status, running);
-  const stage = stageLabel[details.stage] ?? details.stage;
+  const stage = stageLabel[details.stage] ?? details.stage ?? (options.isPartial ? "starting" : "result unavailable");
   const bits = [`${mark} bootstrap · ${stage}`];
   if (details.mode) bits.push(details.mode);
   if (details.model) bits.push(details.model);
@@ -99,6 +102,7 @@ export function formatBootstrapTool(details: BootstrapToolDetails | undefined, o
   if ((options.expanded || details.showCitations) && details.citations?.length) {
     for (const citation of details.citations.slice(0, 8)) lines.push(`  ↳ ${citation.label}${citation.source ? `: ${citation.source}` : ""}`);
   }
+  if (details.brief) lines.push("", details.brief);
   return lines.join("\n");
 }
 
@@ -109,13 +113,19 @@ class BootstrapComponent {
   invalidate(): void {}
   render(width: number): string[] {
     const limit = Math.max(1, Number.isFinite(width) ? width : 80);
-    return this.value.split("\n").map((line) => line.length <= limit ? line : `${line.slice(0, Math.max(1, limit - 1))}…`);
+    return this.value.split("\n").flatMap(line => {
+      const chars = Array.from(line);
+      if (!chars.length) return [""];
+      const wrapped: string[] = [];
+      for (let i = 0; i < chars.length; i += limit) wrapped.push(chars.slice(i, i + limit).join(""));
+      return wrapped;
+    });
   }
 }
 
 export interface BootstrapToolRenderer {
   renderCall(args: { scope?: string } | undefined, theme?: unknown, context?: unknown): BootstrapComponent;
-  renderResult(result: { details?: BootstrapToolDetails; isError?: boolean }, options?: BootstrapRenderOptions, theme?: unknown, context?: unknown): BootstrapComponent;
+  renderResult(result: { details?: BootstrapToolDetails; isError?: boolean; content?: Array<{type: string; text?: string}> }, options?: BootstrapRenderOptions, theme?: unknown, context?: unknown): BootstrapComponent;
 }
 
 /** Factory for a tool definition. State is event-derived; it has no clock or side effects. */
@@ -128,6 +138,11 @@ export function createBootstrapToolRenderer(): BootstrapToolRenderer {
       // Each result belongs to one execution. Never reuse another call's
       // details: the renderer factory is shared across all tool rows.
       const details = result?.details;
+      if (!details?.stage) {
+        const text = (result?.content ?? []).filter(p => p.type === "text").map(p => p.text ?? "").join("\n");
+        if (text) return new BootstrapComponent(`${result.isError ? "✗ Bootstrap failed" : "Bootstrap · result (display metadata missing)"}\n${redactKnowledge(text)}`);
+        if (!options.isPartial) return new BootstrapComponent("! Bootstrap returned no displayable result. Completion is unknown. Check .swarmpi/execution/ for this run; an existing task does not prove bootstrap succeeded.");
+      }
       return new BootstrapComponent(formatBootstrapTool(details, { ...options, isError: options.isError || result?.isError }));
     },
   };

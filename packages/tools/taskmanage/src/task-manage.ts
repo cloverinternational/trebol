@@ -174,6 +174,32 @@ type RenderTask = {
   category?: Category;
   parent_id?: string;
   depends_on?: string[];
+  questions?: TaskQuestion[];
+  answers?: TaskAnswer[];
+};
+
+const questionSummary = (task: Pick<Task, "questions" | "answers">) => {
+  const questions = Array.isArray(task.questions) ? task.questions : [];
+  const ids = new Set<string>();
+  const valid = questions.filter(question => {
+    const ok = !!question && typeof question.id === "string" && question.id.trim() !== "" &&
+      typeof question.text === "string" && question.text.trim() !== "" && !ids.has(question.id);
+    if (ok) ids.add(question.id);
+    return ok;
+  });
+  const answers = Array.isArray(task.answers) ? task.answers : [];
+  const answered = new Set(answers.filter(answer => answer && typeof answer.question === "string" && ids.has(answer.question) &&
+    typeof answer.answer === "string" && answer.answer.trim() && typeof answer.evidence === "string" && answer.evidence.trim()).map(answer => answer.question));
+  return { total: valid.length, answered: answered.size, unresolved: valid.filter(question => !answered.has(question.id)), malformed: valid.length !== questions.length };
+};
+
+const renderQuestionLines = (task: Pick<Task, "questions" | "answers">, prefix: string, width: number, theme: RenderTheme): string[] => {
+  const summary = questionSummary(task);
+  if (!summary.total) return summary.malformed ? [truncate(`${prefix}? questions unavailable (malformed)`, width)] : [truncate(`${prefix}? acceptance questions missing — repair required`, width)];
+  const lines = [`${prefix}${summary.unresolved.length ? style(theme, "warning", "?") : style(theme, "success", "✓")} questions: ${summary.answered}/${summary.total} answered`];
+  for (const question of summary.unresolved.slice(0, 3)) lines.push(truncate(`${prefix}  ${question.id}: ${question.text}`, width));
+  if (summary.unresolved.length > 3) lines.push(truncate(`${prefix}  +${summary.unresolved.length - 3} more unresolved`, width));
+  return lines;
 };
 
 function taskRows(batch: Batch): { tasks: RenderTask[]; errors: string[] } {
@@ -240,7 +266,7 @@ export const taskManageRenderers = {
     if (!rows.tasks.length && !rows.errors.length)
       return component([`    ${dim(theme, "⎿")} ${dim(theme, "Tasks unchanged")}`]);
     return component(width => {
-      const lines = rows.tasks.map((task, index) => renderTaskResult(task, index === 0, width, theme));
+      const lines = rows.tasks.flatMap((task, index) => [renderTaskResult(task, index === 0, width, theme), ...renderQuestionLines(task, "      ", width, theme)]);
       for (const message of rows.errors) {
         const prefix = lines.length ? "      " : "    ⎿ ";
         lines.push(`${prefix}${style(theme, "error", "✗")} ${truncate(message, Math.max(0, width - displayWidth(prefix) - 2))}`);
@@ -277,29 +303,35 @@ function orderedOpenTasks(tasks: Task[]): Array<{ task: Task; depth: number }> {
 }
 
 export function taskWidgetRenderer(tasks: Task[], theme: RenderTheme): RenderComponent {
-  const current = tasks.filter(task => task.status !== "deleted");
-  const completed = current.filter(task => task.status === "completed").length;
-  const ordered = orderedOpenTasks(current);
+  const summary = taskFocusSummary(tasks);
   return component(width => {
-    const header = `Tasks   ${completed}/${current.length} done`;
-    const lines = [displayWidth(header) > width ? truncate(header, width) :
-      `${bold(theme, dim(theme, "Tasks"))}${dim(theme, `   ${completed}/${current.length} done`)}`];
-    for (const { task, depth } of ordered) {
-      const blocked = task.dependsOn.some(id => current.find(candidate => candidate.id === id)?.status !== "completed");
-      const glyph = task.active ? style(theme, "accent", "●") :
-        task.status === "in_progress" ? style(theme, "accent", "◐") :
-        blocked ? style(theme, "warning", "⧗") : dim(theme, "○");
-      const indent = `  ${"  ".repeat(depth)}`;
-      const badge = dim(theme, `[${categoryLetter(task.category)}]`);
-      const available = Math.max(0, width - displayWidth(indent) - 6);
-      const subject = truncate(task.subject, available);
-      lines.push(width <= displayWidth(indent) + 6
-        ? truncate(`${indent}${task.active ? "●" : task.status === "in_progress" ? "◐" : blocked ? "⧗" : "○"} [${categoryLetter(task.category)}]`, width)
-        : `${indent}${glyph} ${badge} ${task.active ? bold(theme, subject) : dim(theme, subject)}`);
+    const rows = [bold(theme,dim(theme,truncate(`Tasks  ${summary.completed}/${summary.completed+summary.open} done   /tasks`,width)))];
+    const task=summary.focus;
+    rows.push(task ? style(theme,"accent",bold(theme,truncate(`  ● #${task.id} ${task.subject}  Q ${summary.focusQuestions.answered}/${summary.focusQuestions.total}`,width))) : dim(theme,truncate("  ○ No task focused",width)));
+    if(task) {
+      if(!task.questions?.length) rows.push(style(theme,"warning",truncate("    ! Acceptance questions missing — repair required",width)));
+      for(const q of task.questions??[]) {
+        const answered=task.answers?.some(a=>a.question===q.id&&a.answer?.trim()&&a.evidence?.trim());
+        rows.push(style(theme,answered?"success":"warning",truncate(`    ${answered?"✓":"?"} ${q.id}: ${q.text}`,width)));
+      }
     }
-    return lines;
+    rows.push(dim(theme,truncate(summary.next ? `  ↳ Next #${summary.next.id} ${summary.next.subject}` : "  ↳ No unblocked next task",width)));
+    return rows;
   });
 }
+
+export const taskFocusSummary = (tasks: Task[], shortcut = "/tasks") => {
+  const current = tasks.filter(task => task.status !== "deleted");
+  const byId = new Map(current.map(task => [task.id, task]));
+  const blocked = (task: Task) => task.dependsOn.some(id => byId.get(id)?.status !== "completed");
+  const openTasks = current.filter(task => task.status === "pending" || task.status === "in_progress");
+  const focus = current.find(task => task.active && task.status === "in_progress");
+  const focusQuestions = focus ? questionSummary(focus) : { total: 0, answered: 0, unresolved: [], malformed: false };
+  const eligible = openTasks.filter(task => !blocked(task) && task.id !== focus?.id && !openTasks.some(child=>child.parentTaskId===task.id));
+  return { open: openTasks.length, blocked: openTasks.filter(blocked).length,
+    completed: current.filter(task => task.status === "completed").length,
+    focus, focusQuestions, next: eligible[0], remaining: eligible.length, shortcut };
+};
 
 export class TaskManager {
   private state: State = { nextId: 1, tasks: [], keys: {} };
@@ -462,7 +494,8 @@ export class TaskManager {
     if (op.category !== undefined && !CATEGORIES.includes(op.category)) return fail("validation_failed", `operation ${op.key}: invalid category ${op.category}`);
     if (op.priority !== undefined && !PRIORITIES.includes(op.priority)) return fail("validation_failed", `operation ${op.key}: invalid priority ${op.priority}`);
     if (op.status !== undefined && !["pending","in_progress","completed","deleted"].includes(op.status)) return fail("validation_failed", `operation ${op.key}: invalid status ${op.status}`);
-    if (op.op === "create" && op.status === "completed" && op.questions?.length) return fail("validation_failed", `operation ${op.key}: question-bearing tasks cannot be created completed`);
+    if (op.op === "create" && op.status === "completed") return fail("validation_failed", `operation ${op.key}: tasks must be created pending or in_progress and completed only after evidence-backed work`);
+    if (op.op === "create" && (!Array.isArray(op.questions) || op.questions.length === 0)) return fail("validation_failed", `operation ${op.key}: new tasks require 1..${MAX_TASK_QUESTIONS} task-specific acceptance questions`);
     if (op.noteType !== undefined && !NOTE_TYPES.includes(op.noteType)) return fail("validation_failed", `operation ${op.key}: invalid noteType ${op.noteType}`);
     if (op.limit !== undefined && (!Number.isInteger(op.limit) || op.limit < 1 || op.limit > 500)) return fail("validation_failed", `operation ${op.key}: limit must be 1..500`);
     if (op.offset !== undefined && (!Number.isInteger(op.offset) || op.offset < 0)) return fail("validation_failed", `operation ${op.key}: offset must be non-negative`);
@@ -507,17 +540,22 @@ export class TaskManager {
   }
   private completionError(task: Task, op: Operation): Failure | undefined {
     if (task.status === "completed" && op.questions !== undefined && (op.status === undefined || op.status === "completed")) return fail("validation_failed", "reopen task before changing questions");
-    if (op.status !== "completed" || !task.questions?.length) return;
+    if (op.status !== "completed" && op.status !== "in_progress") return;
+    if (!task.questions?.length) return fail("validation_failed", `task ${task.id} is a legacy questionless task; repair it with task-specific questions before resuming or completing`);
+    if (op.status !== "completed") return;
     if (op.questions !== undefined) return fail("validation_failed", "cannot replace or drop questions while completing a task");
     const answers = op.answers ?? [];
-    const ids = new Set(task.questions.map(q => q.id));
+    const ids = new Set<string>();
+    const malformed = task.questions.some(question => !this.validQuestion(question) || ids.has(question.id) || !ids.add(question.id));
+    if (malformed) return fail("validation_failed", `cannot complete task ${task.id}: task questions are malformed or duplicated. Re-read the task and repair questions before completing`);
     const seen = new Set<string>();
     for (const answer of answers) {
       if (seen.has(answer.question)) return fail("validation_failed", `duplicate answer for question id: ${answer.question}`);
       seen.add(answer.question);
       if (!ids.has(answer.question)) return fail("validation_failed", `unknown question id: ${answer.question}`);
     }
-    for (const question of task.questions) if (!seen.has(question.id)) return fail("validation_failed", `missing answer for question id: ${question.id}`);
+    const missing = task.questions.filter(question => !seen.has(question.id));
+    if (missing.length) return fail("validation_failed", `missing answers for question(s): ${missing.map(question => `${question.id} (${question.text})`).join("; ")}. Re-read the task, then retry with status:"completed" and answers:[{question:"<question id>",answer:"<truthful answer>",evidence:"path/to/file.md#Heading or path/to/file.ts#L1-L2"}] for every listed question; do not invent answers or evidence`);
     for (const answer of answers) if (answer.evidence && !this.resolveEvidence(answer.evidence)) return fail("validation_failed", `evidence reference is unavailable: ${answer.evidence}`);
   }
   private resolveEvidence(reference: string): boolean {
@@ -677,6 +715,8 @@ export class TaskManager {
     }
     const deps = [...task.dependsOn]; for (const r of op.addBlockedBy??[]) { const d=target(r); if(typeof d!=="string") return {key:op.key,op:op.op,status:"failed",error:d}; if(!this.find(d)) return {key:op.key,op:op.op,status:"failed",error:fail("not_found",`dependency task ${d} not found`)}; if(d===id || this.reaches(d,id)) return {key:op.key,op:op.op,status:"failed",error:fail("cycle",`dependency would create a cycle`)}; if(!deps.includes(d)) deps.push(d); }
     const resultingStatus = op.status ?? task.status;
+    if ((op.status === "in_progress" || op.active === true) && !(op.questions ?? task.questions)?.length)
+      return {key:op.key,op:op.op,status:"failed",error:fail("validation_failed",`task ${id} is a legacy questionless task; repair it with task-specific questions before resuming`)};
     if (resultingStatus === "in_progress") {
       for (const dependency of deps) {
         const dependencyTask = this.find(dependency);

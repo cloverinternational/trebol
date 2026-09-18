@@ -132,6 +132,7 @@ export class TaskEnforcementHook {
     if (this.mode === "off" || isSubAgent) return CONTINUE;
     const toolName = event.toolName;
     if (!toolName) return CONTINUE;
+    if (normalizeToolName(toolName) === "bootstrap") return CONTINUE;
     if (isPlanModeTool(toolName)) this.planModeUsed = true;
     if (isTaskManagementTool(toolName) || isPlanModeTool(toolName) || isSkillTool(toolName) || isUserInteractionTool(toolName) || isCodeModeTool(toolName)) return CONTINUE;
     if (isReadOnlyExplorationTool(toolName)) return CONTINUE;

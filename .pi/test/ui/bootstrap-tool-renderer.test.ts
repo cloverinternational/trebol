@@ -8,7 +8,7 @@ describe("bootstrap tool renderer", () => {
     const renderer = createBootstrapToolRenderer();
     renderer.renderResult({ details: { stage: "complete", status: "complete", scope: "private-repo" } });
     expect(renderer.renderResult({}).render(200).join("\n")).not.toContain("private-repo");
-    expect(renderer.renderResult({ isError: true }).render(200)[0]).toContain("✗");
+    expect(renderer.renderResult({ isError: true }).render(200)[0]).toContain("Completion is unknown");
     expect(formatBootstrapTool({ stage: "skills", status: "failed" }, { isPartial: true })).toContain("✗");
   });
   it("formats stages and distinguishes selected from loaded skills and committed tasks", () => {
@@ -39,4 +39,22 @@ describe("bootstrap tool renderer", () => {
     expect(final.render(200)[0]).toContain("✓");
     expect(final.render(12)[0].length).toBe(12);
   });
+});
+
+it("never renders undefined for empty partial or final details",()=>{
+ expect(formatBootstrapTool({} as any,{isPartial:true})).not.toContain("undefined");
+ expect(formatBootstrapTool({} as any,{})).toContain("result unavailable");
+});
+
+it("shows the verbose brief without expansion and wraps without losing text",()=>{
+ const brief="GOAL\nabcdefghijklmnopqrstuvwxyz\nTASKS & INSTRUCTIONS\nVerify the result.";
+ const renderer=createBootstrapToolRenderer();
+ const result={details:{stage:"complete",status:"complete",brief} as BootstrapToolDetails};
+ expect(renderer.renderResult(result,{expanded:false}).render(200).join("\n")).toContain(brief);
+ expect(renderer.renderResult(result).render(10).join("")).toContain("abcdefghijklmnopqrstuvwxyz");
+});
+
+it("surfaces actual error content when middleware drops details",()=>{
+ const r=createBootstrapToolRenderer().renderResult({details:{} as any,isError:true,content:[{type:"text",text:"Selector failed: api_key=secret-value"}]}).render(200).join("\n");
+ expect(r).toContain("Selector failed");expect(r).not.toContain("secret-value");expect(r).not.toContain("result unavailable");
 });

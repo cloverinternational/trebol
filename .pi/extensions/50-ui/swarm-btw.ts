@@ -27,6 +27,8 @@ export default function swarmBtw(pi: ExtensionAPI) {
 	let entries: Entry[] = [];
 	let view: BtwView | undefined;
 	let closeView: (() => void) | undefined;
+	let opening = false;
+	let overlayGeneration = 0;
 
 	async function ensureSide(ctx: ExtensionCommandContext): Promise<AgentSession | undefined> {
 		if (side) return side;
@@ -73,33 +75,69 @@ export default function swarmBtw(pi: ExtensionAPI) {
 		}
 		const session = await ensureSide(ctx);
 		if (!session) return;
-		active = { question, answer: "" };
+		const request = { question, answer: "" };
+		active = request;
 		view?.invalidate();
 		try {
 			await session.prompt(question, { source: "extension" });
+			if (active !== request) return;
 			const response = [...session.messages].reverse().find((message) => message.role === "assistant");
-			entries = [...entries, { question, answer: response ? contentText(response.content).trim() : active.answer, error: response?.stopReason === "error" ? response.errorMessage : undefined }].slice(-20);
+			entries = [...entries, { question, answer: response ? contentText(response.content).trim() : request.answer, error: response?.stopReason === "error" ? response.errorMessage : undefined }].slice(-20);
 		} catch (error) {
-			entries = [...entries, { question, answer: active.answer, error: error instanceof Error ? error.message : String(error) }].slice(-20);
+			if (active !== request) return;
+			entries = [...entries, { question, answer: request.answer, error: error instanceof Error ? error.message : String(error) }].slice(-20);
 		} finally {
-			active = undefined;
-			view?.invalidate();
+			if (active === request) {
+				active = undefined;
+				view?.invalidate();
+			}
 		}
 	}
 
 	function open(ctx: ExtensionCommandContext): void {
 		if (view) return view.invalidate();
+		if (opening) return;
+		opening = true;
+		const generation = ++overlayGeneration;
+		let closed = false;
 		let finish!: () => void;
 		void ctx.ui.custom<void>((tui, theme, _keys, done) => {
+			opening = false;
 			finish = done;
-			closeView = () => { done(); view = undefined; closeView = undefined; };
+			closeView = () => {
+				if (closed) return;
+				closed = true;
+				if (overlayGeneration === generation) {
+					view = undefined;
+					closeView = undefined;
+					active = undefined;
+				}
+				opening = false;
+				done();
+			};
 			view = new BtwView(tui, theme, () => entries, () => active, (question) => void ask(ctx, question), () => { void side?.abort(); }, () => closeView?.());
 			return view;
 		}, {
 			overlay: true,
-			overlayOptions: { width: "78%", maxHeight: "78%", anchor: "top-center", margin: { top: 1, left: 2, right: 2 }, nonCapturing: true },
+			overlayOptions: { width: "78%", minWidth: 48, maxHeight: "78%", anchor: "top-center", margin: { top: 1, left: 2, right: 2 } },
 			onHandle: () => undefined,
-		}).catch((error) => { view = undefined; ctx.ui.notify(error instanceof Error ? error.message : String(error), "error"); });
+		}).catch((error) => {
+			if (overlayGeneration === generation) {
+				opening = false;
+				view = undefined;
+				closeView = undefined;
+			}
+			ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
+		}).finally(() => {
+			// custom() also resolves when the host closes the overlay. Always
+			// release our ownership, but never tear down a newer instance.
+			if (overlayGeneration === generation) {
+				opening = false;
+				view = undefined;
+				closeView = undefined;
+				active = undefined;
+			}
+		});
 		void finish;
 	}
 
@@ -113,7 +151,7 @@ export default function swarmBtw(pi: ExtensionAPI) {
 	});
 }
 
-class BtwView implements Component {
+export class BtwView implements Component {
 	private readonly input = new Input();
 	constructor(private readonly tui: TUI, private readonly theme: Theme, private readonly readEntries: () => Entry[], private readonly readActive: () => { question: string; answer: string } | undefined, private readonly submit: (value: string) => void, private readonly abort: () => void, private readonly close: () => void) {
 		this.input.onSubmit = (value) => { if (value.trim()) { this.input.setValue(""); this.submit(value.trim()); } };
@@ -129,7 +167,7 @@ class BtwView implements Component {
 		const body = active ? [`You: ${active.question}`, "", active.answer || "…"] : latest ? [`You: ${latest.question}`, "", ...new Markdown(latest.error || latest.answer || "(empty)", 0, 0, getMarkdownTheme()).render(inner)] : ["No side questions yet."];
 		const edge = this.theme.fg("border", "│");
 		const line = (text: string) => `${edge} ${text.slice(0, inner).padEnd(inner, " ")} ${edge}`;
-		return [this.theme.fg("border", `┌${"─".repeat(inner + 2)}┐`), line(this.theme.fg("accent", "btw · Pi-Swarm side question")), this.theme.fg("border", `├${"─".repeat(inner + 2)}┤`), ...body.map(line), this.theme.fg("border", `├${"─".repeat(inner + 2)}┤`), line(this.input.render(inner)[0] ?? ""), line(this.theme.fg("dim", "Enter ask · Escape abort/close")), this.theme.fg("border", `└${"─".repeat(inner + 2)}┘`)];
+		return [this.theme.fg("border", `┌${"─".repeat(inner + 2)}┐`), line(this.theme.bold(this.theme.fg("accent", "BTW · side question"))), this.theme.fg("border", `├${"─".repeat(inner + 2)}┤`), ...body.map(line), this.theme.fg("border", `├${"─".repeat(inner + 2)}┤`), line(this.input.render(inner)[0] ?? ""), line(this.theme.fg("dim", "Enter ask · Escape abort/close")), this.theme.fg("border", `└${"─".repeat(inner + 2)}┘`)];
 	}
 	invalidate(): void { this.tui.requestRender(); }
 }

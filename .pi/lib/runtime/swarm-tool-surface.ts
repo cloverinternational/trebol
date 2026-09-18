@@ -1,3 +1,4 @@
+import { taskManageSchema } from "../../../packages/tools/taskmanage/src/task-manage.ts";
 import { applyWorkflowGuidance } from "../../../packages/context/prompt/src/workflow-guidance.ts";
 /**
  * Canonical model-facing tool surface, captured from `swarm -p` on the wire
@@ -39,6 +40,11 @@ export function loadSwarmToolSurface(path = FIXTURE): Map<string, CanonicalTool>
 /** Always-on plus environment-gated definitions, for description/schema overlay by name. */
 export function loadSwarmCanonicalTools(): Map<string, CanonicalTool> {
   if (!conditionalCache) conditionalCache = new Map([...loadSwarmToolSurface(), ...readFixture(CONDITIONAL_FIXTURE), ...readFixture(INTERACTIVE_FIXTURE)]);
+  // Local task questions are an intentional extension to the captured upstream
+  // contract. Advertise the owning schema, not the older fixture without answers.
+  const task = conditionalCache.get("TaskManage");
+  if (task) conditionalCache.set("TaskManage", {...task, parameters:taskManageSchema,
+    description:"Manage ordered tasks. Every new task requires 1–12 task-specific questions {id,text}. Complete with answers [{question,answer,evidence}] covering every question in the same update; evidence must be workspace file#Heading or file#Lx-Ly. Repair questionless legacy tasks before activation/completion. Parent completion requires finished children. Use parentTaskId for hierarchy and addBlockedBy for dependencies. Atomic batches roll back on failure. Read errors and change invalid input before retrying; never fabricate answers."});
   return conditionalCache;
 }
 

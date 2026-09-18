@@ -13,3 +13,12 @@ it("uses adapted descriptions at registration and on both provider wire shapes",
     expect(anthropic?.tools[0].description).toBe(registered.description);
   }
 });
+
+it("advertises mandatory task questions and answers on both wire protocols",()=>{
+ const a=overlaySwarmToolSchemas({tools:[{function:{name:"TaskManage",parameters:{}}}]})!;
+ const b=overlaySwarmToolSchemas({tools:[{name:"TaskManage",input_schema:{}}]})!;
+ const schema:any=a.tools[0].function.parameters;
+ expect(schema.properties.operations.items.properties.questions.minItems).toBe(1);
+ expect(schema.properties.operations.items.properties.answers).toBeDefined();
+ expect(b.tools[0].input_schema).toEqual(schema);
+});

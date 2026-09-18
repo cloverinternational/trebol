@@ -98,12 +98,25 @@ export function extractBashDisplayText(text: string): string {
   return /<result [^>]*\bexit_code="0"/.test(text) ? "" : text;
 }
 
+/** Render the structured response returned when interactive Bash is detached. */
+function extractBackgroundDisplayText(text: string, details: any): string | undefined {
+  let body: any;
+  try { body = JSON.parse(text); } catch { return undefined; }
+  if (!body || body.backgrounded !== true || typeof body.task_id !== "string") return undefined;
+  const command = typeof details?.command === "string" ? details.command : "";
+  const status = body.status === "running" ? "running" : body.status ?? "backgrounded";
+  const message = typeof body.message === "string" ? body.message : "Background command is running.";
+  const commandRow = command ? `$ ${command}` : `$ ...`;
+  return `${commandRow}\n[backgrounded · ${status} · task_id=${body.task_id}]\n${message}`;
+}
+
 export function bashResultComponent(result: any, options: any = {}, theme: any = {}, wrapToWidth: WrapToWidth = wrapPlainText): { render: (width: number) => string[]; invalidate: () => void } {
   const raw = Array.isArray(result?.content) ? result.content.filter((part: any) => part?.type === "text").map((part: any) => part.text).join("\n") : "";
   const failed = Boolean(result?.isError || options?.isError);
   const partial = Boolean(options?.isPartial);
   // A failure's message is prose, not the XML envelope; keep it verbatim.
-  const body = stripANSI(failed ? raw : extractBashDisplayText(raw)).trimEnd();
+  const background = failed ? undefined : extractBackgroundDisplayText(raw, result?.details);
+  const body = stripANSI(failed ? raw : background ?? extractBashDisplayText(raw)).trimEnd();
   const dim = (text: string) => theme?.fg?.(failed ? "error" : "toolOutput", text) ?? text;
   const muted = (text: string) => theme?.fg?.("muted", text) ?? text;
   const durationMs = Number(result?.details?.duration_ms);

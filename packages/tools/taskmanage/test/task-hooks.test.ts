@@ -29,7 +29,7 @@ describe("TaskManage hooks coordinator", () => {
   it("reminds about active or pending tasks on a throttled user-message cadence", () => {
     const m = new TaskManager();
     const h = new TaskHooksCoordinator(m, pi());
-    m.execute({ operations: [{ key: "a", op: "create", subject: "Work", status: "in_progress" }] });
+    m.execute({ operations: [{ key: "a", op: "create", subject: "Work", questions: [{ id: "accept", text: "Is this verified?" }], status: "in_progress" }] });
     expect(h.on(event("input", { text: "first" }))).toBeUndefined();
     expect(h.on(event("before_agent_start", { prompt: "first" }))).toMatchObject({ message: expect.stringContaining("active task") });
     for (let i = 0; i < 4; i++) {
@@ -44,8 +44,9 @@ describe("TaskManage hooks coordinator", () => {
     const p = pi(), m = new TaskManager(), h = new TaskHooksCoordinator(m, p, { enforcementMode: "block" });
     expect(h.on(event("tool_call", { toolName: "write", input: {} }), {})).toMatchObject({ block: true });
     expect(h.on(event("tool_call", { toolName: "read", input: {} }), {})).toBeUndefined();
+    expect(h.on(event("tool_call", { toolName: "bootstrap", input: { task: "work" } }), {})).toBeUndefined();
     expect(h.on(event("tool_call", { toolName: "write", input: {} }), { isSubagent: true })).toBeUndefined();
-    m.execute({ operations: [{ key: "a", op: "create", subject: "work", status: "in_progress" }] });
+    m.execute({ operations: [{ key: "a", op: "create", subject: "work", questions: [{ id: "accept", text: "Is this verified?" }], status: "in_progress" }] });
     expect(h.on(event("tool_call", { toolName: "write", input: {} }), {})).toBeUndefined();
   });
   it("only bypasses genuinely simple read-only bash commands", () => {
@@ -71,7 +72,7 @@ describe("TaskManage hooks coordinator", () => {
   });
   it("guides task lifecycle and records redacted outcomes", () => {
     const p = pi(), m = new TaskManager(), h = new TaskHooksCoordinator(m, p);
-    const createInput = { operations: [{ key: "a", op: "create", subject: "work" }] };
+    const createInput = { operations: [{ key: "a", op: "create", subject: "work", questions: [{ id: "accept", text: "Is this verified?" }] }] };
     const createResult = m.execute(createInput);
     expect(h.on(event("tool_result", { toolName: "TaskManage", input: createInput, result: createResult }))).toBeDefined();
     m.execute({ operations: [{ key: "focus", op: "update", taskId: "1", status: "in_progress" }] });
@@ -116,7 +117,7 @@ describe("TaskManage hooks coordinator", () => {
 
   it("deduplicates Pi terminal events and rejects failed or partial batches", () => {
     const p = pi(), m = new TaskManager(), h = new TaskHooksCoordinator(m, p);
-    const input = { operations: [{ key: "a", op: "create", subject: "work", status: "in_progress" }] };
+    const input = { operations: [{ key: "a", op: "create", subject: "work", questions: [{ id: "accept", text: "Is this verified?" }], status: "in_progress" }] };
     const result = m.execute(input);
     const end = event("tool_execution_end", { toolCallId: "call-1", toolName: "TaskManage", input, result, isError: false });
     expect(h.on(event("tool_result", { ...end, content: [{ type: "text", text: JSON.stringify(result) }] }))).toBeDefined();
@@ -136,7 +137,7 @@ describe("TaskManage hooks coordinator", () => {
 
   it("redacts secrets embedded in headers, paths, URLs, subjects, and commands", () => {
     const p = pi(), m = new TaskManager(), h = new TaskHooksCoordinator(m, p);
-    m.execute({ operations: [{ key: "f", op: "create", subject: "work", status: "in_progress" }] });
+    m.execute({ operations: [{ key: "f", op: "create", subject: "work", questions: [{ id: "accept", text: "Is this verified?" }], status: "in_progress" }] });
     h.on(event("tool_result", { toolCallId: "x", toolName: "bash", input: {
       command: "curl --private_key=abc https://host/x?access_token=def", path: "/tmp/private_key=ghi",
       subject: "token=jkl", headers: { Authorization: "Bearer mno" }
@@ -146,7 +147,7 @@ describe("TaskManage hooks coordinator", () => {
 
   it("redacts camel-case and embedded access key/token command forms", () => {
     const p = pi(), m = new TaskManager(), h = new TaskHooksCoordinator(m, p);
-    m.execute({ operations: [{ key: "f", op: "create", subject: "work", status: "in_progress" }] });
+    m.execute({ operations: [{ key: "f", op: "create", subject: "work", questions: [{ id: "accept", text: "Is this verified?" }], status: "in_progress" }] });
     h.on(event("tool_result", { toolName: "bash", input: {
       command: `node -e "const accessToken='camel-secret'; const access_key=\"snake-secret\"; run --access-key kebab-secret --accessToken flag-secret"`,
     }, result: {} }));
@@ -171,7 +172,7 @@ describe("TaskManage hooks coordinator", () => {
       expect(h.on(event("tool_call", { toolName, input: {} }))).toBeUndefined();
     for (const toolName of ["lspwrite", "lspapply", "untrustedrecall"])
       expect(h.on(event("tool_call", { toolName, input: {} }))).toMatchObject({ block: true });
-    m.execute({ operations: [{ key: "a", op: "create", subject: "a", status: "in_progress" }, { key: "b", op: "create", subject: "b" }] });
+    m.execute({ operations: [{ key: "a", op: "create", subject: "a", questions: [{ id: "accept", text: "Is this verified?" }], status: "in_progress" }, { key: "b", op: "create", subject: "b", questions: [{ id: "accept", text: "Is this verified?" }] }] });
     h.on(event("tool_result", { toolName: "bash", input: {}, result: {} }));
     expect(h.on(event("turn_end"))).toBeUndefined(); // focus change establishes the baseline
     h.on(event("tool_result", { toolName: "bash", input: {}, result: {} }));
@@ -182,7 +183,7 @@ describe("TaskManage hooks coordinator", () => {
 
   it("keeps a separate maintenance baseline when switching away and back", () => {
     const p = pi(), m = new TaskManager(), h = new TaskHooksCoordinator(m, p, { maintenanceToolThreshold: 2 });
-    m.execute({ operations: [{ key: "a", op: "create", subject: "a", status: "in_progress" }, { key: "b", op: "create", subject: "b" }] });
+    m.execute({ operations: [{ key: "a", op: "create", subject: "a", questions: [{ id: "accept", text: "Is this verified?" }], status: "in_progress" }, { key: "b", op: "create", subject: "b", questions: [{ id: "accept", text: "Is this verified?" }] }] });
     h.on(event("tool_result", { toolName: "bash", input: {}, result: {} }));
     h.on(event("turn_end")); // establish task a's baseline at one tool
     h.on(event("tool_result", { toolName: "bash", input: {}, result: {} }));

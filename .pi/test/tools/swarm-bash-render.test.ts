@@ -113,6 +113,16 @@ describe("bash result rendering", () => {
     expect(extractBashDisplayText(buildResultXML({ exitCode: 0, durationMs: 1, stdout: "", stderr: "", timedOut: false, requestedSecs: 60, effectiveSecs: 60 }))).toBe("");
     expect(extractBashDisplayText("plain text")).toBe("plain text");
   });
+
+  it("keeps the command visible for an auto-backgrounded result", () => {
+    const rows = bashResultComponent({
+      content: [{ type: "text", text: JSON.stringify({ backgrounded: true, status: "running", task_id: "bg-1", message: "Command idle for 30s (no output) and was auto-backgrounded." }) }],
+      details: { command: "npm test", background: true, background_reason: "idle" },
+    }, {}, theme).render(80);
+    expect(rows.join("\n")).toContain("$ npm test");
+    expect(rows.join("\n")).toContain("backgrounded · running · task_id=bg-1");
+    expect(rows.join("\n")).not.toContain('{"backgrounded":true');
+  });
 });
 
 /**

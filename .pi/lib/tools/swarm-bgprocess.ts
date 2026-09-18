@@ -356,7 +356,7 @@ export class SwarmBackgroundProcessManager {
         status: "running",
         task_id: rec.id,
         timeout_seconds: timeoutSec,
-      }), details: { task_id: rec.id, background: true, background_reason: "explicit" } };
+      }), details: { task_id: rec.id, command: rec.command, background: true, background_reason: "explicit" } };
     }
 
     const idle = new Promise<"idle">(resolveIdle => {
@@ -393,7 +393,7 @@ export class SwarmBackgroundProcessManager {
         task_id: rec.id,
         timeout_seconds: timeoutSec,
       });
-      return { text, details: { task_id: rec.id, background: true, background_reason: winner } };
+      return { text, details: { task_id: rec.id, command: rec.command, background: true, background_reason: winner } };
     }
     // bash_tool.go completedProcessResult: plain text, IsError on non-zero.
     const exitCode = rec.exitCode ?? -1;

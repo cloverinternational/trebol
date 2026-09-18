@@ -40,7 +40,7 @@ describe('compact task completion questions',()=>{
  });
  it('preserves legacy tasks and enforces field bounds',()=>{
   const m=new TaskManager();
-  expect(m.execute({operations:[{key:'legacy',op:'create',subject:'Legacy',status:'completed'}]}).status).toBe('succeeded');
+  expect(m.execute({operations:[{key:'legacy',op:'create',subject:'Legacy',questions:[question]}]}).status).toBe('succeeded');
   expect(m.execute({operations:[{...create,questions:[{...question,text:'x'.repeat(241)}]}]}).status).toBe('failed');
  });
  it('registered tool resolves evidence using execution workspace',async()=>{
@@ -49,5 +49,16 @@ describe('compact task completion questions',()=>{
   await tool.execute('c',{operations:[create]},undefined,undefined,{cwd:root});
   const result=await tool.execute('d',{operations:[done]},undefined,undefined,{cwd:root});
   expect(result.isError).toBe(false);
+ });
+});
+
+describe('question completion guidance', () => {
+ it('names every missing question and gives the valid recovery shape without mutating state', () => {
+  const {manager} = fixture();
+  const before = manager.snapshot().tasks.map(task => ({id: task.id, status: task.status, answers: task.answers, questions: task.questions}));
+  const result = manager.execute({operations:[{...done, answers:undefined}]});
+  expect(result.results[0].error?.message).toContain('q1 (Does it work?)');
+  expect(result.results[0].error?.message).toContain('answers:[{question:"<question id>"');
+  expect(manager.snapshot().tasks.map(task => ({id: task.id, status: task.status, answers: task.answers, questions: task.questions}))).toEqual(before);
  });
 });

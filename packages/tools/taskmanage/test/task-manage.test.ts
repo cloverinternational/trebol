@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { TaskManager, registerTaskManage, taskManageSchema, type JournalEntry } from "../src/task-manage.js";
 
-const create = (key:string, subject=key) => ({key,op:"create" as const,subject});
+const create = (key:string, subject=key) => ({key,op:"create" as const,subject,questions:[{id:"accept",text:`Is ${subject} verified?`}]});
 describe("TaskManage", () => {
   it("appends compact audit events to the focused task", () => {
     const manager = new TaskManager();
-    manager.execute({ operations: [{ key: "work", op: "create", subject: "Work", status: "in_progress" }] });
+    manager.execute({ operations: [{ key: "work", op: "create", subject: "Work", questions: [{ id: "accept", text: "Is this verified?" }], status: "in_progress" }] });
     expect(manager.appendActiveAuditEvent({ tool: "bash", toolCallId: "call-1", actor: "main", summary: "bash: pwd", outcome: "success" })).toBe(true);
     const result = manager.execute({ operations: [{ key: "get", op: "get", taskId: "1", include_audit: true }] });
     expect((result.results[0].data as any).task.audit_events).toEqual(expect.arrayContaining([
@@ -61,14 +61,14 @@ describe("TaskManage", () => {
     const m = new TaskManager();
     const local = m.execute({operations:[
       create("dependency"),
-      {key:"blocked",op:"create",subject:"Blocked",addBlockedBy:["dependency"]},
+      {key:"blocked",op:"create",subject:"Blocked", questions: [{ id: "accept", text: "Is this verified?" }],addBlockedBy:["dependency"]},
     ]});
     expect(local.status).toBe("succeeded");
     expect(m.snapshot().tasks[1].dependsOn).toEqual(["1"]);
 
     const collision = m.execute({operations:[
-      {key:"1",op:"create",subject:"Key named like an ID"},
-      {key:"uses-id",op:"create",subject:"Uses ID",addBlockedBy:["1"]},
+      {key:"1",op:"create",subject:"Key named like an ID", questions: [{ id: "accept", text: "Is this verified?" }]},
+      {key:"uses-id",op:"create",subject:"Uses ID", questions: [{ id: "accept", text: "Is this verified?" }],addBlockedBy:["1"]},
     ]});
     expect(collision.status).toBe("succeeded");
     expect(m.snapshot().tasks.at(-1)?.dependsOn).toEqual(["1"]);
@@ -86,14 +86,14 @@ describe("TaskManage", () => {
       expect(ref.additionalProperties).toBe(false);
     }
     const m = new TaskManager();
-    expect(m.execute({operations:[{key:"x",op:"create",subject:"x",addBlocks:[{ref:"a",extra:true} as any]}]}).results[0].error?.code).toBe("validation_failed");
+    expect(m.execute({operations:[{key:"x",op:"create",subject:"x", questions: [{ id: "accept", text: "Is this verified?" }],addBlocks:[{ref:"a",extra:true} as any]}]}).results[0].error?.code).toBe("validation_failed");
   });
   it("rejects fields that do not apply to an operation", () => {
     const m = new TaskManager();
     for (const operation of [
       {key:"x",op:"list" as const,addNote:"no"},
       {key:"x",op:"get" as const,status:"completed" as const},
-      {key:"x",op:"create" as const,subject:"x",include_audit:true},
+      {key:"x",op:"create" as const,subject:"x", questions: [{ id: "accept", text: "Is this verified?" }],include_audit:true},
     ]) expect(m.execute({operations:[operation as any]}).results[0].error?.code).toBe("validation_failed");
   });
   it("rolls back reverse dependency mutations when sequential update fails", () => {
@@ -105,16 +105,16 @@ describe("TaskManage", () => {
   });
   it("validates create dependencies and parent cycles without leaking tasks", () => {
     const m = new TaskManager();
-    expect(m.execute({operations:[create("a"),{key:"bad",op:"create",subject:"bad",addBlockedBy:["missing"]}]}).status).toBe("partial");
+    expect(m.execute({operations:[create("a"),{key:"bad",op:"create",subject:"bad", questions: [{ id: "accept", text: "Is this verified?" }],addBlockedBy:["missing"]}]}).status).toBe("partial");
     expect(m.snapshot().tasks).toHaveLength(1);
-    expect(m.execute({operations:[{key:"child",op:"create",subject:"child",parentTaskId:"1"}]}).status).toBe("succeeded");
+    expect(m.execute({operations:[{key:"child",op:"create",subject:"child", questions: [{ id: "accept", text: "Is this verified?" }],parentTaskId:"1"}]}).status).toBe("succeeded");
     expect(m.execute({operations:[{key:"bad-parent",op:"update",taskId:"1",parentTaskId:"2"}]}).results[0].error?.code).toBe("cycle");
   });
   it("treats an empty parentTaskId as no parent on create and update", () => {
     const m = new TaskManager();
-    expect(m.execute({operations:[{key:"root",op:"create",subject:"Root",parentTaskId:""}]}).status).toBe("succeeded");
+    expect(m.execute({operations:[{key:"root",op:"create",subject:"Root", questions: [{ id: "accept", text: "Is this verified?" }],parentTaskId:""}]}).status).toBe("succeeded");
     expect(m.snapshot().tasks[0].parentTaskId).toBeUndefined();
-    expect(m.execute({operations:[{key:"child",op:"create",subject:"Child",parentTaskId:"1"}]}).status).toBe("succeeded");
+    expect(m.execute({operations:[{key:"child",op:"create",subject:"Child", questions: [{ id: "accept", text: "Is this verified?" }],parentTaskId:"1"}]}).status).toBe("succeeded");
     expect(m.snapshot().tasks[1].parentTaskId).toBe("1");
     const detached = m.execute({operations:[{key:"detach",op:"update",taskId:"2",parentTaskId:""}]});
     expect(detached.status).toBe("succeeded");
@@ -125,7 +125,7 @@ describe("TaskManage", () => {
     const m = new TaskManager();
     m.execute({operations:[create("dependency")]});
     const result = m.execute({operations:[{
-      key:"blocked",op:"create",subject:"Blocked",status:"in_progress",addBlockedBy:["1"],
+      key:"blocked",op:"create",subject:"Blocked", questions: [{ id: "accept", text: "Is this verified?" }],status:"in_progress",addBlockedBy:["1"],
     }]});
     expect(result.results[0].error?.code).toBe("validation_failed");
     expect(m.snapshot().tasks).toHaveLength(1);
@@ -192,7 +192,7 @@ describe("TaskManage", () => {
     m.execute({operations:[{key:"b",op:"update",status:"in_progress"}]});
     expect(m.snapshot().tasks.map(t=>t.active)).toEqual([false, true]);
     m.execute({operations:[{key:"b",op:"update",status:"completed"}]});
-    expect(m.snapshot().tasks.map(t=>t.active)).toEqual([false, false]);
+    expect(m.snapshot().tasks.map(t=>t.active)).toEqual([false, true]);
   });
   it("validates focus transitions and preserves explicit active:false", () => {
     const m = new TaskManager();
@@ -221,8 +221,8 @@ describe("TaskManage", () => {
       expect(m.execute({operations:[operation]}).results[0].error?.code, field).toBe("validation_failed");
     }
     const circular: any = {}; circular.self = circular;
-    expect(m.execute({operations:[{key:"cycle",op:"create",subject:"x",metadata:circular}]}).results[0].error?.code).toBe("validation_failed");
-    expect(m.execute({operations:[{key:"bad-json",op:"create",subject:"x",metadata:{value:NaN}}]}).results[0].error?.code).toBe("validation_failed");
+    expect(m.execute({operations:[{key:"cycle",op:"create",subject:"x", questions: [{ id: "accept", text: "Is this verified?" }],metadata:circular}]}).results[0].error?.code).toBe("validation_failed");
+    expect(m.execute({operations:[{key:"bad-json",op:"create",subject:"x", questions: [{ id: "accept", text: "Is this verified?" }],metadata:{value:NaN}}]}).results[0].error?.code).toBe("validation_failed");
     expect(m.snapshot().tasks).toHaveLength(0);
   });
   it("keeps plain notes, typed notes, and audit history separate", () => {
@@ -291,11 +291,11 @@ describe("TaskManage", () => {
   it("honors create active and matches upstream create deleted behavior", () => {
     const m = new TaskManager();
     m.execute({operations:[create("first")]});
-    const active = m.execute({operations:[{key:"active",op:"create",subject:"Active",status:"in_progress",active:true}]});
+    const active = m.execute({operations:[{key:"active",op:"create",subject:"Active", questions: [{ id: "accept", text: "Is this verified?" }],status:"in_progress",active:true}]});
     expect(active.status).toBe("succeeded");
     expect(m.snapshot().tasks.map(t=>t.active)).toEqual([false, true]);
-    expect(m.execute({operations:[{key:"bad",op:"create",subject:"Bad",active:true}]}).results[0].error?.code).toBe("validation_failed");
-    const deleted = m.execute({operations:[{key:"deleted",op:"create",subject:"Not deleted",status:"deleted"}]});
+    expect(m.execute({operations:[{key:"bad",op:"create",subject:"Bad", questions: [{ id: "accept", text: "Is this verified?" }],active:true}]}).results[0].error?.code).toBe("validation_failed");
+    const deleted = m.execute({operations:[{key:"deleted",op:"create",subject:"Not deleted", questions: [{ id: "accept", text: "Is this verified?" }],status:"deleted"}]});
     expect(deleted.status).toBe("succeeded");
     expect(m.snapshot().tasks.at(-1)).toMatchObject({subject:"Not deleted",status:"pending",active:false});
   });
@@ -309,7 +309,7 @@ describe("TaskManage", () => {
   });
   it("supports upstream low/medium/high priorities and exposes them in task DTOs", () => {
     const m = new TaskManager();
-    const created = m.execute({operations:[{key:"urgent",op:"create",subject:"Urgent",priority:"high"}]});
+    const created = m.execute({operations:[{key:"urgent",op:"create",subject:"Urgent", questions: [{ id: "accept", text: "Is this verified?" }],priority:"high"}]});
     expect(created.results[0].data).toMatchObject({task:{id:"1",status:"pending"}});
     expect(m.execute({operations:[{key:"get",op:"get",taskId:"1"}]}).results[0].data).toMatchObject({task:{priority:"high"}});
     expect(m.execute({operations:[{key:"lower",op:"update",taskId:"1",priority:"low"}]}).results[0].data).toMatchObject({task:{priority:"low"}});
@@ -319,7 +319,7 @@ describe("TaskManage", () => {
   it("treats empty optional enum strings as omitted", () => {
     const m = new TaskManager();
     const created = m.execute({operations:[{
-      key:"neutral",op:"create",subject:"Neutral",
+      key:"neutral",op:"create",subject:"Neutral", questions: [{ id: "accept", text: "Is this verified?" }],
       category:"" as any,priority:"" as any,status:"" as any,
     }]});
     expect(created.status).toBe("succeeded");
@@ -362,8 +362,8 @@ describe("TaskManage", () => {
 
   it("matches upstream key, lifecycle, deletion, metadata, inference, and DTO contracts", () => {
     const m = new TaskManager();
-    const created = m.execute({operations:[{key:"build",op:"create",subject:"Investigate API",metadata:{keep:1,remove:2}}]});
-    expect(created.results[0].data).toEqual({task:{id:"1",subject:"Investigate API",status:"pending",active:false,parent_id:""}});
+    const created = m.execute({operations:[{key:"build",op:"create",subject:"Investigate API", questions: [{ id: "accept", text: "Is this verified?" }],metadata:{keep:1,remove:2}}]});
+    expect(created.results[0].data).toEqual({task:{id:"1",subject:"Investigate API",status:"pending",active:false,parent_id:"",questions:[{id:"accept",text:"Is this verified?"}]}});
     expect(m.execute({operations:[{key:"build",op:"update",status:"in_progress",metadata:{added:3,remove:null}}]}).status).toBe("succeeded");
     expect(m.snapshot().tasks[0]).toMatchObject({category:"researching",active:true,metadata:{keep:1,added:3}});
     expect(m.execute({operations:[{key:"build",op:"get"}]}).results[0].status).toBe("succeeded");
@@ -371,7 +371,7 @@ describe("TaskManage", () => {
       tasks:[{id:"1",subject:"Investigate API",category:"researching"}],
       pagination:{total:1,offset:0,limit:50,more:false},
     });
-    m.execute({operations:[{key:"child",op:"create",subject:"Child",parentTaskId:"1"}]});
+    m.execute({operations:[{key:"child",op:"create",subject:"Child", questions: [{ id: "accept", text: "Is this verified?" }],parentTaskId:"1"}]});
     const blocked = m.execute({operations:[{key:"build",op:"update",status:"deleted"}]});
     expect(blocked.results[0].error?.code).toBe("validation_failed");
     expect(m.snapshot().tasks).toHaveLength(2);
