@@ -1,6 +1,6 @@
-# Trebol v2.0
+# Trebol v0.4.0
 
-Trebol v2.0 is Clover's internal harness and the successor to the original
+Trebol is Clover's internal harness and the successor to the original
 Swarm Go agent harness. It brings the Swarm development model
 to Pi as an extension pack: structured prompt and
 context assembly, policy and hooks, durable state, tasks, subagents, skills,
@@ -27,9 +27,8 @@ Pi owns the agent loop, provider, sessions, native tools, and TUI
 Trebol extensions add Swarm context, policy, tools, state, and UI
 ```
 
-The migration is not a rewrite of the Swarm model. It is an adaptation of that
-model to Pi's lifecycle and extension APIs, with parity fixtures and probes to
-make behavioral differences visible.
+The migration adapts the Swarm model to Pi's lifecycle and extension APIs;
+obsolete parity probes were retired in v0.4.0.
 
 ## Capabilities
 
@@ -55,12 +54,15 @@ make behavioral differences visible.
 
 - Durable session entries and conversation metadata
 - Repository, worktree, and global memory scopes
+- Evidence-backed candidate capture/review, PageIndex discovery, and
+  bounded read-only retrieval; a candidate is not an established fact
 - Bounded history search and retrieval with redaction
 - Shared state that does not depend on what the TUI happens to render
 
 ### Policy and presentation
 
-- Capability, workspace, mutation, network, and approval policy
+- Capability, workspace, mutation, network, and approval policy; `/init`
+  scaffolding can install a workspace structure guard
 - Disk hooks and policy nudges
 - Pi-native tool renderers plus Swarm hook rows and widgets
 - Conversation metrics, footer segments, themes, control-panel status, and
@@ -68,7 +70,6 @@ make behavioral differences visible.
 
 ### Verification
 
-- Pi ↔ Swarm behavioral parity probes and fixtures
 - Unit tests, integration tests, build checks, and dogfood commands
 - Architecture notes documenting the migration and the important seams
 
@@ -98,9 +99,9 @@ The implementation is split between thin Pi adapters and reusable packages:
 .pi/lib/              Shared runtime, context, tool, state, and UI helpers
 packages/             Reusable TypeScript packages grouped by capability
 docs/architecture/    Living design and migration notes
-docs/parity/          Parity plan, acceptance criteria, and media
+docs/reference/       Feature audits and validation notes
 tests/                Repository-level tests
-tools/                Probes, integration runners, install checks, and maintenance
+tools/                Integration runners, install checks, and maintenance
 vendor/               Read-only upstream references and submodules
 ```
 
@@ -180,6 +181,107 @@ context files are discovered:
 pi
 ```
 
+## Usage
+
+Type these commands **inside Pi** (not in a shell). Begin with `/help` for Pi's
+own commands; Trebol's commands below are provided by the extension pack in
+this repository. Slash commands configure the session or open UI; for research,
+edits, tasks, and memory retrieval, describe the work to the agent so it can
+invoke the corresponding tools. Some panels require interactive `pi` rather
+than headless `pi -p`.
+
+### First task and memory
+
+1. Describe your task normally, e.g. “Inspect the auth flow and plan a safe fix.”
+   The agent's `bootstrap` tool selects relevant memory and up to two skills,
+   then creates or reconciles tasks. Inspect its evidence before acting.
+2. `/bootstrap status` reports strategy, model and readiness;
+   `/bootstrap parallel|combined|off|reset` changes strategy and
+   `/bootstrap model` opens a model selector. `/mem status|on|off` controls
+   bootstrap enforcement. While enforcement is on, ordinary tool calls before
+   bootstrap are blocked; `/mem off` is the recovery option if bootstrap fails.
+   `Ctrl+D` toggles the session-only bootstrap requirement (shown in the footer).
+3. `/tasks` opens the **read-only** task browser (interactive TUI). Ask the
+   agent to use `TaskManage` for edits, dependencies and evidence-backed
+   completion. `/memory-capture status|on|off` reports or changes session
+   candidate extraction; `/memory-review` attempts review of one candidate
+   with a single readable source reference. Other candidates may remain
+   pending; an absent model or source evidence cannot establish a verified fact.
+4. Ask the agent to `memory_history search` or `recall` with a task-specific
+   query, or index a Markdown document with `context_index`, then use
+   `context_outline` and `context_read` for cited sections. `/swarm-context`
+   lists indexed sources and their staleness. To promote an **already verified**
+   project record to global memory, use `/memory-promote repository ID`
+   (or `worktree ID [namespace]`); this requires interactive confirmation and
+   does nothing when declined. Never put secrets in memory.
+
+```mermaid
+flowchart LR
+  U[Describe task] --> B[bootstrap: recall skills and reconcile tasks]
+  B --> V[Check evidence and implement]
+  V --> C[Candidate capture / memory_history offer]
+  C --> R[Review candidate against source]
+  R -->|supported| K[Verified project memory]
+  R -->|unsupported or unavailable| P[No automatic promotion]
+  K -->|interactive approval only| G[Global promotion]
+```
+
+### Start a project and configure your workspace
+
+`/init a TypeScript CLI` starts a project interview in the current workspace;
+`/init ./example a TypeScript CLI` selects a relative target directory. The
+agent must call `project_init` to **inspect**, **plan** an exact file list, show
+you that list and get approval before **apply**. Existing files are preserved;
+an out-of-workspace target is rejected. The resulting structure policy blocks
+unapproved paths. `/configure` opens a draft picker for prompt profiles,
+context sources, skill/tool allowlists and workspace files; select **Apply**
+to save or **Cancel** to discard. `/sp` selects/edits prompt profiles and
+`/sp current` inspects the effective prompt. `/system` opens the prompt and
+runtime inspector. `/skill` lists available skills; `/swarm-skills NAME` shows
+one description (or lists skills if no matching name).
+
+```mermaid
+flowchart TD
+  I["/init description or ./target description"] --> Q[Project interview]
+  Q --> S[project_init inspect]
+  S --> L[project_init plan: exact files, no writes]
+  L --> A{User approves?}
+  A -->|yes| W[project_init apply: scaffold and guard]
+  A -->|no| X[No files written]
+  W --> E[Existing files kept; new files created]
+```
+
+### Everyday commands
+
+| Command | What to expect / important limit |
+| --- | --- |
+| `/btw Why did this test fail?` | Read-only side question using the current session as background. TUI and an active model are required; Escape aborts an active question or closes the overlay. |
+| `/codemode` or `/codemode status|on|off|list` | Pick available tools, inspect mode or toggle CodeMode. `on` hides native tools while the bounded `codemode` tool remains available; `off` restores them. |
+| `/supervisor status` or `/supervisor` | Inspect configuration/status (JSON in non-interactive mode) or open the TUI settings for optional Jev audit, operational review and memory worker. Workers need configured credentials/adapters; unavailable actions report an error rather than claiming completion. |
+| `/vault list`, `/vault add [id]`, `/vault remove <id>` | List IDs/kinds, enter a global secret through UI prompts, or remove an entry. Add needs an interactive input UI; never paste credentials into chat or commit them. |
+| `/hooks` or `/hooks GROUP on|off` | Inspect or change a known hook group; an unknown group reports an error. |
+| `/goal CONDITION`, `/goal status|clear` | Persist a goal condition, inspect it, or clear it. An overlong condition is rejected. |
+| `/loop [10m] TASK`, `/loop status|stop` | Schedule repeats in the current session; default interval is 10 minutes. Loops expire and are cancelled on shutdown/reload; use `scheduler` for delay/cron jobs. |
+| `/trebol-update` or `/trebol-update install` | Check the release manifest or launch `pi update --extensions` and restart Pi afterward. Offline mode, manifest errors and launch failures are reported; this is not an in-place live reload. |
+| `/swarm-autogen status|on|off|manual` | Show or change generated-skill mode; restart/reload to apply. |
+| `/swarm-thinking` | Open Pi thinking-level selector (including off, low, medium, high); `Ctrl+Alt+Shift+T` opens the same picker. |
+| `/swarm-mcp` or `/swarm-mcp discover SERVER` | Inspect configured MCP servers or discover server tools; requires an enabled server/connection. |
+| `/metrics`, `/control-panel`, `/swarm-tools` | Show current conversation counters, durable agent/job status, or registered tools. |
+| `/annoyed list`, `/annoyed read ID`, `/annoyed on|off` | Inspect recorded defect reports or toggle the annoyance reminder. A missing issue ID reports an error. |
+| `/paste-image` | Paste a Windows clipboard bitmap into Pi's editor; non-Windows platforms use Pi's native paste behavior. |
+
+Other inspection controls include `/plan-mode` (current plan state),
+`/cache` (request-change telemetry, **not** provider cache-hit counts), and
+`/swarm-runtime` (runtime/MCP status). `/swarm-websearch discover` initializes
+the optional web-search MCP server; if its configuration or connection is
+unavailable, use the `swarm-websearch` tool status or inspect the server config
+rather than assuming search is working. These integrations are optional.
+
+Use `/paseo status` and `/paseo setup` to inspect remote access before changing
+anything; the explicit mutating step is `/paseo setup apply` (details below).
+These are Trebol commands; Pi itself may offer additional commands such as
+`/settings` and `/help`.
+
 ## Paseo remote access
 
 On Linux, the Paseo extension starts an already-built daemon independently of
@@ -203,7 +305,6 @@ hello/status/pong exchange, not merely an open port.
 /paseo status         # inspect the daemon
 /paseo setup          # inspect without applying changes
 /paseo setup apply    # retry automatic connection setup
-
 ```
 
 For reboot-safe Linux startup, install the optional per-user systemd unit from
@@ -248,13 +349,7 @@ Run the focused test suite:
 npm test
 ```
 
-Run parity checks:
-
-```bash
-npm run test:parity
-```
-
-Run the repository dogfood path (build, tests, and parity):
+Run the repository dogfood path (build and tests):
 
 ```bash
 npm run dogfood
@@ -266,9 +361,8 @@ Check installation health with:
 npm run doctor
 ```
 
-For parity probes and their acceptance criteria, see
-[docs/parity/acceptance.md](docs/parity/acceptance.md). For the migration
-design, start with [docs/architecture/modular-pi-architecture.md](docs/architecture/modular-pi-architecture.md),
+For migration design and validation boundaries, start with
+[docs/architecture/modular-pi-architecture.md](docs/architecture/modular-pi-architecture.md),
 [docs/architecture/swarm-tui-to-pi-map.md](docs/architecture/swarm-tui-to-pi-map.md),
 and [docs/architecture/hooks-prompts-tools-pi-equivalence.md](docs/architecture/hooks-prompts-tools-pi-equivalence.md).
 
