@@ -6,6 +6,7 @@ import {
   buildResultXML,
   extractBashDisplayText,
   formatBashCall,
+  normalizeBashParams,
   stripANSI,
 } from "../../lib/tools/swarm-bash.ts";
 
@@ -13,7 +14,7 @@ import {
 // the module's own dependency-free wrapper and measure width the same way
 // pi-tui's visibleWidth does for the ASCII text used here.
 const theme = { fg: (_k: string, s: string) => s, bold: (s: string) => s };
-const visibleWidth = (text: string) => stripANSI(text).replace(/\t/g, "   ").length;
+const visibleWidth = (text: string) => Array.from(stripANSI(text).replace(/\t/g, "   ")).reduce((n, ch) => n + (/\p{Mark}/u.test(ch) ? 0 : ((ch.codePointAt(0) ?? 0) > 0xffff || /[\u1100-\u115f\u2e80-\ua4cf\uac00-\ud7a3\uf900-\ufaff\ufe10-\ufe6f\uff00-\uff60]/u.test(ch) ? 2 : 1)), 0);
 const truncate = (text: string, width: number) => {
   const plain = stripANSI(text);
   return plain.length <= width ? text : `${plain.slice(0, Math.max(0, width - 1))}\u2026`;
@@ -31,6 +32,15 @@ function expectRenderable(rows: string[], width: number) {
     expect(visibleWidth(row), `row must fit width ${width}: ${JSON.stringify(row)}`).toBeLessThanOrEqual(width);
   }
 }
+
+describe("bash timeout normalization", () => {
+  it("accepts numeric timeout values and defaults malformed DeepSeek boolean payloads", () => {
+    expect(normalizeBashParams({ command: "echo ok", timeout_seconds: 120 }).timeout_seconds).toBe(120);
+    expect(normalizeBashParams({ command: "echo ok", timeout: "75" }).timeout_seconds).toBe(75);
+    expect(normalizeBashParams({ command: "echo ok", timeout: true }).timeout_seconds).toBe(90);
+    expect(normalizeBashParams({ command: "echo ok" }).timeout_seconds).toBe(90);
+  });
+});
 
 describe("bash call rendering", () => {
   const heredoc = `cat > /tmp/f.txt <<'EOF'\n${"line ".repeat(30)}\nEOF`;
@@ -102,6 +112,14 @@ describe("bash result rendering", () => {
     expect(rows.some((r) => r.includes("ctrl+b"))).toBe(true);
   });
 
+  it("fits wide Unicode command output to terminal display cells (reported Bash crash shape)", () => {
+    const text = "tos: ✅ 5 puertos identificados ├─ Análisis de Servicios: ✅ 7 componentes mapeados ├─ Evaluación de Aplicación Web completada";
+    const output = { content: [{ type: "text", text }], details: { command: "echo report" } };
+    expect(visibleWidth(text)).toBeGreaterThan(110);
+    expectRenderable(bashResultComponent(output, { expanded: true }, theme).render(110), 110);
+    expectRenderable(bashResultComponent(output, { expanded: true }, theme).render(37), 37);
+  });
+
   it("keeps a failure message verbatim instead of parsing it as XML", () => {
     const message = "Error executing bash: Command exited with code 1: exit status 1\n\nstderr:\nboom";
     const rows = bashResultComponent({ content: [{ type: "text", text: message }], isError: true, details: { command: "false" } }, {}, theme).render(80);
@@ -112,6 +130,16 @@ describe("bash result rendering", () => {
     expect(extractBashDisplayText(buildResultXML({ exitCode: 0, durationMs: 1, stdout: "out", stderr: "err", timedOut: false, requestedSecs: 60, effectiveSecs: 60 }))).toBe("out\nerr");
     expect(extractBashDisplayText(buildResultXML({ exitCode: 0, durationMs: 1, stdout: "", stderr: "", timedOut: false, requestedSecs: 60, effectiveSecs: 60 }))).toBe("");
     expect(extractBashDisplayText("plain text")).toBe("plain text");
+  });
+
+  it("keeps the command visible for an auto-backgrounded result", () => {
+    const rows = bashResultComponent({
+      content: [{ type: "text", text: JSON.stringify({ backgrounded: true, status: "running", task_id: "bg-1", message: "Command idle for 30s (no output) and was auto-backgrounded." }) }],
+      details: { command: "npm test", background: true, background_reason: "idle" },
+    }, {}, theme).render(80);
+    expect(rows.join("\n")).toContain("$ npm test");
+    expect(rows.join("\n")).toContain("backgrounded · running · task_id=bg-1");
+    expect(rows.join("\n")).not.toContain('{"backgrounded":true');
   });
 });
 

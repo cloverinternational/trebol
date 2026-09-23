@@ -2,9 +2,7 @@ import {
   CapabilityManifestState,
   alignProviderPayload,
   applySwarmModelCompat,
-  collapseUserText,
   swarmToolOrder,
-  swarmMessageShapes,
 } from "../../lib/runtime/swarm-transport-parity.ts";
 import { gateActiveTools } from "../../lib/runtime/swarm-tool-gating.ts";
 import { loadSwarmCanonicalTools } from "../../lib/runtime/swarm-tool-surface.ts";
@@ -54,7 +52,11 @@ export function registerSwarmTransportParity(pi: Pi): void {
     const selected = configured?.mode === "allowlist"
       ? effectiveSelection(available.length ? available : active, configured)
       : active;
-    const gated = gateActiveTools(selected, { interactive }, process.env, available) ?? selected;
+    const mcpTools = available.filter(name => {
+      const definition = pi.getToolDefinition?.(name);
+      return name === "mcp" || name === "mcpScript" || name.startsWith("mcp__") || definition?.label?.startsWith("MCP:");
+    });
+    const gated = gateActiveTools(selected, { interactive, mcpTools }, process.env, available) ?? selected;
     const ordered = swarmToolOrder(gated) ?? (gated === active ? undefined : gated);
     if (ordered) pi.setActiveTools?.(ordered);
   };
@@ -93,8 +95,6 @@ export function registerSwarmTransportParity(pi: Pi): void {
     // Swarm's registry only holds the tools it exposes; a Pi tool that is
     // registered but gated off the surface (e.g. `bash` in the interactive
     // TUI) is unknown to the model and must error like one.
-    const shaped = swarmMessageShapes(messages, new Set<string>(pi.getActiveTools?.() ?? (pi.getAllTools?.() ?? []).map((tool: any) => tool.name)));
-    if (shaped) { messages = shaped; changed = true; }
     const withManifest = manifest.apply(messages, currentMode(), activeToolSummaries());
     if (withManifest) { messages = withManifest; changed = true; }
     // The user turn as the model sees it (manifest included) is what Swarm
@@ -108,8 +108,6 @@ export function registerSwarmTransportParity(pi: Pi): void {
       (globalThis as any)[LAST_USER_MESSAGE] = text;
       break;
     }
-    const collapsed = collapseUserText(messages);
-    if (collapsed) { messages = collapsed; changed = true; }
     return changed ? { messages } : undefined;
   });
   // Last hop before serialisation: top-level keys in Go struct order and tool

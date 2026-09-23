@@ -41,13 +41,13 @@ describe("swarm-goal", () => {
     const evaluate = vi.fn(async (_c: string, path: string) => { seen.push({ path, content: readFileSync(path, "utf8") }); return verdicts[seen.length - 1]; });
     const h = harness(evaluate);
     await h.command("goal", "verify result");
-    await h.emit("agent_end", { messages: [{ role: "toolResult", toolName: "Bash", content: "observed" }] });
+    await h.emit("agent_settled", { messages: [{ role: "toolResult", toolName: "Bash", content: "observed" }] });
     expect(h.pi.sendMessage).toHaveBeenCalledTimes(2); expect(seen[0].content).toContain("observed");
     expect(existsSync(seen[0].path)).toBe(false); // temp file removed after evaluation
-    await h.emit("agent_end", { messages: [] }); expect(h.api.getGoal()?.status).toBe("met");
+    await h.emit("agent_settled", { messages: [] }); expect(h.api.getGoal()?.status).toBe("met");
     // Large transcripts are written in full — no truncation, no size failure.
     await h.command("goal", "new goal");
-    await h.emit("agent_end", { messages: [{ role: "toolResult", content: "x".repeat(200_000) }, { role: "toolResult", content: "recent evidence" }] });
+    await h.emit("agent_settled", { messages: [{ role: "toolResult", content: "x".repeat(200_000) }, { role: "toolResult", content: "recent evidence" }] });
     expect(h.api.getGoal()?.status).toBe("met");
     expect(seen[2].content).toContain("recent evidence");
     expect(seen[2].content.length).toBeGreaterThan(200_000);
@@ -59,7 +59,7 @@ describe("swarm-goal", () => {
     const evaluate = vi.fn(async (_c: string, path: string) => { seen.push({ path, mode: statSync(path).mode & 0o777 }); return "MET"; });
     const h = harness(evaluate);
     await h.command("goal", "verify");
-    await h.emit("agent_end", { messages: [{ role: "toolResult", content: "secret token" }] });
+    await h.emit("agent_settled", { messages: [{ role: "toolResult", content: "secret token" }] });
     // Transcripts carry prompts and tool output; other local users must not read them.
     expect(seen[0].mode).toBe(0o600);
 
@@ -88,7 +88,7 @@ describe("swarm-goal", () => {
   it("clear invalidates an in-flight evaluator", async () => {
     let resolve!: Function; let invoked!: Function; const called = new Promise(r => { invoked = r; });
     const h = harness(() => { invoked(); return new Promise(r => { resolve = r; }); });
-    await h.command("goal", "work"); const pending = h.emit("agent_end", { messages: [] }); await called;
+    await h.command("goal", "work"); const pending = h.emit("agent_settled", { messages: [] }); await called;
     await h.command("goal", "clear"); resolve("NOT_MET"); await pending;
     expect(h.pi.sendMessage).toHaveBeenCalledTimes(1); expect(h.api.getGoal()).toBeUndefined();
   });

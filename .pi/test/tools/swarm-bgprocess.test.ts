@@ -1,9 +1,10 @@
-import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { registerSwarmBackgroundBash } from "../../extensions/30-tools/swarm-background-bash.ts";
 import { PERMISSIVE_PARAMETERS, overlaySwarmToolSchemas } from "../../lib/runtime/swarm-tool-surface.ts";
+import { TOOL_CONTRACTS } from "../../lib/runtime/tool-contracts.ts";
 import { bgOutputPreview, formatBackgroundDone, SwarmBackgroundProcessManager } from "../../lib/tools/swarm-bgprocess.ts";
 import { boundToolOutput, elideOversizedToolOutput } from "../../lib/runtime/swarm-toolout.ts";
 import { afterTurnFlushListeners } from "../../lib/runtime/swarm-builtin-hooks-runtime.ts";
@@ -52,14 +53,12 @@ describe("Swarm interactive background bash", () => {
 
   it("registers both canonical interactive tools", () => {
     const { tools } = harness();
-    const fixture = new Map(JSON.parse(readFileSync(resolve(root, "tools/parity/fixtures/swarm-interactive-tools.json"), "utf8"))
-      .map((x: any) => [x.function.name, x.function]));
     expect(tools.map(x => x.name)).toEqual(["Bash", "ReadBackgroundCommand"]);
     for (const tool of tools) {
       expect(tool.parameters).toEqual(PERMISSIVE_PARAMETERS);
-      expect(tool.description).toBe((fixture.get(tool.name) as any).description);
+      expect(tool.description).toBe(TOOL_CONTRACTS[tool.name].description);
       const overlaid: any = overlaySwarmToolSchemas({ tools: [{ type: "function", function: tool }] });
-      expect(overlaid.tools[0].function.parameters).toEqual((fixture.get(tool.name) as any).parameters);
+      expect(overlaid.tools[0].function.parameters).toEqual(TOOL_CONTRACTS[tool.name].parameters);
     }
   });
 
@@ -132,6 +131,31 @@ describe("Swarm interactive background bash", () => {
     } finally {
       if (previousPath === undefined) delete process.env.PATH;
       else process.env.PATH = previousPath;
+    }
+  });
+
+  it("skips an optional wrapper that exists but cannot be executed", async () => {
+    const { bash } = harness();
+    const bin = mkdtempSync(join(tmpdir(), "swarm-broken-wrapper-"));
+    const brokenScript = join(bin, "script");
+    writeFileSync(brokenScript, "#!/definitely/missing/interpreter\n");
+    chmodSync(brokenScript, 0o755);
+    const previousPath = process.env.PATH;
+    process.env.PATH = bin;
+    try {
+      // access(X_OK) succeeds for this fixture, but execve reports ENOENT.
+      // The optional PTY tier must degrade to the direct shell invocation.
+      expect((await invoke(bash, { command: "printf wrapper-fallback", timeout_seconds: 2 })).content[0].text)
+        .toBe("wrapper-fallback\n");
+
+      // Near-miss: a missing binary requested by the user is still an ordinary
+      // shell failure, not a wrapper capability failure or successful retry.
+      await expect(invoke(bash, { command: "definitely-not-a-real-binary", timeout_seconds: 2 }))
+        .rejects.toThrow(/Exit code: 127/);
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+      rmSync(bin, { recursive: true, force: true });
     }
   });
 

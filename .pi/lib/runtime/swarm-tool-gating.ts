@@ -1,14 +1,13 @@
 /**
- * Which tools Swarm exposes to the model, and under which conditions, so Pi
- * advertises the same surface. Mirrors swarm-tui/internal/chat/sdk_integration.go:
+ * Which tools this harness exposes to the model, and under which conditions.
  *
- *  - the 29 always-on tools captured in tools/parity/fixtures/swarm-tools.json
+ *  - the always-on tools declared in runtime/tool-contracts.ts
  *  - ask_user_question          only when a QuestionBroker exists (interactive TUI)
  *  - enter_plan_mode/exit_plan_mode only when a PlanBroker exists (interactive TUI)
  *  - Bash + ReadBackgroundCommand instead of bash when a BackgroundProcessManager exists (interactive TUI)
- *  - x_search / xai_web_search  only when xaitools.HasCredentials():
+ *  - x_search / xai_web_search  only when xAI credentials resolve:
  *        ~/.swarm/config/oauth/xai.json token (unexpired or refreshable)
- *        or XAI_API_KEY set  (internal/tools/xai/responses.go:63)
+ *        or XAI_API_KEY set
  *
  * Anything Pi registers beyond this list is Pi-only and is hidden from the
  * model surface unless it is required by the active global policy below,
@@ -20,9 +19,9 @@ import { swarmToolNames } from "./swarm-tool-surface.ts";
 
 export const INTERACTIVE_ONLY_TOOLS = ["ask_user_question", "enter_plan_mode", "exit_plan_mode", "Bash", "ReadBackgroundCommand"] as const;
 /**
- * sdk_integration.go: with a BackgroundProcessManager (the interactive TUI)
+ * With a BackgroundProcessManager (the interactive TUI)
  * the bgprocess `Bash` + `ReadBackgroundCommand` pair replaces the plain
- * `bash` tool; headless `swarm -p` has no manager and registers `bash`.
+ * `bash` tool; headless mode has no manager and registers `bash`.
  */
 export const HEADLESS_ONLY_TOOLS = ["bash"] as const;
 export const XAI_TOOLS = ["x_search", "xai_web_search"] as const;
@@ -34,6 +33,8 @@ export interface GatingEnvironment {
   home?: string;
   env?: NodeJS.ProcessEnv;
   now?: () => number;
+  /** Names positively identified from registered MCP tool definitions. */
+  mcpTools?: readonly string[];
 }
 
 /** Explicit, narrow escape hatch for registered Pi extension tools. */
@@ -46,7 +47,7 @@ export function configuredExtraTools(env: NodeJS.ProcessEnv = process.env): Set<
   );
 }
 
-/** internal/tools/xai/responses.go HasCredentials + oauth_config.go IsExpired. */
+/** True when an unexpired (or refreshable) xAI token or XAI_API_KEY is present. */
 export function xaiHasCredentials(home = process.env.HOME ?? "", env = process.env, now = () => Date.now()): boolean {
   // paths.OAuthFile("xai") → <SWARM_HOME or ~/.swarm>/config/oauth/xai.json
   const file = join(env.SWARM_HOME || join(home, ".swarm"), "config", "oauth", "xai.json");
@@ -59,7 +60,7 @@ export function xaiHasCredentials(home = process.env.HOME ?? "", env = process.e
         if (!expired) return true;
         if (typeof token.refresh_token === "string" && token.refresh_token !== "") return true;
       }
-    } catch { /* unreadable config counts as absent, like Go's error path */ }
+    } catch { /* unreadable config counts as absent */ }
   }
   return (env.XAI_API_KEY ?? "").trim() !== "";
 }
@@ -75,6 +76,9 @@ export function swarmSurfaceFor(environment: GatingEnvironment): Set<string> {
   // Durable memory is a Pi-Swarm state extension, not part of the upstream
   // Swarm wire fixture, but it is an intentional model-facing capability.
   names.add("memory_history");
+  // Project scaffolding is driven by the agent through /init, so the tool must
+  // reach the model surface even though upstream Swarm has no equivalent.
+  names.add("project_init");
   for (const name of ["CronCreate", "CronList", "CronDelete", "ScheduleWakeup"]) names.delete(name);
   names.add("scheduler");
   if (environment.interactive) {
@@ -104,7 +108,7 @@ export function gateActiveTools(
   }
   const next = (env.PI_SWARM_TOOL_SURFACE ?? "").toLowerCase() === "all"
     ? candidates
-    : candidates.filter((name) => swarmSurfaceFor(environment).has(name));
+    : candidates.filter((name) => (swarmSurfaceFor(environment).has(name) || environment.mcpTools?.includes(name)));
   return next.length === active.length && next.every((name, index) => name === active[index])
     ? undefined
     : next;

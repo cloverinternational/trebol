@@ -24,7 +24,7 @@ describe("versioned append/replay persistence", () => {
   it("increments durable revisions and exposes useful metrics", () => {
     const entries: JournalEntry[] = [];
     const manager = new TaskManager(entry => entries.push(entry));
-    manager.execute({ operations: [{ key: "x", op: "create", subject: "Persist me" }] });
+    manager.execute({ operations: [{ key: "x", op: "create", subject: "Persist me", questions: [{ id: "accept", text: "Is this verified?" }] }] });
     manager.execute({ operations: [{ key: "read", op: "list" }] });
     expect((entries[0].data as any).schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
     expect((entries[0].data as any).revision).toBe(1);

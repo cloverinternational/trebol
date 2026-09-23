@@ -110,7 +110,6 @@ export function registerSystemInspector(pi: any): void {
   pi.on?.("session_start", (_event: any, ctx: any) => {
     cwd = resolve(ctx?.cwd ?? pi.getCwd?.() ?? process.cwd());
     const skills = new SkillLoader({ cwd, home: process.env.HOME, closed: true, cliPaths: [join(cwd, ".pi", "skills")] }).load();
-    ctx?.ui?.notify?.(`Pi-Swarm ready · ${toolNames(pi).length} tools · ${skills.skills.length} Pi skills · Ctrl+O: Pi startup resources · /system: full prompt and inventory`, "info");
     // Keep the large prompt out of the normal transcript. Pi toggles a custom
     // header's `setExpanded` state together with its built-in Ctrl+O view, so
     // the full inspector is available only while that view is expanded.

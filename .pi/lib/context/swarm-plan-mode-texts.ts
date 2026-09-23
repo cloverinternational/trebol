@@ -2,7 +2,7 @@
  * GENERATED from vendor/swarm-sdk — do not edit by hand.
  *   internal/hooks/builtin/plan_mode_first_tool.go  ProblemBreakdownPrompt
  *   internal/hooks/builtin/simulation.go            SimulationReminderMessage
- * Regenerate: node tools/parity/gen-plan-texts.mjs
+ * Regenerate: hand-maintained (generator removed)
  */
 export const PROBLEM_BREAKDOWN_PROMPT = `[PLAN MODE — PROBLEM BREAKDOWN REQUIRED]
 

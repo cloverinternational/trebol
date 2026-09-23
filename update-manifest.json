@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "package": "@pi-swarm/integration",
-  "version": "0.3.0",
-  "releasedAt": "2026-09-15T16:55:00Z",
+  "version": "0.4.0",
+  "releasedAt": "2026-09-23T20:38:47Z",
   "changelog": "https://github.com/cloverinternational/trebol/blob/main/CHANGELOG.md",
   "source": "git:github.com/cloverinternational/trebol@main",
   "updateCommand": "pi update --extensions"

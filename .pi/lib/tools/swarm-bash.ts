@@ -20,7 +20,7 @@ import { basename, dirname, join, relative, resolve, isAbsolute } from "node:pat
 import { checkAllowedPath, defaultAllowedPaths, resolvePathForCheck, pathWithinRoot } from "./path-guard.ts";
 
 export const SWARM_BASH_DESCRIPTION =
-  "Execute a shell command and capture stdout, stderr, exit code, duration, and timeout status. Pipes and redirections are supported.\n\nSet timeout_seconds for every command; values below the enforced 60-second minimum are raised automatically. Use cwd instead of cd.";
+  "Execute a shell command and capture stdout, stderr, exit code, duration, and timeout status. Pipes and redirections are supported.\n\nSet timeout_seconds to a JSON integer for every command; booleans are invalid. Defaults to 90 seconds when missing or malformed; values below the enforced 60-second minimum are raised automatically. Use cwd instead of cd.";
 
 /** Exact JSON Schema Swarm's SchemaFor[BashParams] emits (captured from the wire). */
 export const SWARM_BASH_PARAMETERS = {
@@ -29,13 +29,25 @@ export const SWARM_BASH_PARAMETERS = {
     cwd: { description: "Working directory (use this instead of 'cd')", type: "string" },
     description: { description: "Brief label for this command shown in the status header and TUI (5-10 words)", type: "string" },
     env: { additionalProperties: { type: "string" }, description: "Extra environment variables to set", properties: {}, type: "object" },
-    timeout_seconds: { default: "60", description: "Max seconds to wait (minimum 60; values below 60 are raised automatically)", type: "integer" },
+    timeout_seconds: { default: 90, description: "Max seconds to wait as an integer number (never a boolean); values below the enforced 60-second minimum are raised automatically", type: "integer" },
   },
   required: ["command"],
   type: "object",
 } as const;
 
-export interface BashParams { command: string; cwd?: string; env?: Record<string, string>; timeout_seconds?: number; description?: string; background?: boolean }
+export interface BashParams { command: string; cwd?: string; env?: Record<string, string>; timeout_seconds?: number; timeout?: unknown; description?: string; background?: boolean }
+
+/** Normalize common model/tool payload mistakes without treating booleans as numbers. */
+export function normalizeBashParams(value: unknown): BashParams {
+  const params = value && typeof value === "object" ? value as Record<string, unknown> : {};
+  const supplied = params.timeout_seconds;
+  let timeout: number | undefined;
+  if (typeof supplied === "number" && Number.isFinite(supplied)) timeout = Math.trunc(supplied);
+  else if (typeof supplied === "string" && /^\d+$/.test(supplied.trim())) timeout = Number(supplied.trim());
+  else if (typeof params.timeout === "number" && Number.isFinite(params.timeout)) timeout = Math.trunc(params.timeout);
+  else if (typeof params.timeout === "string" && /^\d+$/.test(params.timeout.trim())) timeout = Number(params.timeout.trim());
+  return { ...params, command: typeof params.command === "string" ? params.command : "", timeout_seconds: timeout ?? 90 } as BashParams;
+}
 
 /** Pi's native Bash call preview: keep the command visible in the dim tool row. */
 export function formatBashCall(args: { command?: string; timeout_seconds?: number; timeout?: number } | undefined, theme: any): string {
@@ -49,11 +61,7 @@ export function formatBashCall(args: { command?: string; timeout_seconds?: numbe
 
 type WrapToWidth = (text: string, width: number) => string[];
 
-/**
- * Minimal dependency-free fallback for headless consumers. The live extension
- * injects pi-tui's wrapTextWithAnsi so terminal-cell width is authoritative for
- * tabs, wide glyphs, and ANSI sequences.
- */
+/** Dependency-free equivalent of Pi's Text component for extension tests. */
 const wrapPlainText: WrapToWidth = (text, width) => {
   if (width <= 0) return [""];
   const normalized = text.replace(/\t/g, "   ");
@@ -75,13 +83,32 @@ export const BASH_PREVIEW_LINES = 5;
  * guard and tears down the whole TUI. A multi-line `command` (heredoc, `&&`
  * chain) therefore crashed the bash row mid-flight. Normalise before wrapping.
  */
-const toDisplayRows = (text: string, width: number, wrapToWidth: WrapToWidth): string[] =>
-  text
-    .replace(/\r\n/g, "\n")
-    .replace(/\r/g, "\n")
-    .split("\n")
+const rowCellWidth = (line: string): number => Array.from(line).reduce((n, ch) => {
+  const cp = ch.codePointAt(0) ?? 0;
+  if (/\p{Mark}/u.test(ch) || cp === 0x200d || cp === 0xfe0f) return n;
+  return n + ((cp >= 0x1100 && (cp <= 0x115f || cp === 0x2329 || cp === 0x232a || cp >= 0x2e80 && cp <= 0xa4cf || cp >= 0xac00 && cp <= 0xd7a3 || cp >= 0xf900 && cp <= 0xfaff || cp >= 0xfe10 && cp <= 0xfe6f || cp >= 0xff00 && cp <= 0xff60 || cp >= 0x1f300 && cp <= 0x1faff || cp >= 0x20000 && cp <= 0x3fffd)) ? 2 : 1);
+}, 0);
+
+/** Wrap output produced by arbitrary commands, then enforce the terminal's display-cell limit. */
+export const toDisplayRows = (text: string, width: number, wrapToWidth: WrapToWidth): string[] => {
+  const rows = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n")
     .flatMap((line) => wrapToWidth(line, width))
     .flatMap((line) => (line.includes("\n") ? line.split("\n") : [line]));
+  return rows.map((line) => {
+    // Strip command-provided ANSI control sequences before the TUI renderer sees them.
+    const plain = stripANSI(line);
+    if (rowCellWidth(plain) <= width) return plain;
+    let out = "", cells = 0;
+    for (const char of plain) {
+      const cp = char.codePointAt(0) ?? 0;
+      const cell = /\p{Mark}/u.test(char) || cp === 0x200d || cp === 0xfe0f ? 0 : rowCellWidth(char);
+      if (cells + cell > width) break;
+      out += char;
+      cells += cell;
+    }
+    return out;
+  });
+};
 
 /**
  * The model-facing payload is Swarm's `<result …><stdout><![CDATA[…]]></stdout>`
@@ -98,12 +125,25 @@ export function extractBashDisplayText(text: string): string {
   return /<result [^>]*\bexit_code="0"/.test(text) ? "" : text;
 }
 
+/** Render the structured response returned when interactive Bash is detached. */
+function extractBackgroundDisplayText(text: string, details: any): string | undefined {
+  let body: any;
+  try { body = JSON.parse(text); } catch { return undefined; }
+  if (!body || body.backgrounded !== true || typeof body.task_id !== "string") return undefined;
+  const command = typeof details?.command === "string" ? details.command : "";
+  const status = body.status === "running" ? "running" : body.status ?? "backgrounded";
+  const message = typeof body.message === "string" ? body.message : "Background command is running.";
+  const commandRow = command ? `$ ${command}` : `$ ...`;
+  return `${commandRow}\n[backgrounded · ${status} · task_id=${body.task_id}]\n${message}`;
+}
+
 export function bashResultComponent(result: any, options: any = {}, theme: any = {}, wrapToWidth: WrapToWidth = wrapPlainText): { render: (width: number) => string[]; invalidate: () => void } {
   const raw = Array.isArray(result?.content) ? result.content.filter((part: any) => part?.type === "text").map((part: any) => part.text).join("\n") : "";
   const failed = Boolean(result?.isError || options?.isError);
   const partial = Boolean(options?.isPartial);
   // A failure's message is prose, not the XML envelope; keep it verbatim.
-  const body = stripANSI(failed ? raw : extractBashDisplayText(raw)).trimEnd();
+  const background = failed ? undefined : extractBackgroundDisplayText(raw, result?.details);
+  const body = stripANSI(failed ? raw : background ?? extractBashDisplayText(raw)).trimEnd();
   const dim = (text: string) => theme?.fg?.(failed ? "error" : "toolOutput", text) ?? text;
   const muted = (text: string) => theme?.fg?.("muted", text) ?? text;
   const durationMs = Number(result?.details?.duration_ms);
@@ -130,12 +170,10 @@ export function bashCallComponent(value: string, truncate?: (text: string, width
   // Pi validates every rendered line against the terminal width, and treats one
   // array element as one row. Commands can be arbitrarily long AND multi-line
   // (heredocs, `&&` chains), so collapse to a single width-bounded row.
-  const visible = (text: string) => stripANSI(text).length;
   const fit = (text: string, width: number) => {
     if (width <= 0) return "";
-    if (visible(text) <= width) return text;
-    if (width <= 1) return text.slice(0, width);
-    return `${text.slice(0, width - 1)}…`;
+    const row = toDisplayRows(text, width, wrapPlainText)[0] ?? "";
+    return rowCellWidth(text) > width && width > 1 ? row.slice(0, width - 1) + "…" : row;
   };
   return {
     render: (width: number) => {
@@ -331,7 +369,7 @@ export function resolveWorkdir(cwd: string | undefined, defaultCwd: string, allo
   return { dir: abs };
 }
 
-export interface RunOptions { defaultCwd: string; shell?: string; signal?: AbortSignal; onData?: (chunk: { stream: "stdout" | "stderr"; text: string }) => void }
+export interface RunOptions { defaultCwd: string; shell?: string; signal?: AbortSignal }
 
 /**
  * bash.go prepareCmd: `cmd.WaitDelay = 2 * time.Second`. Go issue #21922 — a
@@ -376,8 +414,8 @@ export function runSwarmBash(params: BashParams, options: RunOptions): Promise<B
     // pipe (and any bound port) alive. bgprocess spawns the same way.
     const child = spawn(options.shell ?? "/bin/bash", ["-c", params.command], { cwd: wd.dir || undefined, env, stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32" });
     const out: Buffer[] = [], err: Buffer[] = [];
-    child.stdout.on("data", (d: Buffer) => { out.push(d); options.onData?.({ stream: "stdout", text: d.toString("utf8") }); });
-    child.stderr.on("data", (d: Buffer) => { err.push(d); options.onData?.({ stream: "stderr", text: d.toString("utf8") }); });
+    child.stdout.on("data", (d: Buffer) => out.push(d));
+    child.stderr.on("data", (d: Buffer) => err.push(d));
     let timedOut = false;
     const timer = setTimeout(() => { timedOut = true; killProcessTree(child); }, effectiveSecs * 1000);
     const onAbort = () => killProcessTree(child);

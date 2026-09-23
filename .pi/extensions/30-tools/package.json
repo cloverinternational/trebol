@@ -11,7 +11,6 @@
       "exa-search.ts",
       "history-search.ts",
       "ask-user/index.ts",
-      "paseo.ts",
       "research-tools.ts",
       "swarm-monitor.ts",
       "swarm-websearch.ts",

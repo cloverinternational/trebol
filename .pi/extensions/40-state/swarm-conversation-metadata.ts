@@ -1,6 +1,7 @@
 import { METADATA_SYSTEM_PROMPT, type MetadataState, type TranscriptMessage, openAICompletionsTransport, refreshConversationMetadata } from "../../lib/state/swarm-conversation-metadata.ts";
 import { injectContextBlocks } from "../../lib/context/swarm-context.ts";
 import { currentContextBlocks } from "../10-context/swarm-prompt.ts";
+import { onAgentSettled } from "../../lib/runtime/agent-settled.ts";
 
 /**
  * After every agent run, issue Swarm's conversation title/summary model call
@@ -47,7 +48,7 @@ export function registerSwarmConversationMetadata(pi: Pi): void {
     const last = [...entries].reverse().find((e) => e?.type === "custom" && e?.customType === ENTRY);
     if (last?.data && typeof last.data === "object") state = { ...last.data };
   });
-  pi.on?.("agent_end", async (event: { messages?: any[] }, ctx: any) => {
+  onAgentSettled(pi, async (_event: unknown, ctx: any) => {
     const model = ctx?.model ?? pi.getModel?.();
     if (!model?.baseUrl || (model.api && model.api !== "openai-completions")) return;
     let auth: { apiKey?: string; headers?: Record<string, string> } = {};
@@ -57,10 +58,10 @@ export function registerSwarmConversationMetadata(pi: Pi): void {
     // system prompt carries the same cached/ephemeral context blocks.
     const { cached, ephemeral } = currentContextBlocks(ctx?.cwd ?? pi.getCwd?.() ?? process.cwd());
     const systemPrompt = injectContextBlocks(METADATA_SYSTEM_PROMPT, cached, ephemeral);
-    // conversation_metadata.go walks the WHOLE conversation; Pi's agent_end
-    // carries only this prompt's messages, so prefer the session branch.
+    // agent_settled is notification-only and follows all retries,
+    // compaction retries, and queued continuations. Read the canonical branch.
     const branch: any[] | undefined = ctx?.sessionManager?.getBranch?.()?.filter((e: any) => e?.type === "message").map((e: any) => e.message);
-    const messages = transcriptOf(branch?.length ? branch : event?.messages ?? []);
+    const messages = transcriptOf(branch ?? []);
     // client.Execute → refreshConversationMetadataBestEffort, then the
     // persistence-path RefreshConversationMetadata (version-idempotent).
     for (let attempt = 0; attempt < 2; attempt++) {

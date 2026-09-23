@@ -38,6 +38,7 @@ const READ_TOOLS = new Set(["read", "readfile", "grep", "glob", "find", "ls", "l
 const INTERACTION_TOOLS = new Set(["askuserquestion", "question", "userquestion", "pushagentupdate", "annoyed"]);
 const RESEARCH_TOOLS = new Set(["websearch", "search", "webfetch", "web", "browser", "xsearch", "xaiwebsearch", "fetch"]);
 const IGNORED_AUDIT = new Set([...TASK_TOOLS, ...PLAN_TOOLS, ...SKILL_TOOLS, ...INTERACTION_TOOLS]);
+const BOOTSTRAP_TOOL = "bootstrap";
 // One vocabulary covers object keys and values embedded in commands.
 const secretName = String.raw`(?:token|password|passwd|secret|credential|authorization|cookie|api(?:[_-]?key)|private(?:[_-]?key)|access(?:[_-]?(?:key|token)))`;
 const secret = new RegExp(secretName, "i");
@@ -82,7 +83,7 @@ function readOnlyBash(command: string): boolean {
 }
 function exempt(name: string, args: any): boolean {
   const n = normalize(name);
-  return TASK_TOOLS.has(n) || PLAN_TOOLS.has(n) || READ_TOOLS.has(n) || INTERACTION_TOOLS.has(n) ||
+  return n === BOOTSTRAP_TOOL || TASK_TOOLS.has(n) || PLAN_TOOLS.has(n) || READ_TOOLS.has(n) || INTERACTION_TOOLS.has(n) ||
     SKILL_TOOLS.has(n) || RESEARCH_TOOLS.has(n) || (n === "bash" && readOnlyBash(text(args?.command)));
 }
 function stateFrom(entries: readonly unknown[]): HookState {

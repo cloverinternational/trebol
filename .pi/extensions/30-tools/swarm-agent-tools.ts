@@ -1,5 +1,6 @@
 import { AgentManager, createPiRunner } from "../../../packages/tools/agents/src/index.ts";
 import { applySwarmSurface } from "../../lib/runtime/swarm-tool-surface.ts";
+import { CONTRACTS } from "../../lib/tools/swarm-agent-tools.contract.ts";
 import { AGENT_MANAGER_SYMBOL, AGENT_TOOLS_SYMBOL, AgentToolValidationError, SwarmAgentTools, WAIT_FOR_AGENT_BACKGROUND, type ToolResult } from "../../lib/tools/swarm-agent-tools.ts";
 import { newErrorID } from "../../lib/tools/swarm-bash.ts";
 import { createSessionWakeup } from "../../lib/runtime/session-wakeup.ts";
@@ -39,13 +40,13 @@ export function registerSwarmAgentTools(pi: Pi, options: { manager?: AgentManage
   registrations.add(pi as object);
   for (const [name, method] of Object.entries(methods)) {
     pi.registerTool?.(applySwarmSurface({
-      name, label: name, description: "", parameters: {},
+      name, label: name, ...CONTRACTS[name],
       async execute(callId: string, params: Record<string, unknown>) {
         try { return text(await (logic[method] as any).call(logic, params, callId)); }
         catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           if (message.startsWith("Error executing ") || err instanceof PlainToolFailure) throw err;
-          // registry_impl.go: Validate failures are sdkerr-wrapped a second time.
+          // Validation failures are wrapped once more.
           if (err instanceof AgentToolValidationError) throw new Error(`Error executing ${name}: validation failed for ${name}: ${message} (error_id=${newErrorID()}) (error_id=${newErrorID()})`);
           throw new Error(`Error executing ${name}: ${message} (error_id=${newErrorID()})`);
         }

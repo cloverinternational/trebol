@@ -1,4 +1,5 @@
-import { loadSwarmCanonicalTools, PERMISSIVE_PARAMETERS, rawPi, withSwarmToolSurface } from "../../lib/runtime/swarm-tool-surface.ts";
+import { PERMISSIVE_PARAMETERS, rawPi, withSwarmToolSurface } from "../../lib/runtime/swarm-tool-surface.ts";
+import { INTERACTIVE_BASH_CONTRACT, READBACKGROUNDCOMMAND_CONTRACT } from "../../lib/tools/swarm-bash.contract.ts";
 import { afterTurnFlushListeners } from "../../lib/runtime/swarm-builtin-hooks-runtime.ts";
 import { newErrorID } from "../../lib/tools/swarm-bash.ts";
 import {
@@ -10,6 +11,7 @@ import {
 } from "../../lib/tools/swarm-bgprocess.ts";
 import { bashCallComponent, bashResultComponent, formatBashCall } from "../../lib/tools/swarm-bash.ts";
 import { withDefaultToolRenderer } from "../../../packages/runtime/core/src/tool-renderer.ts";
+import { onAgentSettled } from "../../lib/runtime/agent-settled.ts";
 
 type Pi = any;
 const registrations = new WeakSet<object>();
@@ -30,7 +32,6 @@ export function registerSwarmBackgroundBash(inputPi: Pi): void {
   const manager = new SwarmBackgroundProcessManager();
   (globalThis as any)[BACKGROUND_BASH_DETACH] = () => manager.requestBackground();
   managers.set(identity, manager);
-  const fixtures = loadSwarmCanonicalTools();
   const text = (value: string, details: Record<string, unknown> = {}) => ({ content: [{ type: "text", text: value }], details });
   const fail = (value: string): never => { throw new Error(value); };
 
@@ -62,14 +63,14 @@ export function registerSwarmBackgroundBash(inputPi: Pi): void {
   });
   pi.on?.("session_start", (_e: unknown, ctx: any) => { sessionContext = ctx; });
   pi.on?.("agent_start", () => { running = true; });
-  pi.on?.("agent_end", () => { running = false; pending.push(...midRun.splice(0)); wake(); });
+  onAgentSettled(pi, () => { running = false; pending.push(...midRun.splice(0)); wake(); });
 
   pi.registerTool?.(withDefaultToolRenderer({
     name: "Bash",
     label: "Bash",
-    description: fixtures.get("Bash")!.description,
-    // Keep the canonical permissive schema for parity; `background` is an
-    // accepted execution parameter handled by SwarmBackgroundProcessManager.
+    description: INTERACTIVE_BASH_CONTRACT.description,
+    // Arguments are validated by SwarmBackgroundProcessManager, which reports
+    // its own prose; `background` is an accepted execution parameter.
     parameters: { ...PERMISSIVE_PARAMETERS },
     renderCall(args: BackgroundBashParams, theme: any) {
       return bashCallComponent(formatBashCall(args, theme));
@@ -91,7 +92,7 @@ export function registerSwarmBackgroundBash(inputPi: Pi): void {
   pi.registerTool?.(withDefaultToolRenderer({
     name: "ReadBackgroundCommand",
     label: "ReadBackgroundCommand",
-    description: fixtures.get("ReadBackgroundCommand")!.description,
+    description: READBACKGROUNDCOMMAND_CONTRACT.description,
     parameters: { ...PERMISSIVE_PARAMETERS },
     async execute(_id: string, params: ReadBackgroundParams) {
       try {

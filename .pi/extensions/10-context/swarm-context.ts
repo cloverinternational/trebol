@@ -7,6 +7,8 @@ import { ContextIndex, CONTEXT_SOURCE_ENTRY, CONTEXT_TOMBSTONE_ENTRY, MAX_SOURCE
 import { RETRIEVAL_BUDGET, RetrievalSession, chooseRetrievalModel, freeSummaries, summaryPlan, type RetrievalModelChoice } from "../../lib/context/context-retrieval.ts";
 import { footerSegments } from "../50-ui/conversation-metrics.ts";
 import { consultWithPi } from "../../lib/context/context-consult.ts";
+import { searchKnowledgeTree } from "../../lib/context/knowledge-pageindex.ts";
+import { pushStartupNotice } from "../../lib/ui/startup-notices.ts";
 
 const result = (value: unknown) => ({ content: [{ type: "text", text: JSON.stringify(value) }], details: value });
 const schema = (operation: string, properties: Record<string, unknown>, required: string[] = ["operation"]) => ({ type: "object", required, additionalProperties: false, properties: { operation: { type: "string", enum: [operation] }, ...properties } });
@@ -76,7 +78,7 @@ export default function swarmContextExtension(pi: any): void {
     const configured = pi.config?.contextRetrievalModel;
     const verifiedOverride = typeof configured === "string" && available.some(name => name === configured || name.endsWith("/" + configured)) ? configured : undefined;
     modelChoice = chooseRetrievalModel(available, verifiedOverride);
-    if (modelChoice.fallback) ctx?.ui?.notify?.("swarm-context: " + modelChoice.reason, "warn");
+    if (modelChoice.fallback) pushStartupNotice("swarm-context: " + modelChoice.reason, "warn");
   });
 
   pi.on?.("session_shutdown", () => { sessionGeneration++; });
@@ -163,13 +165,21 @@ export default function swarmContextExtension(pi: any): void {
     if (generation !== sessionGeneration || signal?.aborted) return { status: "cancelled", evidence: [], untrusted: true };
     const session = new RetrievalSession(index, scopeFor(params.namespace));
     const outline = session.outline();
-    if (!outline.outline.length) return { status: "not-indexed", untrusted: true, evidence: [], searched: [], next_steps: outline.next_steps };
+    if (!outline.outline.length) {
+      const memory = searchKnowledgeTree(cwd, params.query, { namespace: params.namespace ?? scope.namespace, status: "candidate" });
+      if (memory.evidence.length) return { status: "candidate-leads", untrusted: true, evidence: memory.evidence,
+        searched: memory.evidence.map(item => item.id), next_steps: { summary: "Found unverified knowledge leads; no session document indexed", options: ["Read the cited evidence before relying on any answer.", "Use memory_history get for the exact candidate revision."] } };
+      return { status: "not-indexed", untrusted: true, evidence: [], searched: [], next_steps: outline.next_steps };
+    }
     const consulted = await consultWithPi(pi, { prompt: RETRIEVER_PROMPT.replace("1. Call context_outline to see the indexed sources, each with a one-line description, and their section titles, summaries, nodeIds, and line numbers. The outline never contains body text.", "You cannot call tools. Select IDs only from the supplied outline; the parent will read selected sections." ) + "\n\nQUERY:\n" + params.query + "\n\nSOURCES:\n" + JSON.stringify(outline.sources) + "\n\nOUTLINE:\n" + JSON.stringify(outline.outline), cwd, signal, model: modelChoice.model ?? sessionModel, generation: sessionGeneration, currentGeneration: () => sessionGeneration });
     if (consulted.status !== "completed") return { status: consulted.status, untrusted: true, evidence: [], searched: [], sources: outline.sources, outline: outline.outline, error: consulted.error, next_steps: { summary: "Retrieval consultation failed", options: [consulted.error, "Read the supplied outline and call context_read yourself."] } };
     const picked: any = consulted.value;
     if (!picked || typeof picked.found !== "boolean" || !Array.isArray(picked.nodes)) return { status: "malformed-json", untrusted: true, evidence: [], searched: [] };
     const nodes: any[] = (Array.isArray(picked.nodes) ? picked.nodes : []).slice(0, RETRIEVAL_BUDGET.maxReads);
     const evidence = nodes.flatMap(node => session.read(String(node.sourceId), [String(node.nodeId)]).evidence.map(item => ({ ...item, why: String(node.why ?? "") })));
+    const memory = evidence.length ? undefined : searchKnowledgeTree(cwd, params.query, { namespace: params.namespace ?? scope.namespace, status: "candidate" });
+    if (memory?.evidence.length) return { status: "candidate-leads", untrusted: true, evidence: memory.evidence,
+      searched: memory.evidence.map(item => item.id), next_steps: { summary: "Only unverified knowledge leads found", options: ["Read each source citation before relying on it.", "Use memory_history get for the exact candidate revision."] } };
     const status = evidence.length ? "ok" : "no-result";
     return { status, untrusted: true, retrievalModel: modelChoice.model ?? "session-model", modelFallback: modelChoice.fallback, evidence, searched: session.visited,
       next_steps: { summary: evidence.length ? "Cited " + evidence.length + " section(s)" : "Nothing in the index answers this", options: evidence.length ? ["Verify each excerpt actually answers the question before relying on it.", "Cite sourceId, nodeId, and line when you use an excerpt."] : [String(picked.note ?? "The retriever found no matching section."), "Say the index does not cover this rather than answering from general knowledge."] } };

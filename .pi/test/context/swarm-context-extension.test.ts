@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import swarmContextExtension from "../../extensions/10-context/swarm-context.ts";
 import { footerSegments } from "../../extensions/50-ui/conversation-metrics.ts";
+import { startupNotices } from "../../lib/ui/startup-notices.ts";
 
 function harness(cwd: string, options: { models?: string[]; retriever?: (task: string) => string } = {}) {
   const tools = new Map<string, any>(); const commands = new Map<string, any>(); const entries: any[] = []; const notices: any[] = []; const spawned: any[] = [];
@@ -49,10 +50,13 @@ describe("swarm-context extension", () => {
     expect(footerSegments().get("swarm-context")!()).toBeUndefined();
     expect(cheap.notices).toEqual([]);
 
-    const fallback = harness(seed(), { models: ["some/expensive-model"] });
+    harness(seed(), { models: ["some/expensive-model"] });
     expect(footerSegments().get("swarm-context")!()).toBe("ctx:session-model");
-    expect(fallback.notices[0]).toMatchObject({ level: "warn" });
-    expect(fallback.notices[0].text).toContain("session model");
+    // The warning is a startup notice, not a ctx.ui.notify call: it is raised
+    // during session_start, before the UI can show a transient notification.
+    const warning = startupNotices().at(-1);
+    expect(warning).toMatchObject({ level: "warn" });
+    expect(warning!.message).toContain("session model");
   });
 
   it("says not-indexed rather than searching an empty index", async () => {

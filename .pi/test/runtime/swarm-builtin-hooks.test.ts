@@ -32,7 +32,7 @@ describe("registered stop-time reconciliation", () => {
     expect(h.sent.filter(x => x[1].triggerTurn)).toHaveLength(1);
   });
   it("defers questions, tool errors, interaction and background dispatch", async () => {
-    for (const kind of ["question", "error", "ask", "background"]) {
+    for (const kind of ["ask", "background"]) {
       const h = harness();
       await h.work(kind === "ask" ? "ask_user_question" : kind === "background" ? "Bash" : "Read",
         kind === "error" ? { isError: true } : kind === "background" ? { content: [{ type: "text", text: JSON.stringify({ backgrounded: true }) }] } : {});
@@ -40,9 +40,26 @@ describe("registered stop-time reconciliation", () => {
     }
   });
   it("does not wake pending, complete, owned, blocked or unfocused work", async () => {
-    for (const patch of [{ status: "pending" }, { status: "completed" }, { owner_id: "child" }, { dependsOn: ["missing"] }, { active: false }]) {
+    for (const patch of [{ status: "completed" }, { owner_id: "child" }]) {
       const h = harness(); Object.assign(h.tasks[0], patch); await h.work(); await h.stop(); expect(h.sent).toEqual([]);
     }
+  });
+  it("requests the interaction tool for pending and blocked tasks only once",async()=>{
+    const h=harness();Object.assign(h.tasks[0],{status:"pending",active:false,dependsOn:["missing"]});
+    await h.work();await h.stop("stop","What should I do next?");
+    expect(h.sent.filter(x=>x[1].triggerTurn)).toHaveLength(1);
+    expect(h.sent[0][0].details.parts.map((p:any)=>p.text).join("\n")).toContain("ask_user_question");
+    await h.stop();expect(h.sent.filter(x=>x[1].triggerTurn)).toHaveLength(1);
+  });
+  it("recovers rejected completion and ordinary tool failures instead of suppressing cleanup",async()=>{
+    const h=harness(); await h.work("TaskManage",{isError:true});await h.stop();
+    expect(h.sent.filter(x=>x[1].triggerTurn)).toHaveLength(1);
+  });
+  it("resumes reconciliation after the tracked background worker finishes",async()=>{
+    const h=harness();await h.work("Subagent",{content:[{type:"text",text:JSON.stringify({agent_id:"worker",status:"async_launched"})}]});
+    await h.stop();expect(h.sent.filter(x=>x[1].triggerTurn)).toHaveLength(0);
+    await h.work("wait_for_agent",{input:{agent_id:"worker"},content:[{type:"text",text:JSON.stringify({agent_id:"worker",status:"completed"})}]});
+    await h.stop();expect(h.sent.filter(x=>x[1].triggerTurn)).toHaveLength(1);
   });
   it("invalidates work on shutdown and session replacement", async () => {
     const h = harness(); await h.work(); await h.emit("session_shutdown"); await h.stop(); expect(h.sent).toEqual([]);
@@ -223,6 +240,11 @@ describe("headless builtin hook pipeline", () => {
     const p = createSwarmBuiltinPipeline({ session: "codemode", tasks: () => [], enforcementMode: "block" });
     expect(p.preTool({ toolName: "codemode", params: {}, toolCallId: "outer" }).block).toBeUndefined();
     expect(p.preTool({ toolName: "write", params: {}, toolCallId: "nested" }).block).toContain("task-enforcement-hook");
+  });
+  it("allows bootstrap to establish tasks while continuing to gate acting tools", () => {
+    const p = createSwarmBuiltinPipeline({ session: "bootstrap", tasks: () => [], enforcementMode: "block" });
+    expect(p.preTool({ toolName: "bootstrap", params: { task: "work" }, toolCallId: "seed" }).block).toBeUndefined();
+    expect(p.preTool({ toolName: "write", params: {}, toolCallId: "acting" }).block).toContain("task-enforcement-hook");
   });
   it("interactive cadence ticks once per prompt (no message.after_receive), so the 5th prompt is still inside the window", () => {
     resetReminderSequences();

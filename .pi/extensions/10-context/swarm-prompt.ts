@@ -27,6 +27,9 @@ export { UPSTREAM_SOURCE, forgeSwarmSystemPrompt, swarmForgeSystemPrompt };
  */
 export const MAIN_REPORTING_DIRECTIVE = `[REPORTING DIRECTIVE]
 
+# Conversation startup
+When starting a conversation, call bootstrap first, then use TaskManage.
+
 For every substantive final response, produce an evidence-based structured report:
 
 1. Outcome — answer the user's question or state exactly what changed.
@@ -437,9 +440,13 @@ export function registerSwarmPrompt(pi: PromptExtensionAPI): void {
   if (promptRegistrations.has(pi as object)) return;
   promptRegistrations.add(pi as object);
   registerHook(pi, "swarm-prompt", "before_agent_start", (event: PromptExtensionEvent, ctx: PromptExtensionContext) => {
-    const cwd = ctx.cwd ?? event.systemPromptOptions?.cwd ?? process.cwd();
-    const assemble = () => {
+    // Pi can pass an already assembled prompt back without systemPromptOptions.
+    // Keep its embedded workspace unless the current callback supplies one;
+    // an explicit cwd always wins so cross-workspace calls cannot reuse it.
+    const embeddedCwd = event.systemPrompt.match(/<current_working_directory>([^<]+)<\/current_working_directory>/)?.[1];
+    const cwd = ctx.cwd ?? event.systemPromptOptions?.cwd ?? embeddedCwd ?? process.cwd();
     const interactive = (ctx as { hasUI?: boolean }).hasUI === true;
+    const assemble = () => {
     const isolation = cliIsolation();
     const config = loadPromptContextConfig(cwd, undefined, { persistMigration: false });
     const selectedSkills = config.skills?.mode === "allowlist" ? config.skills.names : undefined;

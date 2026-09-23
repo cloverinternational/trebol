@@ -1,19 +1,16 @@
 import { PERMISSIVE_PARAMETERS, overlaySwarmToolSchemas } from "../../lib/runtime/swarm-tool-surface.ts";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { AgentManager, type Runner } from "../../../packages/tools/agents/src/index.ts";
 import { SwarmAgentTools } from "../../lib/tools/swarm-agent-tools.ts";
 import { registerSwarmAgentTools } from "../../extensions/30-tools/swarm-agent-tools.ts";
-import { applyWorkflowGuidance } from "../../../packages/context/prompt/src/workflow-guidance.ts";
+import { TOOL_CONTRACTS } from "../../lib/runtime/tool-contracts.ts";
 
 const root = resolve(import.meta.dirname, "../../..");
+
 const names = ["BackgroundTask", "Subagent", "SubagentOutput", "TaskOutput", "Delegate", "DelegateOutput", "multi_agent_wait", "wait_for_agent"];
-const fixtures = new Map(
-  JSON.parse(readFileSync(resolve(root, "tools/parity/fixtures/swarm-tools.json"), "utf8"))
-    .map((entry: any) => [entry.function.name, entry.function]),
-);
 const deferred = () => {
   let resolve!: (value: string) => void;
   const promise = new Promise<string>(r => { resolve = r; });
@@ -39,15 +36,14 @@ describe("Swarm agent orchestration tools", () => {
     d.resolve("done");
   });
 
-  it("advertises fixture descriptions and schemas byte-for-byte", () => {
+  it("advertises the owned contract descriptions and schemas byte-for-byte", () => {
     const { tools } = harness(async () => "done");
     expect(tools.map(t => t.name)).toEqual(names);
     for (const tool of tools) {
-      const fixture: any = fixtures.get(tool.name);
-      // Local workflow guidance intentionally adapts selected upstream prose.
-      expect(tool.description).toBe(applyWorkflowGuidance(fixture.description));
+      const contract = TOOL_CONTRACTS[tool.name];
+      expect(tool.description).toBe(contract.description);
       expect(tool.parameters).toEqual(PERMISSIVE_PARAMETERS);
-      expect(JSON.stringify(overlaySwarmToolSchemas({ tools: [{ type: "function", function: { name: tool.name, description: tool.description, parameters: tool.parameters } }] })!.tools[0].function.parameters)).toBe(JSON.stringify(fixture.parameters));
+      expect(JSON.stringify(overlaySwarmToolSchemas({ tools: [{ type: "function", function: { name: tool.name, description: tool.description, parameters: tool.parameters } }] })!.tools[0].function.parameters)).toBe(JSON.stringify(contract.parameters));
     }
     expect(tools.some(t => t.name === "Agent" || t.name === "AgentControl")).toBe(false);
   });

@@ -5,6 +5,7 @@ vi.mock("../../lib/tools/paseo-setup.ts", () => ({
   paseoPair: vi.fn(), paseoSetup: vi.fn(), paseoStatus: vi.fn(), paseoStop: vi.fn(), paseoUpdate: vi.fn(),
 }));
 import extension from "../../extensions/30-tools/paseo.ts";
+import { startupNotices } from "../../lib/ui/startup-notices.ts";
 
 it("does not access expired UI after delayed startup resolves", async () => {
   let resolve!: (value: any) => void;
@@ -24,5 +25,7 @@ it("still reports startup failure while the session is active", async () => {
   extension({ on: (name, handler) => { handlers.set(name, handler); } });
   await handlers.get("session_start")({}, { ui: { notify } });
   await new Promise(r => setImmediate(r));
-  expect(notify).toHaveBeenCalledWith("Paseo auto-start skipped: fixture failure", "warning");
+  // Startup failures go to the startup notice buffer rather than ctx.ui.notify,
+  // which survives the UI not being ready yet during session_start.
+  expect(startupNotices().at(-1)).toEqual({ message: "Paseo auto-start skipped: fixture failure", level: "warning" });
 });

@@ -54,19 +54,31 @@ describe("root Pi TaskManage extension", () => {
     expect(runtime.tools).toHaveLength(1);
     expect(runtime.tools.find((tool: any) => tool.name === "ask_user_question")).toBeUndefined();
     // The model-facing contract is Swarm's canonical TaskManage definition
-    // (tools/parity/fixtures/swarm-tools.json), overlaid on the wire by
+    // (tests/fixtures/swarm-tools.json), overlaid on the wire by
     // before_provider_request; the registered validator stays permissive so
     // the tool validates its own input exactly like Swarm's Go tool.
     const canonical = loadSwarmToolSurface().get("TaskManage")!;
     expect(runtime.tools[0]).toMatchObject({
       name: "TaskManage",
-      description: canonical.description,
+      description: expect.stringContaining("Every new task requires"),
       parameters: PERMISSIVE_PARAMETERS,
       promptSnippet: expect.any(String),
       renderCall: expect.any(Function),
       renderResult: expect.any(Function),
     });
-    expect(overlaySwarmToolSchemas({ tools: [{ type: "function", function: { name: "TaskManage", description: "", parameters: runtime.tools[0].parameters } }] })!.tools[0].function.parameters).toEqual(canonical.parameters);
+    const overlaid = overlaySwarmToolSchemas({ tools: [{ type: "function", function: { name: "TaskManage", description: "", parameters: runtime.tools[0].parameters } }] })!.tools[0].function.parameters;
+    expect(overlaid.type).toBe("object");
+    const branches = (overlaid as any).properties.operations.items.oneOf;
+    const branch = (op: string) => branches.find((candidate: any) => candidate.properties.op.const === op);
+    expect(branch("create").properties.questions).toBeDefined();
+    expect(branch("update").properties.answers).toBeDefined();
+    // A create without questions is the single most common granular-call
+    // failure, so the advertised schema must mark it required rather than
+    // leaving the runtime to reject a call the model was told was valid.
+    expect(branch("create").required).toContain("questions");
+    // Fields the validators refuse must not be advertised on that op.
+    expect(branch("update").properties.owner_id).toBeUndefined();
+    expect(branch("list").properties.include_audit).toBeUndefined();
     expect(runtime.handlers.get("session_start")).toHaveLength(3); // state, cleanup budget, audit
     // Swarm builtin pipeline (first) + task-audit coordinator (second).
     expect(runtime.handlers.get("tool_call")).toHaveLength(2);
@@ -108,7 +120,7 @@ describe("root Pi TaskManage extension", () => {
     const tool = first.tools[0];
 
     await tool.execute("call-1", {
-      operations: [{ key: "build", op: "create", subject: "Build adapter" }],
+      operations: [{ key: "build", op: "create", subject: "Build adapter" , questions: [{ id: "accept", text: "Is the adapter verified?" }] }],
     });
 
     expect(manager.execute({ operations: [{ key: "get", op: "get", taskId: { ref: "build" } }] }).status)
@@ -134,33 +146,42 @@ describe("root Pi TaskManage extension", () => {
   it("embeds the task-enforcement advisory into the successful tool result like agent_tools.go", async () => {
     const runtime = fakePi();
     registerTaskManageExtension(runtime.pi, { enforcementMode: "advise" });
-    const beforeStart = runtime.handlers.get("before_agent_start")![0];
-    await beforeStart({ prompt: "do it", systemPrompt: "base" }, {}); // advances the meta-nudge cadence clock
+    const beforeStarts = runtime.handlers.get("before_agent_start")!;
+    let startEvent: any = { prompt: "do it", systemPrompt: "base" };
+    for (const beforeStart of beforeStarts) startEvent = (await beforeStart(startEvent, {})) ?? startEvent;
     const toolCall = runtime.handlers.get("tool_call")![0];
     await expect(toolCall({ toolName: "write", toolCallId: "w1", input: {} }, {})).resolves.toBeUndefined();
-    const toolResult = runtime.handlers.get("tool_result")![0];
-    const patched: any = await toolResult({ toolName: "write", toolCallId: "w1", input: {}, content: [{ type: "text", text: "Wrote 1 file" }], isError: false }, {});
+    const toolResults = runtime.handlers.get("tool_result")!;
+    let patched: any = { toolName: "write", toolCallId: "w1", input: {}, content: [{ type: "text", text: "Wrote 1 file" }], isError: false };
+    for (const toolResult of toolResults) patched = (await toolResult(patched, {})) ?? patched;
     expect(patched.content[0].text).toBe('<system-reminder source="task-enforcement-hook" kind="nudge" seq="1">No active task is focused; consider a TaskManage create/update before multi-step work.</system-reminder>\n\n---\n\nWrote 1 file');
     // one budgeted nudge per turn window: the next call is silent
     await toolCall({ toolName: "write", toolCallId: "w2", input: {} }, {});
-    await expect(toolResult({ toolName: "write", toolCallId: "w2", input: {}, content: [{ type: "text", text: "x" }], isError: false }, {})).resolves.toBeUndefined();
+    let silent: any = { toolName: "write", toolCallId: "w2", input: {}, content: [{ type: "text", text: "x" }], isError: false };
+    for (const toolResult of toolResults) silent = (await toolResult(silent, {})) ?? silent;
+    expect(silent.content[0].text).toBe("x");
   });
 
   it("covers the full Pi task lifecycle: block, activate, audit", async () => {
     const runtime = fakePi();
     registerTaskManageExtension(runtime.pi, { enforcementMode: "block" });
-    const before = runtime.handlers.get("tool_call")![0];
-    const blocked: any = await before({ toolName: "write", toolCallId: "blocked", input: {} }, {});
+    const befores = runtime.handlers.get("tool_call")!;
+    let blocked: any;
+    for (const before of befores) blocked = (await before({ toolName: "write", toolCallId: "blocked", input: {} }, {})) ?? blocked;
     expect(blocked).toMatchObject({ block: true });
     expect(blocked.reason.startsWith("Tool 'write' blocked by hook: <system-reminder source=\"task-enforcement-hook\" kind=\"block\" seq=\"")).toBe(true);
     expect(blocked.reason).toContain("[TASK ENFORCEMENT - BLOCKED] YOU CANNOT EXECUTE ANY TOOL WITHOUT A TASK");
 
     const tool = runtime.tools.find((candidate: any) => candidate.name === "TaskManage");
-    await tool.execute("create", { operations: [{ key: "work", op: "create", subject: "Do work" }] });
+    await tool.execute("create", { operations: [{ key: "work", op: "create", subject: "Do work" , questions: [{ id: "accept", text: "Is the work verified?" }] }] });
     // pending only: still blocked (Swarm requires an in_progress + active focus)
-    expect(await before({ toolName: "write", toolCallId: "blocked2", input: {} }, {})).toMatchObject({ block: true });
+    let blocked2: any;
+    for (const before of befores) blocked2 = (await before({ toolName: "write", toolCallId: "blocked2", input: {} }, {})) ?? blocked2;
+    expect(blocked2).toMatchObject({ block: true });
     await tool.execute("activate", { operations: [{ key: "activate", op: "update", taskId: "1", status: "in_progress", active: true }] });
-    expect(await before({ toolName: "write", toolCallId: "ok", input: {} }, {})).toBeUndefined();
+    let allowed: any;
+    for (const before of befores) allowed = (await before({ toolName: "write", toolCallId: "ok", input: {} }, {})) ?? allowed;
+    expect(allowed).toBeUndefined();
 
     const after = runtime.handlers.get("tool_result")![1];
     await after({ toolName: "bash", toolCallId: "audit", input: { command: "pwd" }, result: {}, isError: false }, {});
@@ -173,11 +194,10 @@ describe("root Pi TaskManage extension", () => {
   it("handles Pi lifecycle payloads whose event name is not in the payload", async () => {
     const runtime = fakePi();
     registerTaskManageExtension(runtime.pi, { enforcementMode: "block" });
-    const toolCall = runtime.handlers.get("tool_call")![0];
-
-    await expect(toolCall({ toolName: "write", input: {} }, {})).resolves.toMatchObject({
-      block: true,
-    });
+    const toolCalls = runtime.handlers.get("tool_call")!;
+    let blocked: any;
+    for (const toolCall of toolCalls) blocked = (await toolCall({ toolName: "write", input: {} }, {})) ?? blocked;
+    expect(blocked).toMatchObject({ block: true });
   });
 
   it("overrides Pi's base prompt with the TUI-equivalent Forge prompt once", async () => {
@@ -228,14 +248,14 @@ describe("root Pi TaskManage extension", () => {
     const tool = runtime.tools[0];
     const call = tool.renderCall({
       mode: "atomic",
-      operations: [{ key: "plan", op: "create", subject: "Design the renderer" }],
+      operations: [{ key: "plan", op: "create", subject: "Design the renderer" , questions: [{ id: "accept", text: "Is the renderer verified?" }] }],
     }, {}, {});
     expect(call.render(80).join("\n")).toContain("TaskManage");
     expect(call.render(80).join("\n")).toContain("Managing tasks");
     expect(() => call.invalidate()).not.toThrow();
 
     const result = await tool.execute("call-3", {
-      operations: [{ key: "plan", op: "create", subject: "Design the renderer" }],
+      operations: [{ key: "plan", op: "create", subject: "Design the renderer" , questions: [{ id: "accept", text: "Is the renderer verified?" }] }],
     });
     const panel = tool.renderResult(result, { isError: false, expanded: false }, {});
     expect(panel.render(100).join("\n")).toContain("○ #");
@@ -247,7 +267,7 @@ describe("root Pi TaskManage extension", () => {
     // Renderer must support Pi's structured details path even when content is
     // unavailable or not JSON-shaped.
     const structured = await tool.execute("call-structured", {
-      operations: [{ key: "verify", op: "create", subject: "Structured result" }],
+      operations: [{ key: "verify", op: "create", subject: "Structured result", questions: [{ id: "accept", text: "Is the structured result verified?" }] }],
     });
     const detailsOnly = tool.renderResult({ details: structured.details }, { isError: false, expanded: false }, {});
     expect(detailsOnly.render(100).join("\n")).toContain("Structured result");
@@ -259,17 +279,36 @@ describe("root Pi TaskManage extension", () => {
     const widgets: any[] = [];
     await runtime.tools[0].execute("call-widget", {
       operations: [
-        { key: "build", op: "create", subject: "Build the renderer", category: "acting" },
+        { key: "build", op: "create", subject: "Build the renderer", category: "acting", questions: [{ id: "accept", text: "Is the renderer verified?" }] },
         { key: "start", op: "update", taskId: { ref: "build" }, status: "in_progress", active: true },
       ],
     }, undefined, undefined, { ui: { setWidget: (key: string, content: unknown) => widgets.push({ key, content }) } });
     const latest = widgets.at(-1);
     expect(latest.key).toBe("swarm-tasks");
-    const widget = latest.content({}, {});
+    const widgetEntry = widgets.find(entry => typeof entry.content === "function");
+    expect(widgetEntry).toBeDefined();
+    const widget = widgetEntry!.content({}, {});
     const lines = widget.render(80).join("\n");
-    expect(lines).toContain("Tasks   0/1 done");
-    expect(lines).toContain("● [A] Build the renderer");
+    expect(lines).toContain("Tasks  0/1 done");
+    expect(lines).toContain("#1 Build the renderer");
     expect(() => widget.invalidate()).not.toThrow();
+  });
+
+  it("renders bounded task question status and unresolved prompts in the widget", async () => {
+    const runtime = fakePi();
+    extension(runtime.pi);
+    const widgets: any[] = [];
+    await runtime.tools[0].execute("question-widget", {
+      operations: [{ key: "q", op: "create", subject: "Verify behavior", status: "in_progress", active: true, questions: [
+        { id: "q1", text: "Which behavior is expected?" },
+        { id: "q2", text: "What evidence proves it?" },
+      ] }],
+    }, undefined, undefined, { ui: { setWidget: (key: string, content: unknown) => widgets.push({ key, content }) } });
+    const widgetEntry = widgets.find(entry => typeof entry.content === "function");
+    expect(widgetEntry).toBeDefined();
+    const lines = widgetEntry.content({}, {}).render(80).join("\n");
+    expect(lines).toContain("Q 0/2");
+    expect(lines).toContain("q1: Which behavior is expected?");
   });
 
   it("keeps task output within narrow widths for wide subjects", async () => {

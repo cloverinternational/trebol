@@ -1,0 +1,23 @@
+import {it,expect,afterEach} from "vitest";
+import {mkdtempSync,writeFileSync,rmSync} from "node:fs";
+import {tmpdir} from "node:os";import {join} from "node:path";
+import worker from "../../lib/state/memory-maintenance-worker.ts";
+import {recallKnowledge} from "../../lib/context/knowledge-recall.ts";
+const keys=["PI_SWARM_MEMORY_WORKER","PI_SWARM_SUBAGENT","PI_SWARM_MEMORY_SNAPSHOT","PI_SWARM_MEMORY_RECEIPT","PI_SWARM_MEMORY_DIR","PI_SWARM_MEMORY_LEASE"];
+const saved=Object.fromEntries(keys.map(k=>[k,process.env[k]]));const roots:string[]=[];
+afterEach(()=>{for(const k of keys){if(saved[k]===undefined)delete process.env[k];else process.env[k]=saved[k];}for(const p of roots.splice(0))rmSync(p,{recursive:true,force:true});});
+function setup(){const root=mkdtempSync(join(tmpdir(),"memory-worker-test-"));roots.push(root);const snapshot=join(root,"snapshot.jsonl"),lease=join(root,"active");writeFileSync(snapshot,JSON.stringify({type:"session",version:3,id:"s",cwd:root})+"\n"+JSON.stringify({type:"message",id:"u1",message:{role:"user",content:[{type:"text",text:"Project Orion stores invoices in PostgreSQL."}]}})+"\n");writeFileSync(lease,"active");Object.assign(process.env,{PI_SWARM_MEMORY_WORKER:"1",PI_SWARM_SUBAGENT:"1",PI_SWARM_MEMORY_SNAPSHOT:snapshot,PI_SWARM_MEMORY_RECEIPT:join(root,"receipt.json"),PI_SWARM_MEMORY_DIR:join(root,"store"),PI_SWARM_MEMORY_LEASE:lease});const tools=new Map<string,any>(),hooks=new Map<string,any>();worker({registerTool:(t:any)=>tools.set(t.name,t),on:(n:string,f:any)=>hooks.set(n,f),setActiveTools:()=>{}});const ctx={cwd:root,abort:()=>{}};const exec=(name:string,p:any)=>tools.get(name).execute("call",p,undefined,undefined,ctx);return{root,lease,snapshot,ctx,hooks,exec};}
+it("evidence-reviewed write reaches durable query and verified recall; invalid scopes and revisions fail",async()=>{const h=setup();
+ const params={operation:"remember",text:"Orion stores invoices in PostgreSQL.",status:"verified",evidence:[{ref:"u1",quote:"Project Orion stores invoices in PostgreSQL."}]};
+ expect((await h.exec("memory_history",params)).isError).toBe(true);
+ await h.exec("memory_history",{operation:"search",query:"Orion"}); await h.exec("memory_evidence",{ids:["u1"]});const written=await h.exec("memory_history",params);expect(written.isError).toBeUndefined();const record=JSON.parse(written.content[0].text).knowledge[0];expect(record.evidence[0].ref).toBe(`${h.snapshot}#u1`);
+ expect(recallKnowledge(h.root,"Orion PostgreSQL").memories.length).toBeGreaterThan(0);
+ expect((await h.exec("supervisor_review",{verdict:"reject",evidenceIds:["u1"],reason:"Evidence does not establish neglected work"})).isError).toBeUndefined();
+ expect((await h.exec("supervisor_review",{verdict:"confirm",evidenceIds:["invented"],reason:"bad"})).isError).toBe(true);
+ expect((await h.exec("memory_history",{...params,scope:"global"})).isError).toBe(true);
+ expect((await h.exec("memory_history",{...params,namespace:"invisible-custom"})).isError).toBe(true);
+ expect((await h.exec("memory_history",{...params,operation:"correct",id:record.id,expectedRevision:"bad"})).isError).toBe(true);
+ expect((await h.exec("memory_history",{operation:"delete",id:record.id})).isError).toBe(true);
+});
+it("enforces seventh-turn and revoked-lease checks at tool execution",async()=>{const h=setup();for(let i=0;i<7;i++)h.hooks.get("turn_start")({},h.ctx);expect((await h.exec("memory_evidence",{ids:["u1"]})).isError).toBe(true);expect(h.hooks.get("tool_call")({toolName:"Bash"},h.ctx).block).toBe(true);});
+it("cancellation lease prevents writes while process is still alive",async()=>{const h=setup();writeFileSync(h.lease,"revoked");expect((await h.exec("memory_history",{operation:"remember",text:"x"})).isError).toBe(true);});

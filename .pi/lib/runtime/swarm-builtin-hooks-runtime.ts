@@ -1,3 +1,4 @@
+import { executionLog } from "../context/execution-log.ts";
 import { isHookEnabled, registerHook } from "./hook-state.ts";
 import { AnnoyanceNudgeState, formatHookContext, resultText } from "../policy/swarm-annoyance-nudge.ts";
 import {
@@ -114,11 +115,14 @@ export function registerSwarmBuiltinHooks(pi: Pi, options: SwarmBuiltinHookOptio
   const preContext = new Map<string, string>();
   // One cleanup opportunity per external request, not per automatic wake.
   let spent = false, deferred = false, sawWork = false, stopped = false;
+  const pendingWorkers = new Set<string>();
   const resetCleanup = () => { spent = false; deferred = false; sawWork = false; };
-  pi.on("session_start", (_event: any, ctx: any) => { sessionOf(ctx); stopped = false; resetCleanup(); preContext.clear(); });
-  pi.on("session_shutdown", () => { stopped = true; resetCleanup(); preContext.clear(); });
+  pi.on("session_start", (_event: any, ctx: any) => { sessionOf(ctx); stopped = false; resetCleanup(); pendingWorkers.clear(); preContext.clear(); });
+  pi.on("session_shutdown", () => { stopped = true; resetCleanup(); pendingWorkers.clear(); preContext.clear(); });
   pi.on("input", (event: any) => {
-    if (event?.source === "interactive" || event?.source === "rpc") resetCleanup();
+    const completion = /\[agent completed\] id=(\S+) status=(completed|failed|cancelled)/.exec(String(event?.text ?? ""));
+    if (completion) pendingWorkers.delete(completion[1]);
+    else if (event?.source === "interactive" || event?.source === "rpc") resetCleanup();
   });
 
   registerHook(pi, "taskmanage", "before_agent_start", (event: any, ctx: any) => {
@@ -152,15 +156,18 @@ export function registerSwarmBuiltinHooks(pi: Pi, options: SwarmBuiltinHookOptio
     sessionOf(ctx);
     const failed = event?.isError === true;
     const name = String(event?.toolName ?? "").toLowerCase();
-    if (failed || name === "ask_user_question" || name === "requestapproval") deferred = true;
-    if (name && name !== "taskmanage") sawWork = true;
+    if (name === "ask_user_question" || name === "requestapproval") deferred = true;
+    if (name) sawWork = true;
     // Conservatively defer after async dispatch; never read UI state as authority.
-    if (["agent", "subagent", "backgroundtask", "delegate", "bash", "taskoutput", "readbackgroundcommand"].includes(name)) {
+    if (["agent", "subagent", "backgroundtask", "delegate", "bash", "taskoutput", "subagentoutput", "delegateoutput", "wait_for_agent", "readbackgroundcommand"].includes(name)) {
       try {
         const body = JSON.parse(resultText(event?.content));
-        if (body.backgrounded || body.status === "running" || body.agent_id || body.handle) deferred = true;
+        const id = String(body.agent_id ?? body.task_id ?? body.handle ?? event?.input?.agent_id ?? event?.input?.task_id ?? "unknown-background");
+        const status = body.status ?? body.agent?.status;
+        if (["completed", "failed", "cancelled", "done"].includes(status)) pendingWorkers.delete(id);
+        else if (body.backgrounded || ["running","async_launched"].includes(status) || body.agent_id || body.handle) pendingWorkers.add(id);
       } catch { /* Ordinary non-JSON result. */ }
-      if (event?.input?.background || event?.input?.run_in_background) deferred = true;
+      if (!failed && (event?.input?.background || event?.input?.run_in_background) && !pendingWorkers.size) pendingWorkers.add("unknown-background");
     }
     let { text, index } = firstText(event?.content);
     // agent_tools.go: oversized results (100k bytes / 1000 lines) are
@@ -198,18 +205,18 @@ export function registerSwarmBuiltinHooks(pi: Pi, options: SwarmBuiltinHookOptio
     if (["aborted", "error", "length"].includes(message?.stopReason)) deferred = true;
     const text = Array.isArray(message?.content) ? message.content.filter((b: any) => b?.type === "text").map((b: any) => String(b.text ?? "")).join(" ") : "";
     const tasks = hookTasks();
-    const open = tasks.filter(t => !t.owner && t.status === "in_progress" && t.active &&
-      (t.dependsOn ?? []).every(id => tasks.some(dep => dep.id === id && dep.status === "completed")));
+    const open = tasks.filter(t => !t.owner && ["pending", "in_progress"].includes(t.status));
     // Positive normal stops only. Questions conservatively defer; prose never
     // establishes completion. One wake even if the model ignores the reminder.
     const cleanup = !stopped && !runContinues && message?.role === "assistant" && message.stopReason === "stop" &&
-      sawWork && !spent && !deferred && !ctx?.hasPendingMessages?.() && open.length > 0 && !/[?？]/u.test(text) &&
+      sawWork && !spent && !deferred && !pendingWorkers.size && !ctx?.hasPendingMessages?.() && open.length > 0 &&
       process.env.PI_SWARM_SUBAGENT !== "1" && !(globalThis as any)[PLAN_CONTROLLER_SYMBOL]?.isActive?.();
+    if (!runContinues && message?.role === "assistant" && ctx?.cwd) executionLog(ctx.cwd,"execution","task-stop-reconciliation",{stopReason:message.stopReason,openTaskIds:open.map(t=>t.id),sawWork,spent,deferred,pendingWorkers:pendingWorkers.size,triggered:cleanup});
     if (cleanup) {
       spent = true;
-      parts.push({ role: "user", text: "[Task reconciliation: one cleanup opportunity] Focused work remains open: " +
+      parts.push({ role: "user", text: "[Task reconciliation: ask the user before leaving unfinished work] Open work remains: " +
         open.slice(0, 3).map(t => "#" + t.id + " " + t.subject.slice(0, 160)).join("; ") +
-        ". Use TaskManage to reconcile work just performed. Complete only verified finished work. If unfinished or waiting, return it to pending with a blocker note and report what remains. Do not start unrelated work, delete tasks, or manufacture completion. This automatic reconciliation will not repeat for this request." });
+        ". Acknowledge any rejected TaskManage completion before doing anything else: read the exact error and current task record, then submit evidence-backed answers using the required schema; never retry the same invalid call, fabricate answers/evidence, or claim the ledger is complete. First use TaskManage to reconcile actual progress and blockers; complete only evidence-verified finished work. If any tasks remain unfinished, use ask_user_question to ask what to do next, summarizing the current goal, remaining tasks, unaddressed requests and blockers. Offer relevant choices such as continue a named task, reprioritize, or pause with recorded next steps. A prose question alone is not the interaction tool. Do not start unrelated work, delete tasks, or manufacture completion. If interactive questioning is unavailable, report that limitation and retain pending tasks. This hook runs at most once per external request and never auto-answers the user." });
     }
     if (!parts.length) return undefined;
     if (cleanup) pi.sendMessage?.({ customType: HOOK_SLOT_TYPE, content: parts[0].text, display: false, details: { parts } }, { deliverAs: "followUp", triggerTurn: true });

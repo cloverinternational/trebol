@@ -2,6 +2,7 @@ import { boundedHistoryJSON, historyGet, historyRootFromContext, historySearch }
 import { vaultJSONXML, type VaultRuntime } from "../../lib/tools/swarm-vault-tools.ts";
 import { newErrorID } from "../../lib/tools/swarm-bash.ts";
 import { applySwarmSurface } from "../../lib/runtime/swarm-tool-surface.ts";
+import { CONTRACTS } from "../../lib/tools/swarm-history-tools.contract.ts";
 import { sortKeysDeep } from "../../lib/runtime/swarm-transport-parity.ts";
 import { registerVaultTool } from "./vault.ts";
 
@@ -32,7 +33,7 @@ export function registerSwarmHistoryVaultTools(pi: Pi, options: { historyRoot?: 
   let sessionContext: any;
   pi.on?.("session_start", (_event: any, ctx: any) => { sessionContext = ctx; });
   const register = (name: typeof names[number], run: (p: any, ctx: any) => Promise<any> | any, xml = false) => pi.registerTool?.(applySwarmSurface({
-    name, label: labels[name], description: "", parameters: {},
+    name, label: labels[name], ...CONTRACTS[name],
     async execute(_id: string, params: any, _signal: AbortSignal | undefined, _update: unknown, ctx: any) {
       try {
         const value = await run(params ?? {}, ctx ?? sessionContext);

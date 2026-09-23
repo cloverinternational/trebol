@@ -17,8 +17,8 @@ it("persists enforcement and adds the instruction exactly once; off removes it",
   } finally { rmSync(cwd, { recursive: true, force: true }); }
 });
 it("gates all ordinary tools without blocking recovery, and releases after success", () => {
-  for (const name of ["Bash", "Read", "Skill", "TaskManage", "codemode", "Subagent"]) expect(memoryGate(true, false, name)?.block).toBe(true);
-  for (const name of ["bootstrap", "ask_user_question", "exit_plan_mode"]) expect(memoryGate(true, false, name)).toBeUndefined();
+  for (const name of ["Bash", "Read", "Skill", "codemode", "Subagent"]) expect(memoryGate(true, false, name)?.block).toBe(true);
+  for (const name of ["bootstrap", "ask_user_question", "ask_user", "AskUserQuestion", "TaskManage", "memory_history", "exit_plan_mode"]) expect(memoryGate(true, false, name)).toBeUndefined();
   expect(memoryGate(true, true, "Bash")).toBeUndefined();
   expect(memoryGate(false, false, "Bash")).toBeUndefined();
 });

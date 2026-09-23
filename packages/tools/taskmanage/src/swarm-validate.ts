@@ -14,7 +14,20 @@ const CATEGORIES = new Set(["researching", "planning", "acting", "verifying", "d
 const PRIORITIES = new Set(["low", "medium", "high"]);
 const NOTE_TYPES = new Set(["decision", "blocker", "learning", "milestone", "question", "observation", "other"]);
 const MAX_TASK_QUESTIONS = 12, MAX_QUESTION_ID_LENGTH = 64, MAX_QUESTION_TEXT_LENGTH = 240, MAX_ANSWER_LENGTH = 240, MAX_EVIDENCE_LENGTH = 512;
-const ALLOWED: Record<string, string[]> = {
+/**
+ * The single source of truth for per-op field admissibility.
+ *
+ * This map is a faithful port of Swarm's Go validator and is locked by
+ * exact-string assertions in test/swarm-tool-envelope-parity.test.ts, so it is
+ * the authority: `taskManageSchema` advertises it to the model and
+ * `TaskManager.validate` re-checks it at runtime. Both derive from this
+ * constant rather than restating it, because three hand-maintained copies had
+ * drifted apart and every divergence surfaced to the model as a field the
+ * schema promised and a validator then refused.
+ *
+ * `key` and `op` are implicitly admissible for every op and are not listed.
+ */
+export const ALLOWED: Record<string, string[]> = {
   create: ["subject", "description", "activeForm", "category", "priority", "metadata", "parentTaskId", "owner_id", "status", "active", "addBlocks", "addBlockedBy", "questions"],
   update: ["taskId", "status", "category", "priority", "subject", "description", "activeForm", "active", "parentTaskId", "metadata", "addBlocks", "addBlockedBy", "addNote", "noteType", "questions", "answers"],
   get: ["taskId", "include_audit"],
@@ -72,9 +85,23 @@ function validateQuestions(value: unknown): void {
 function validateAnswers(value: unknown): void {
   if (!Array.isArray(value) || value.length < 1 || value.length > MAX_TASK_QUESTIONS) fail(`answers must contain 1-${MAX_TASK_QUESTIONS} items`);
   const ids = new Set<string>();
-  for (const item of value as unknown[]) {
-    if (!isObj(item) || typeof item.question !== "string" || !item.question.trim() || item.question.length > MAX_QUESTION_ID_LENGTH || typeof item.answer !== "string" || !item.answer.trim() || item.answer.length > MAX_ANSWER_LENGTH || typeof item.evidence !== "string" || !item.evidence.trim() || item.evidence.length > MAX_EVIDENCE_LENGTH || Object.keys(item).some(k => !["question", "answer", "evidence"].includes(k))) fail("answers must contain bounded {question,answer,evidence} items");
-    if (isObj(item) && typeof item.question === "string") ids.add(item.question);
+  // One collapsed condition used to report every one of these causes as
+  // "answers must contain bounded {question,answer,evidence} items", so an
+  // over-long answer looked like a structural error and callers retried the
+  // same shape. Report the field and the bound that actually failed. The
+  // generic message is retained as the fallback so the Go-ported wire string
+  // still exists for any shape not named below.
+  for (const [index, item] of (value as unknown[]).entries()) {
+    if (!isObj(item)) fail(`answers[${index}] must be an object with {question,answer,evidence}`);
+    for (const [field, limit] of [["question", MAX_QUESTION_ID_LENGTH], ["answer", MAX_ANSWER_LENGTH], ["evidence", MAX_EVIDENCE_LENGTH]] as const) {
+      const raw = (item as Record<string, unknown>)[field];
+      if (typeof raw !== "string" || !raw.trim()) fail(`answers[${index}].${field} must be a non-empty string`);
+      if ((raw as string).length > limit) fail(`answers[${index}].${field} is ${(raw as string).length} characters; the limit is ${limit}`);
+    }
+    const answer = item as Record<string, unknown>;
+    const unknownField = Object.keys(answer).find(k => !["question", "answer", "evidence"].includes(k));
+    if (unknownField !== undefined) fail(`answers[${index}] has unknown field "${unknownField}"; allowed fields are question, answer and evidence`);
+    ids.add(answer.question as string);
   }
 }
 

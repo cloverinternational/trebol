@@ -5,7 +5,9 @@
  * preview fields. Origin is therefore omitted; preview/title are derived from
  * the first substantive user message. Conversation IDs are Pi session IDs.
  */
+import { createReadStream } from "node:fs";
 import { readFile, readdir, stat } from "node:fs/promises";
+import { createInterface } from "node:readline";
 import { existsSync } from "node:fs";
 import { dirname, isAbsolute, parse, resolve } from "node:path";
 
@@ -114,7 +116,7 @@ function convertMessage(entry: AnyMap): AnyMap | undefined {
   return row;
 }
 
-async function loadSessions(runtime: HistoryRuntime): Promise<Session[]> {
+async function loadSessions(runtime: HistoryRuntime, onlyId?: string): Promise<Session[]> {
   // Reuse Pi's existing engine when its UI peer dependency is available. The
   // small fallback keeps pure-logic/unit-test consumers independent of pi-tui.
   let listed: any[];
@@ -142,6 +144,7 @@ async function loadSessions(runtime: HistoryRuntime): Promise<Session[]> {
     let raw = ""; try { raw = await readFile(item.session, "utf8"); } catch { continue; }
     const entries = raw.split(/\r?\n/).filter(Boolean).flatMap((line) => { try { return [JSON.parse(line)]; } catch { return []; } });
     const header = entries.find((e) => e.type === "session") ?? {};
+    if (onlyId && header.id !== onlyId) continue;
     const messages = entries.map(convertMessage).filter(Boolean) as AnyMap[];
     const firstUser = messages.find((m) => m.role === "user" && substantive(m.content))?.content ?? "";
     const preview = cleanHistoryText(firstUser);
@@ -158,6 +161,64 @@ async function loadSessions(runtime: HistoryRuntime): Promise<Session[]> {
     sessions.push({ id: header.id ?? item.id ?? item.session, cwd: header.cwd ?? item.cwd ?? "", title, titlePersisted: Boolean(persistedTitle), preview, updatedAt: iso(updated), entries, messages, body: messages.map((m) => m.content).join("\n"), segments });
   }
   return sessions;
+}
+
+async function loadSessionForGet(file: string, id: string, maxMessages: number, offset?: number, tail?: number): Promise<Session> {
+  const selected: AnyMap[] = [];
+  let header: AnyMap = {};
+  let messageCount = 0;
+  const limit = Math.min(tail ?? maxMessages, maxMessages);
+  const input = createReadStream(file, { encoding: "utf8" });
+  const rl = createInterface({ input, crlfDelay: Infinity });
+  try {
+    for await (const line of rl) {
+      if (!line) continue;
+      let entry: AnyMap;
+      try { entry = JSON.parse(line); } catch { continue; }
+      if (entry.type === "session") { header = entry; continue; }
+      const message = convertMessage(entry);
+      if (!message) continue;
+      const index = messageCount++;
+      if (offset !== undefined) {
+        if (index >= offset && index < offset + maxMessages) selected.push(message);
+      } else {
+        selected.push(message);
+        if (selected.length > limit) selected.shift();
+      }
+    }
+  } finally { rl.close(); input.destroy(); }
+  const firstUser = selected.find((m) => m.role === "user" && substantive(m.content))?.content ?? "";
+  const preview = cleanHistoryText(firstUser);
+  const persistedTitle = cleanHistoryText(header.name ?? "");
+  return { id: header.id ?? id, cwd: header.cwd ?? "", title: persistedTitle || deriveTitle(preview), titlePersisted: Boolean(persistedTitle), preview, updatedAt: iso(header.timestamp ?? ""), entries: [], messages: selected, body: "", segments: [], _messageCount: messageCount } as Session;
+}
+
+async function sessionFiles(root: string): Promise<string[]> {
+  const files: string[] = [];
+  const walk = async (dir: string): Promise<void> => {
+    for (const item of await readdir(dir, { withFileTypes: true })) {
+      const file = resolve(dir, item.name);
+      if (item.isDirectory()) await walk(file);
+      else if (item.isFile() && file.endsWith(".jsonl")) files.push(file);
+    }
+  };
+  if (existsSync(root)) await walk(root);
+  return files;
+}
+
+async function getSessionCandidates(runtime: HistoryRuntime, id: string): Promise<string[]> {
+  const result: string[] = [];
+  for (const file of await sessionFiles(runtime.root)) {
+    const input = createReadStream(file, { encoding: "utf8" });
+    const rl = createInterface({ input, crlfDelay: Infinity });
+    try {
+      for await (const line of rl) {
+        if (!line) continue;
+        try { const entry = JSON.parse(line); if (entry.type === "session") { if (entry.id === id) result.push(file); break; } } catch { /* malformed line */ }
+      }
+    } finally { rl.close(); input.destroy(); }
+  }
+  return result;
 }
 
 function regexFor(params: AnyMap): RegExp | undefined {
@@ -301,11 +362,10 @@ export async function historyGet(params: AnyMap, runtime: HistoryRuntime): Promi
   const id = typeof params.conversation_id === "string" ? params.conversation_id.trim() : ""; if (!id) throw new Error("HistoryGet: conversation_id is required");
   const maxMessages = integer(params, "max_messages", 20, 100), maxChars = integer(params, "max_chars", 12000, 50000), humanOnly = bool(params, "human_only", false);
   if (params.tail !== undefined && params.offset !== undefined) throw new Error("HistoryGet: tail and offset are mutually exclusive");
-  const sessions = await loadSessions(runtime);
+  const files = await getSessionCandidates(runtime, id);
+  const sessions = await Promise.all(files.map((file) => loadSessionForGet(file, id, maxMessages, params.offset, params.tail)));
   const matchingId = sessions.filter((session) => session.id === id);
-  const matches = all
-    ? matchingId
-    : matchingId.filter((session) => resolve(session.cwd) === selected);
+  const matches = all ? matchingId : matchingId.filter((session) => resolve(session.cwd) === selected);
   if (!matches.length) {
     if (matchingId.length && !all)
       throw new Error("HistoryGet: conversation does not match the requested workspace");
@@ -314,13 +374,16 @@ export async function historyGet(params: AnyMap, runtime: HistoryRuntime): Promi
   if (matches.length > 1)
     throw new Error("HistoryGet: conversation_id is ambiguous across stored sessions");
   const conv = matches[0];
-  const total = conv.messages.length; let start = 0, end = total;
+  const total = (conv as any)._messageCount ?? conv.messages.length; let start = 0, end = total;
   if (params.offset !== undefined) { start = Math.min(total, integer(params, "offset", 0, Number.MAX_SAFE_INTEGER, true)); end = Math.min(total, start + maxMessages); }
   else if (params.tail !== undefined) { const tail = Math.min(integer(params, "tail", 20, 100), maxMessages); start = Math.max(0, total - tail); }
   else start = Math.max(0, total - maxMessages);
+  const selectedMessages = conv.messages;
+  const selectedStart = params.offset !== undefined ? start : Math.max(start, total - selectedMessages.length);
   let remaining = maxChars, omitted = start + total - end, filtered = 0, contentTruncated = false; const messages: AnyMap[] = [];
-  for (let i = end - 1; i >= start; i--) {
-    const original = conv.messages[i]; if (humanOnly && !["user", "assistant"].includes(original.role)) { filtered++; continue; }
+  for (let j = selectedMessages.length - 1; j >= 0; j--) {
+    const i = selectedStart + j;
+    const original = selectedMessages[j]; if (humanOnly && !["user", "assistant"].includes(original.role)) { filtered++; continue; }
     const content = humanOnly ? cleanHistoryText(original.content) : original.content;
     if (humanOnly && (!content || original.role === "user" && !substantive(content))) { filtered++; continue; }
     const fitted = fitRow({ ...original, content }, remaining, humanOnly);

@@ -10,6 +10,7 @@ import systemPromptsExtension, {
   savePromptStore,
 } from "../../extensions/10-context/system-prompts.ts";
 import { registerSystemInspector } from "../../extensions/10-context/system-inspector.ts";
+import { writeBootstrapSettings } from "../../../packages/runtime/bootstrap/src/store.ts";
 
 function fakePi() {
   const handlers = new Map<string, Array<(event: any, ctx: any) => any>>();
@@ -54,6 +55,34 @@ describe("system-prompt ownership", () => {
     const result: any = await handler({ systemPrompt: "Pi base", systemPromptOptions: { cwd } }, {});
     expect(result.systemPrompt).toContain("Pi base");
     expect(result.systemPrompt).toContain("<available_skills>");
+  });
+
+  it("reassembles a previously returned prompt for another workspace and current settings", async () => {
+    const first = mkdtempSync(join(tmpdir(), "pi-prompt-first-"));
+    const second = mkdtempSync(join(tmpdir(), "pi-prompt-second-"));
+    for (const cwd of [first, second]) savePromptStore(cwd, { prompts: [], active: PI_DEFAULT_PROMPT });
+    writeBootstrapSettings(first, "parallel", "", true);
+    writeBootstrapSettings(second, "parallel", "", false);
+    const runtime = fakePi();
+    promptExtension(runtime.pi as any);
+    const handler = runtime.handlers.get("before_agent_start")![0];
+    const assembled: any = await handler({ systemPrompt: "Pi base" }, { cwd: first });
+    expect(assembled.systemPrompt).toContain("<memory_ceremony>");
+
+    // The original input is also reassembled, rather than cached under an
+    // unrelated output string or reused for a different workspace.
+    const fromOriginal: any = await handler({ systemPrompt: "Pi base" }, { cwd: second });
+    expect(fromOriginal.systemPrompt).not.toContain("<memory_ceremony>");
+    expect(fromOriginal.systemPrompt).toContain("Pi base");
+
+    // Pi can pass the previous output back; it must not suppress a new cwd's settings.
+    const replayed: any = await handler({ systemPrompt: assembled.systemPrompt }, { cwd: second });
+    expect(replayed.systemPrompt).not.toContain("<memory_ceremony>");
+    expect(replayed.systemPrompt).toContain("Pi base");
+
+    writeBootstrapSettings(first, "parallel", "", false);
+    const changed: any = await handler({ systemPrompt: "Pi base" }, { cwd: first });
+    expect(changed.systemPrompt).not.toContain("<memory_ceremony>");
   });
 
   it("migrates the old active-undefined representation as Pi base", () => {

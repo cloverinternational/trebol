@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { createSessionWakeup } from "../runtime/session-wakeup.ts";
 import { withDefaultToolRenderer } from "../../../packages/runtime/core/src/tool-renderer.ts";
+import { onAgentSettled } from "../runtime/agent-settled.ts";
 
 /** A provider-neutral long-running monitor. The check is an agent instruction,
  * so the target can be a PR, deployment, inbox, filesystem, API, ticket, or
@@ -130,7 +131,7 @@ export function registerSwarmMonitor(pi: any, options: MonitorOptions = {}) {
     else throw new Error("action must be create, list, pause, resume, cancel, or check");
     persist(); arm(); return result(describe(monitor));
   } }));
-  pi.on?.("agent_end", (event: any) => {
+  onAgentSettled(pi, (event: any) => {
     const text = bounded((event?.messages ?? []).map((m: any) => typeof m?.content === "string" ? m.content : m?.content ?? "").join("\n"), 16_000);
     const eventMonitorId = typeof event?.monitorId === "string" ? event.monitorId : undefined;
     const candidates = [...monitors.values()].filter(m => m.id === eventMonitorId || text.includes(m.id) || text.includes(`[MONITOR ${m.id}]`));

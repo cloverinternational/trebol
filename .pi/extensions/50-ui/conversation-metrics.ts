@@ -1,5 +1,6 @@
 /** Small, session-backed status line for the native Pi editor. */
 import { formatRunningWorkDuration, onRunningWorkChange, runningWorkExpanded, runningWorkSelection, visibleRunningWork } from "../../lib/ui/running-work.ts";
+import { onAgentSettled } from "../../lib/runtime/agent-settled.ts";
 export interface ConversationMetrics {
   version: 1;
   walltimeMs: number;
@@ -37,9 +38,9 @@ export function footerSegments(): FooterSegments {
   const g = globalThis as typeof globalThis & { [FOOTER_SEGMENTS_KEY]?: FooterSegments };
   return g[FOOTER_SEGMENTS_KEY] ?? (g[FOOTER_SEGMENTS_KEY] = new Map());
 }
-type Shared = { metrics?: ConversationMetrics; pi?: any; ctx?: any; timer?: ReturnType<typeof setInterval>; frame: number; registered?: WeakSet<object>; footer?: MetricsFooter };
+type Shared = { metrics?: ConversationMetrics; pi?: any; ctx?: any; timer?: ReturnType<typeof setInterval>; frame: number; generation: number; registered?: WeakSet<object>; footer?: MetricsFooter };
 const root = globalThis as typeof globalThis & { [ROOT_KEY]?: Shared };
-const shared: Shared = root[ROOT_KEY] ?? (root[ROOT_KEY] = { frame: 0 });
+const shared: Shared = root[ROOT_KEY] ?? (root[ROOT_KEY] = { frame: 0, generation: 0 });
 
 const blank = (): ConversationMetrics => ({ version: 1, walltimeMs: 0, outputTokens: 0, active: false, updatedAt: new Date().toISOString() });
 
@@ -257,14 +258,15 @@ export default function conversationMetricsExtension(pi: any) {
   if (registered.has(pi)) return;
   registered.add(pi);
   shared.pi = pi;
-  const refreshWork = () => shared.ctx?.ui?.requestRender?.();
+  const refreshWork = () => { const ctx = shared.ctx; if (ctx) ctx.ui?.requestRender?.(); };
   const workStop = onRunningWorkChange(refreshWork);
   pi.on?.("session_start", (_event: any, ctx: any) => {
+    shared.generation++;
       const previous = [...sessionEntries(ctx)].reverse().find((entry: any) => (entry?.type === "custom" && entry?.customType === ENTRY) || entry?.type === ENTRY)?.data;
     shared.metrics = normalize(previous);
     shared.ctx = ctx;
     render(ctx);
-    if (!shared.timer) shared.timer = setInterval(() => { shared.frame++; render(shared.ctx); }, 500);
+    if (!shared.timer) shared.timer = setInterval(() => { if (!shared.ctx) return; shared.frame++; render(shared.ctx); }, 500);
     (shared.timer as any)?.unref?.();
   });
   pi.on?.("agent_start", (_event: any, ctx: any) => {
@@ -274,7 +276,7 @@ export default function conversationMetricsExtension(pi: any) {
     working(shared.ctx, true);
     saveAndRender(shared.ctx);
   });
-  pi.on?.("agent_end", (_event: any, ctx: any) => {
+  onAgentSettled(pi, (_event: any, ctx: any) => {
     const m = shared.metrics ?? (shared.metrics = blank());
     if (m.active) { m.walltimeMs = currentWalltime(); m.active = false; m.wallStartedAt = undefined; }
     shared.ctx = ctx ?? shared.ctx;
@@ -286,9 +288,12 @@ export default function conversationMetricsExtension(pi: any) {
     if (output) { const m = shared.metrics ?? (shared.metrics = blank()); m.outputTokens += output; saveAndRender(ctx ?? shared.ctx); }
   });
   pi.on?.("session_shutdown", () => {
+    shared.generation++;
     if (shared.metrics?.active) { shared.metrics.walltimeMs = currentWalltime(); shared.metrics.active = false; shared.metrics.wallStartedAt = undefined; persist(); }
     if (shared.timer) { clearInterval(shared.timer); shared.timer = undefined; }
     shared.footer = undefined;
+    shared.ctx = undefined;
+    shared.pi = undefined;
     workStop();
   });
   pi.registerCommand?.("metrics", { description: "Show this conversation's walltime and output tokens", handler: async (_args: string, ctx: any) => { const m = shared.metrics ?? blank(); ctx.ui?.notify?.(`Conversation: ${formatWalltime(currentWalltime())} walltime · ${m.outputTokens.toLocaleString()} output tokens`, "info"); } });

@@ -5,7 +5,11 @@
   "pi": {
     "extensions": [
       "memory-history.ts",
+      "task-candidate-capture.ts",
       "knowledge-enrichment.ts",
+      "candidate-memory-review.ts",
+      "jev-knowledge-audit.ts",
+      "memory-maintenance.ts",
       "swarm-conversation-metadata.ts"
     ]
   }

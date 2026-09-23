@@ -11,6 +11,7 @@
  */
 
 import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
+import { withDefaultToolRenderer } from "../../../../packages/runtime/core/src/tool-renderer.ts";
 import { getMarkdownTheme } from "@earendil-works/pi-coding-agent";
 import { Type, type TUnsafe } from "@sinclair/typebox";
 import {
@@ -1979,9 +1980,10 @@ async function askViaDialogs(
    allowMultiple: boolean,
    allowFreeform: boolean,
    allowComment: boolean,
-   timeout?: number,
+   _legacyTimeout?: number,
 ): Promise<AskUIResult | null> {
-   const dialogOpts = timeout ? { timeout } : undefined;
+   // pi-swarm: human questions never expire; only answer/cancel/shutdown resolves.
+   const dialogOpts = undefined;
    const prompt = context ? `${question}\n\nContext:\n${context}` : question;
 
    if (allowMultiple) {
@@ -2033,7 +2035,7 @@ async function askViaDialogs(
 }
 
 export default function(pi: ExtensionAPI) {
-   pi.registerTool({
+   pi.registerTool(withDefaultToolRenderer({
       // Use the canonical name used by Swarm's built-in tool contract.  The
       // previous local name (ask_user) made the model call a different schema
       // and produced confusing oneOf/additional-properties validation errors.
@@ -2120,7 +2122,7 @@ export default function(pi: ExtensionAPI) {
             }),
          ),
          timeout: Type.Optional(
-            Type.Number({ description: "Auto-dismiss after N milliseconds. Returns null (cancelled) when expired." }),
+            Type.Number({ description: "Deprecated and ignored. Questions wait indefinitely until answered or explicitly cancelled." }),
          ),
       }),
 
@@ -2148,7 +2150,6 @@ export default function(pi: ExtensionAPI) {
             contextExpanded: requestedContextExpanded,
             overlayToggleKey,
             commentToggleKey,
-            timeout,
          } = params as AskParams & { questions?: Array<{ prompt?: string; question?: string }> };
          const question = rawQuestion?.trim() || questions?.map((item) => item.prompt || item.question).filter(Boolean).join("\n") || "";
          const effectiveOptions = rawOptions.length ? rawOptions : (choices ?? []);
@@ -2237,7 +2238,7 @@ export default function(pi: ExtensionAPI) {
             pi.events.emit("herdr:blocked", { active: true, label: "Waiting for user response" });
             let answer: string | undefined;
             try {
-               answer = await ctx.ui.input(prompt, "Type your answer...", timeout ? { timeout } : undefined);
+               answer = await ctx.ui.input(prompt, "Type your answer...", undefined);
             } finally {
                pi.events.emit("herdr:blocked", { active: false });
             }
@@ -2274,9 +2275,6 @@ export default function(pi: ExtensionAPI) {
                   signal.addEventListener("abort", onAbort, { once: true });
                }
 
-               if (timeout && timeout > 0) {
-                  setTimeout(() => done(null), timeout);
-               }
 
                return new AskComponent(
                   question,
@@ -2335,7 +2333,7 @@ export default function(pi: ExtensionAPI) {
                result = customResult;
             } else {
                // RPC/headless mode: degrade to select()/input() dialog protocol
-               result = await askViaDialogs(ctx.ui, question, normalizedContext, options, allowMultiple, allowFreeform, allowComment, timeout);
+               result = await askViaDialogs(ctx.ui, question, normalizedContext, options, allowMultiple, allowFreeform, allowComment);
             }
          } catch (error) {
             const message =
@@ -2437,5 +2435,5 @@ export default function(pi: ExtensionAPI) {
 
          return new Text(text, 0, 0);
       },
-   });
+   }));
 }

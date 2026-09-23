@@ -28,7 +28,7 @@ describe("generic monitor agent", () => {
   it("records structured evidence and stops after completion", async () => {
     const h = harness(); const created = await h.tool({ action: "create", target: "batch job 42", check: "Check job status", interval: "1m", max_attempts: 2 });
     await h.tool({ action: "check", id: created.details.id });
-    await h.emit("agent_end", { monitorId: created.details.id, messages: [{ content: "status: complete\nevidence: job 42 finished" }] });
+    await h.emit("agent_settled", { monitorId: created.details.id, messages: [{ content: "status: complete\nevidence: job 42 finished" }] });
     const listed = (await h.tool({ action: "list" })).details[0];
     expect(listed.lastObservation).toMatchObject({ status: "complete", retryable: false, attempts: 1 });
     expect(listed.history).toHaveLength(1);
@@ -39,7 +39,7 @@ describe("generic monitor agent", () => {
     await h.tool({ action: "check", id: created.details.id });
     await vi.advanceTimersByTimeAsync(60_000);
     expect(h.pi.sendMessage).toHaveBeenCalledTimes(1);
-    await h.emit("agent_end", { messages: [{ content: "unrelated turn" }] });
+    await h.emit("agent_settled", { messages: [{ content: "unrelated turn" }] });
     expect((await h.tool({ action: "list" })).details[0].lastObservation).toBeUndefined();
   });
 });
