@@ -7,6 +7,16 @@ import {
 } from "../../lib/runtime/swarm-tool-gating.ts";
 
 describe("explicit Pi extension tool gating", () => {
+  it("keeps project_init on the model surface so /init can drive it", () => {
+    // Regression: project_init registered but was filtered out of the active
+    // set, so the agent reported the tool as missing in a real session.
+    const environment = { interactive: true, home: "/nonexistent", env: {} };
+    expect(swarmSurfaceFor(environment).has("project_init")).toBe(true);
+    expect(gateActiveTools(["project_init"], environment, {})).toBeUndefined();
+    // A tool that is genuinely Pi-only must still be hidden.
+    expect(gateActiveTools(["project_init", "unlisted_local"], environment, {})).toEqual(["project_init"]);
+  });
+
   it("always allows required policy tools and keeps other extras explicit", () => {
     expect(REQUIRED_PI_EXTENSION_TOOLS).toEqual(["change_context", "context_index", "context_remember", "context_reindex", "context_search", "context_outline", "context_read", "context_inspect", "context_delete"]);
     expect([
@@ -70,4 +80,10 @@ describe("explicit Pi extension tool gating", () => {
       ),
     ).toBeUndefined();
   });
+});
+
+it("retains selected registered MCP tools without enabling deselected tools", () => {
+  const environment = { interactive: true, home: "/nonexistent", env: {}, mcpTools: ["mcp", "plexus_management_status"] };
+  expect(gateActiveTools(["mcp", "plexus_management_status", "unlisted_local"], environment, {})).toEqual(["mcp", "plexus_management_status"]);
+  expect(gateActiveTools(["Bash"], environment, {}, ["Bash", "mcp"])).toBeUndefined();
 });

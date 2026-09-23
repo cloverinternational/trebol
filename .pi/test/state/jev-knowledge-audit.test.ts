@@ -48,13 +48,13 @@ it("missing key does not call the provider or prevent normal turns", async () =>
 it("audits final evidence on stop before five turns without duplicate or wakeup",async()=>{
  const h=harness();await h.command("on");await h.turn();
  h.entries.push({id:"final",type:"message",message:{role:"assistant",content:"Configured, runtime verification still pending."}});
- await h.handlers.get("agent_end")({},h.ctx);expect(h.call).toHaveBeenCalledTimes(1);
- await h.handlers.get("agent_end")({},h.ctx);expect(h.call).toHaveBeenCalledTimes(1);
+ await h.handlers.get("agent_settled")({},h.ctx);expect(h.call).toHaveBeenCalledTimes(1);
+ await h.handlers.get("agent_settled")({},h.ctx);expect(h.call).toHaveBeenCalledTimes(1);
  const note=h.handlers.get("context")({messages:[]});expect(note.messages).toHaveLength(1);
- await h.handlers.get("agent_end")({},h.ctx);expect(h.call).toHaveBeenCalledTimes(1);
+ await h.handlers.get("agent_settled")({},h.ctx);expect(h.call).toHaveBeenCalledTimes(1);
 });
 it("stop waits for the same in-flight audit, never a second concurrent request",async()=>{
  let finish!:(value:any)=>void;const h=harness(()=>new Promise(r=>{finish=r}));await h.command("on");
- const first=h.command("now");const stop=h.handlers.get("agent_end")({},h.ctx);await Promise.resolve();expect(h.call).toHaveBeenCalledTimes(1);
+ const first=h.command("now");const stop=h.handlers.get("agent_settled")({},h.ctx);await Promise.resolve();expect(h.call).toHaveBeenCalledTimes(1);
  finish({findings:[]});await Promise.all([first,stop]);
 });

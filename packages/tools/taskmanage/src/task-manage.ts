@@ -77,7 +77,15 @@ export interface OperationEvent {
   data: { mode: Mode; status: Batch["status"]; results: Result[]; at: string };
 }
 import { replayLatest, snapshot, type VersionedSnapshot } from "./persistence.js";
-import { goNow, normalizeTaskManageParams, swarmValidateTaskManageParams } from "./swarm-validate.js";
+import { ALLOWED, goNow, normalizeTaskManageParams, swarmValidateTaskManageParams } from "./swarm-validate.js";
+
+/**
+ * Per-op admissible fields, including the universal `key`/`op`, derived from
+ * the pre-gate's ALLOWED map so the schema, the pre-gate and the runtime
+ * validator can never disagree about which field belongs to which op.
+ */
+export const OPERATION_FIELDS: Record<string, string[]> =
+  Object.fromEntries(Object.entries(ALLOWED).map(([op, fields]) => [op, ["key", "op", ...fields]]));
 import { randomBytes } from "node:crypto";
 import { readFileSync, statSync, realpathSync } from "node:fs";
 import { resolve as resolvePath, relative as relativePath, isAbsolute } from "node:path";
@@ -88,34 +96,91 @@ export interface TaskManagerOptions { workspaceRoot?: string; resolveEvidence?: 
 export interface TaskMetrics { mutations: number; reads: number; failures: number; lastRevision: number }
 
 const fail = (code: string, message: string, retryable = false): Failure => ({ code, message, retryable });
+
+/**
+ * Split a multi-file citation into individual references.
+ *
+ * Splitting naively on `;`/`,` would corrupt markdown headings, which legally
+ * contain both ("file.md#Results, caveats"). A separator therefore only ends a
+ * reference when what follows looks like the start of another one: a path-ish
+ * token containing `/` or a file extension. Anything else is left alone, so an
+ * unsplittable string is still validated as a single reference exactly as
+ * before.
+ */
+export function splitEvidence(evidence: string): string[] {
+  const parts = evidence.split(/[;,]\s+(?=[^\s;,]*(?:\/|\.[A-Za-z0-9]{1,8}(?:#|$)))/g)
+    .map(part => part.trim()).filter(Boolean);
+  return parts.length ? parts : [evidence.trim()];
+}
 const clone = <T>(x: T): T => structuredClone(x);
 const isObj = (x: unknown): x is Record<string, unknown> => !!x && typeof x === "object" && !Array.isArray(x);
 
-/** JSON schema is deliberately exported as plain JSON so the module works with every Pi release. */
+const taskRef = () => ({ oneOf: [{ type: "string" }, { type: "object", required: ["ref"], additionalProperties: false, properties: { ref: { type: "string" }, field: { type: "string", enum: ["taskId"] } } }] });
+
+/**
+ * Per-field JSON Schema fragments. `OPERATION_FIELDS` decides which of these
+ * each op may carry; nothing here restates admissibility.
+ */
+const FIELD_SCHEMA: Record<string, () => Record<string, unknown>> = {
+  key: () => ({ type: "string", description: "Correlation handle for this operation; unique within the batch. Later operations may target it as taskId:{\"ref\":\"<key>\"}." }),
+  op: () => ({ type: "string", enum: ["create", "update", "get", "list"] }),
+  taskId: taskRef,
+  parentTaskId: taskRef,
+  subject: () => ({ type: "string" }),
+  description: () => ({ type: "string" }),
+  activeForm: () => ({ type: "string" }),
+  category: () => ({ type: "string", enum: CATEGORIES }),
+  priority: () => ({ type: "string", enum: PRIORITIES }),
+  metadata: () => ({ type: "object" }),
+  owner_id: () => ({ type: "string" }),
+  status: () => ({ type: "string", enum: ["pending", "in_progress", "completed", "deleted"] }),
+  active: () => ({ type: "boolean" }),
+  limit: () => ({ type: "integer", minimum: 1, maximum: 500 }),
+  offset: () => ({ type: "integer", minimum: 0 }),
+  addBlocks: () => ({ type: "array", items: taskRef() }),
+  addBlockedBy: () => ({ type: "array", items: taskRef() }),
+  addNote: () => ({ type: "string" }),
+  noteType: () => ({ type: "string", enum: NOTE_TYPES }),
+  include_audit: () => ({ type: "boolean" }),
+  questions: () => ({ type: "array", minItems: 1, maxItems: MAX_TASK_QUESTIONS, items: { type: "object", required: ["id", "text"], additionalProperties: false, properties: { id: { type: "string", minLength: 1, maxLength: MAX_QUESTION_ID_LENGTH }, text: { type: "string", minLength: 1, maxLength: MAX_QUESTION_TEXT_LENGTH } } } }),
+  answers: () => ({ type: "array", minItems: 1, maxItems: MAX_TASK_QUESTIONS, items: { type: "object", required: ["question", "answer", "evidence"], additionalProperties: false, properties: { question: { type: "string", minLength: 1, maxLength: MAX_QUESTION_ID_LENGTH, description: "The id of the question being answered." }, answer: { type: "string", minLength: 1, maxLength: MAX_ANSWER_LENGTH }, evidence: { type: "string", minLength: 1, maxLength: MAX_EVIDENCE_LENGTH, description: "One or more workspace references, separated by \";\" or \",\": file#Lx-Ly, file#L42, file.md#Heading, or a bare file path. Every reference must resolve." } } } }),
+};
+
+/** Fields each op requires, beyond the universal `key` and `op`. */
+const REQUIRED_FIELDS: Record<string, string[]> = {
+  // `questions` is enforced at runtime (see TaskManager.validate) and must be
+  // advertised here, or the model reads it as optional and every minimal
+  // create is rejected by a rule it was never shown.
+  create: ["subject", "questions"],
+  update: ["taskId"],
+  get: ["taskId"],
+  list: [],
+};
+
+const operationSchema = (op: string) => ({
+  type: "object",
+  required: ["key", "op", ...REQUIRED_FIELDS[op]],
+  additionalProperties: false,
+  properties: Object.fromEntries([
+    ["key", FIELD_SCHEMA.key()],
+    ["op", { const: op }],
+    ...OPERATION_FIELDS[op].filter(field => field !== "key" && field !== "op").map(field => [field, FIELD_SCHEMA[field]()]),
+  ]),
+});
+
+/**
+ * JSON schema is deliberately exported as plain JSON so the module works with
+ * every Pi release, and is generated from `OPERATION_FIELDS` so it cannot drift
+ * from the validators. The per-op `oneOf` is what stops the model emitting a
+ * field that a validator would then refuse.
+ */
 export const taskManageSchema = {
   type: "object", required: ["operations"], additionalProperties: false,
   properties: {
     mode: { type: "string", enum: ["sequential", "atomic"] },
-    operations: { type: "array", minItems: 1, maxItems: 50, items: {
-      type: "object", required: ["key", "op"], additionalProperties: false,
-      properties: {
-        key: { type: "string" }, op: { type: "string", enum: ["create", "update", "get", "list"] },
-        taskId: { oneOf: [{ type: "string" }, { type: "object", required: ["ref"], additionalProperties: false, properties: { ref: { type: "string" }, field: { type: "string", enum: ["taskId"] } } }] },
-        parentTaskId: { oneOf: [{ type: "string" }, { type: "object", required: ["ref"], additionalProperties: false, properties: { ref: { type: "string" }, field: { type: "string", enum: ["taskId"] } } }] },
-        subject: { type: "string" }, description: { type: "string" }, activeForm: { type: "string" },
-        category: { type: "string", enum: CATEGORIES }, priority: { type: "string", enum: PRIORITIES }, metadata: { type: "object" }, owner_id: { type: "string" },
-        status: { type: "string", enum: ["pending", "in_progress", "completed", "deleted"] }, active: { type: "boolean" },
-        limit: { type: "integer", minimum: 1, maximum: 500 }, offset: { type: "integer", minimum: 0 },
-        addBlocks: { type: "array", items: { oneOf: [{ type: "string" }, { type: "object", required: ["ref"], additionalProperties: false, properties: { ref: { type: "string" }, field: { type: "string", enum: ["taskId"] } } }] } },
-        addBlockedBy: { type: "array", items: { oneOf: [{ type: "string" }, { type: "object", required: ["ref"], additionalProperties: false, properties: { ref: { type: "string" }, field: { type: "string", enum: ["taskId"] } } }] } },
-        addNote: { type: "string" },
-        noteType: { type: "string", enum: NOTE_TYPES }, include_audit: { type: "boolean" },
-        questions: { type: "array", minItems: 1, maxItems: MAX_TASK_QUESTIONS, items: { type: "object", required: ["id", "text"], additionalProperties: false, properties: { id: { type: "string", minLength: 1, maxLength: MAX_QUESTION_ID_LENGTH }, text: { type: "string", minLength: 1, maxLength: MAX_QUESTION_TEXT_LENGTH } } } },
-        answers: { type: "array", minItems: 1, maxItems: MAX_TASK_QUESTIONS, items: { type: "object", required: ["question", "answer", "evidence"], additionalProperties: false, properties: { question: { type: "string", minLength: 1, maxLength: MAX_QUESTION_ID_LENGTH }, answer: { type: "string", minLength: 1, maxLength: MAX_ANSWER_LENGTH }, evidence: { type: "string", minLength: 1, maxLength: MAX_EVIDENCE_LENGTH } } } }
-      }
-    }}
-  }
-} as const;
+    operations: { type: "array", minItems: 1, maxItems: 50, items: { oneOf: ["create", "update", "get", "list"].map(operationSchema) } },
+  },
+};
 
 type RenderTheme = {
   fg?: (color: string, text: string) => string;
@@ -145,11 +210,11 @@ const characterWidth = (character: string) => {
     point >= 0x1f300 && point <= 0x1faff
   ) ? 2 : 1;
 };
-const displayWidth = (value: string) => Array.from(value).reduce((width, character) => width + characterWidth(character), 0);
-const truncate = (value: string, width: number) => {
-  if (width <= 0) return "";
-  if (displayWidth(value) <= width) return value;
-  const limit = Math.max(0, width - 1);
+export const taskDisplayWidth = (value: string) => Array.from(value).reduce((width, character) => width + characterWidth(character), 0);
+export const truncateTaskText = (value: string, width: number) => {
+  const limitWidth = Math.max(0, width);
+  if (taskDisplayWidth(value) <= limitWidth) return value;
+  const limit = Math.max(0, limitWidth - 1);
   let used = 0;
   let result = "";
   for (const character of value) {
@@ -158,8 +223,9 @@ const truncate = (value: string, width: number) => {
     result += character;
     used += next;
   }
-  return `${result}…`;
+  return `${result}${limitWidth > 0 ? "…" : ""}`;
 };
+const truncate = truncateTaskText;
 const component = (lines: string[] | ((width: number) => string[])): RenderComponent => ({
   render: (width: number) => typeof lines === "function" ? lines(width) : lines,
   invalidate: () => {},
@@ -228,11 +294,11 @@ function renderTaskResult(task: RenderTask, first: boolean, width: number, theme
   const prefix = first ? "    ⎿ " : "      ";
   const rawIcon = task.status === "completed" ? "✓" : task.status === "in_progress" ? "◉" :
     task.status === "pending" ? "○" : "?";
-  if (width <= displayWidth(prefix) + 2) return truncate(`${prefix}${rawIcon}`, width);
+  if (width <= taskDisplayWidth(prefix) + 2) return truncate(`${prefix}${rawIcon}`, width);
   const icon = task.status === "completed" ? style(theme, "success", rawIcon) :
     task.status === "in_progress" ? style(theme, "warning", rawIcon) : dim(theme, rawIcon);
   const label = `${task.id ? `#${task.id} ` : ""}${task.content || task.subject || "Untitled task"}`;
-  const available = Math.max(0, width - displayWidth(prefix) - 2);
+  const available = Math.max(0, width - taskDisplayWidth(prefix) - 2);
   const text = truncate(label, available);
   const rendered = task.status === "in_progress" ? bold(theme, text) :
     task.status === "completed" ? dim(theme, text) : text;
@@ -269,7 +335,7 @@ export const taskManageRenderers = {
       const lines = rows.tasks.flatMap((task, index) => [renderTaskResult(task, index === 0, width, theme), ...renderQuestionLines(task, "      ", width, theme)]);
       for (const message of rows.errors) {
         const prefix = lines.length ? "      " : "    ⎿ ";
-        lines.push(`${prefix}${style(theme, "error", "✗")} ${truncate(message, Math.max(0, width - displayWidth(prefix) - 2))}`);
+        lines.push(`${prefix}${style(theme, "error", "✗")} ${truncate(message, Math.max(0, width - taskDisplayWidth(prefix) - 2))}`);
       }
       return lines;
     });
@@ -455,13 +521,7 @@ export class TaskManager {
   private validate(op: Operation, index: number): Failure | undefined {
     if (!isObj(op) || typeof op.key !== "string" || !op.key || !["create","update","get","list"].includes(op.op))
       return fail("validation_failed", `operation ${index} must contain a valid key and op`);
-    const allowed: Record<Operation["op"], string[]> = {
-      create: ["key","op","subject","description","activeForm","category","priority","metadata","parentTaskId","owner_id","status","active","addBlocks","addBlockedBy","addNote","noteType","questions"],
-      update: ["key","op","taskId","subject","description","activeForm","category","priority","metadata","status","active","parentTaskId","addBlocks","addBlockedBy","addNote","noteType","questions","answers"],
-      get: ["key","op","taskId","include_audit"],
-      list: ["key","op","subject","category","status","active","limit","offset"],
-    };
-    for (const field of Object.keys(op as object)) if (!allowed[op.op]?.includes(field))
+    for (const field of Object.keys(op as object)) if (!OPERATION_FIELDS[op.op]?.includes(field))
       return fail("validation_failed", `operation ${op.key}: field ${field} is not valid for ${op.op}`);
     for (const field of ["taskId", "parentTaskId"] as const) {
       const error = this.validateRef((op as Record<string, unknown>)[field], field);
@@ -536,7 +596,20 @@ export class TaskManager {
   }
   private validateAnswers(answers: unknown, key: string): Failure | undefined {
     if (answers === undefined) return;
-    if (!Array.isArray(answers) || answers.length < 1 || answers.length > MAX_TASK_QUESTIONS || answers.some(a => !this.validAnswer(a)) || new Set(answers.map(a => (a as TaskAnswer).question)).size !== answers.length) return fail("validation_failed", `operation ${key}: answers must contain unique bounded {question,answer,evidence} items`);
+    if (!Array.isArray(answers)) return fail("validation_failed", `operation ${key}: answers must be an array`);
+    if (answers.length < 1 || answers.length > MAX_TASK_QUESTIONS) return fail("validation_failed", `operation ${key}: answers must contain 1..${MAX_TASK_QUESTIONS} items`);
+    for (const [index, answer] of answers.entries()) {
+      if (!isObj(answer)) return fail("validation_failed", `operation ${key}: answers[${index}] must be an object`);
+      if (typeof answer.question !== "string" || !answer.question.trim()) return fail("validation_failed", `operation ${key}: answers[${index}].question must be a non-empty string`);
+      if (answer.question.length > MAX_QUESTION_ID_LENGTH) return fail("validation_failed", `operation ${key}: answers[${index}].question exceeds ${MAX_QUESTION_ID_LENGTH} characters`);
+      if (typeof answer.answer !== "string" || !answer.answer.trim()) return fail("validation_failed", `operation ${key}: answers[${index}].answer must be a non-empty string`);
+      if (answer.answer.length > MAX_ANSWER_LENGTH) return fail("validation_failed", `operation ${key}: answers[${index}].answer exceeds ${MAX_ANSWER_LENGTH} characters`);
+      if (typeof answer.evidence !== "string" || !answer.evidence.trim()) return fail("validation_failed", `operation ${key}: answers[${index}].evidence must be a non-empty string`);
+      if (answer.evidence.length > MAX_EVIDENCE_LENGTH) return fail("validation_failed", `operation ${key}: answers[${index}].evidence exceeds ${MAX_EVIDENCE_LENGTH} characters`);
+      if (Object.keys(answer).some(field => !["question", "answer", "evidence"].includes(field))) return fail("validation_failed", `operation ${key}: answers[${index}] contains an unknown field`);
+    }
+    const duplicate = answers.findIndex((answer, index) => answers.findIndex(other => (other as TaskAnswer).question === (answer as TaskAnswer).question) !== index);
+    if (duplicate >= 0) return fail("validation_failed", `operation ${key}: answers[${duplicate}].question duplicates an earlier question id`);
   }
   private completionError(task: Task, op: Operation): Failure | undefined {
     if (task.status === "completed" && op.questions !== undefined && (op.status === undefined || op.status === "completed")) return fail("validation_failed", "reopen task before changing questions");
@@ -556,11 +629,22 @@ export class TaskManager {
     }
     const missing = task.questions.filter(question => !seen.has(question.id));
     if (missing.length) return fail("validation_failed", `missing answers for question(s): ${missing.map(question => `${question.id} (${question.text})`).join("; ")}. Re-read the task, then retry with status:"completed" and answers:[{question:"<question id>",answer:"<truthful answer>",evidence:"path/to/file.md#Heading or path/to/file.ts#L1-L2"}] for every listed question; do not invent answers or evidence`);
-    for (const answer of answers) if (answer.evidence && !this.resolveEvidence(answer.evidence)) return fail("validation_failed", `evidence reference is unavailable: ${answer.evidence}`);
+    for (const answer of answers) {
+      if (!answer.evidence) continue;
+      const unresolved = splitEvidence(answer.evidence).filter(reference => !this.resolveEvidence(reference));
+      // Name the reference that failed: echoing the whole string forces the
+      // caller to bisect a citation list to find the one bad entry.
+      if (unresolved.length) return fail("validation_failed", `evidence reference is unavailable: ${unresolved.join("; ")}`);
+    }
   }
+  /**
+   * Accept the citation shapes agents actually write. A bare path cites a whole
+   * file; `#Lx`, `#Lx-Ly` and `#Heading` narrow it. Multi-file citations are
+   * split by `splitEvidence` before reaching here.
+   */
   private resolveEvidence(reference: string): boolean {
     if (this.options.resolveEvidence) return this.options.resolveEvidence(reference) === true;
-    const match = /^([^#]+)#(L\d+-L\d+|[^#\s].*)$/.exec(reference);
+    const match = /^([^#]+?)(?:#(L\d+(?:-L\d+)?|[^#\s].*))?$/.exec(reference.trim());
     if (!match || !this.options.workspaceRoot) return false;
     const root = resolvePath(this.options.workspaceRoot), file = resolvePath(root, match[1]);
     const rel = relativePath(root, file);
@@ -570,8 +654,11 @@ export class TaskManager {
       if (isAbsolute(physical) || physical === ".." || physical.startsWith("../")) return false;
       const stat = statSync(file); if (!stat.isFile() || stat.size > 1024 * 1024) return false;
       const text = readFileSync(file, "utf8"), section = match[2];
-      if (/^L\d+-L\d+$/.test(section)) {
-        const parts = section.match(/^L(\d+)-L(\d+)$/)!.slice(1).map(Number); return parts[0] >= 1 && parts[1] >= parts[0] && parts[1] <= text.split("\n").length;
+      if (section === undefined) return true;
+      const lines = /^L(\d+)(?:-L(\d+))?$/.exec(section);
+      if (lines) {
+        const start = Number(lines[1]), end = lines[2] === undefined ? start : Number(lines[2]);
+        return start >= 1 && end >= start && end <= text.split("\n").length;
       }
       if (!/\.md$/i.test(file)) return false;
       return text.split("\n").some(line => /^#{1,6}\s+/.test(line) && (line.replace(/^#{1,6}\s+/, "").trim() === section || line.replace(/^#{1,6}\s+/, "").trim().toLowerCase().replace(/[^\p{L}\p{N} _-]/gu, "").replace(/ /g, "-") === section));
@@ -743,7 +830,12 @@ export class TaskManager {
       ? task.parentTaskId
       : target(op.parentTaskId) || undefined;
     const questionsChanged = op.questions !== undefined && JSON.stringify(op.questions) !== JSON.stringify(task.questions);
-    Object.assign(task, { subject:op.subject?.trim()||task.subject, description:op.description??task.description, activeForm:op.activeForm??task.activeForm, category:op.category??task.category, priority:op.priority??task.priority, metadata:mergedMetadata, questions:op.questions ? clone(op.questions) : task.questions, answers:questionsChanged || (op.status !== undefined && op.status !== "completed") ? undefined : (op.answers ? clone(op.answers) : task.answers), status:op.status??task.status, active:op.active??task.active, parentTaskId, dependsOn:deps, updatedAt:goNow() });
+    // Answers are tied to the questions they answer, not to the status. Only
+    // a genuine change of questions invalidates them; reopening a completed
+    // task used to erase them silently, so the next completion failed with
+    // "missing answers" for work that had already been evidenced.
+    const answers = questionsChanged ? undefined : (op.answers ? clone(op.answers) : task.answers);
+    Object.assign(task, { subject:op.subject?.trim()||task.subject, description:op.description??task.description, activeForm:op.activeForm??task.activeForm, category:op.category??task.category, priority:op.priority??task.priority, metadata:mergedMetadata, questions:op.questions ? clone(op.questions) : task.questions, answers, status:op.status??task.status, active:op.active??task.active, parentTaskId, dependsOn:deps, updatedAt:goNow() });
     if (op.status === "in_progress") {
       for (const other of this.state.tasks) other.active = other.id === id;
       // Explicit false is applied after the focus transition.
@@ -865,7 +957,22 @@ export function registerTaskManage(pi: { registerTool(tool: unknown): void; appe
       // reports failures as a tool error, not a failed batch.
       const normalizedParams = normalizeTaskManageParams(params) as Params;
       const invalid = swarmValidateTaskManageParams(normalizedParams);
-      if (invalid !== undefined) throw new Error(`Error executing TaskManage: validation failed for TaskManage: ${invalid} (error_id=err_${randomBytes(10).toString("hex")})`);
+      if (invalid !== undefined) {
+        // Go reports pre-execution validation as a tool error rather than a
+        // failed batch, and the thrown string is wire-visible, so it is kept
+        // byte-identical. The structured details are additive: without them a
+        // multi-operation call reports a single string and the caller cannot
+        // tell which operation was rejected or whether anything ran.
+        const offending = /^operation "([^"]+)"/.exec(invalid)?.[1]
+          ?? /^duplicate operation key "([^"]+)"/.exec(invalid)?.[1];
+        const error = new Error(`Error executing TaskManage: validation failed for TaskManage: ${invalid} (error_id=err_${randomBytes(10).toString("hex")})`);
+        Object.assign(error, { details: { batch: { status: "failed", results: normalizedParams.operations?.map((operation, index) => {
+          const key = typeof operation?.key === "string" ? operation.key : String(index);
+          const isOffender = offending === undefined ? index === 0 : key === offending;
+          return { key, op: operation?.op, status: isOffender ? "failed" : "skipped", ...(isOffender ? { error: { code: "validation_failed", message: invalid, retryable: false } } : {}) };
+        }) ?? [] } } });
+        throw error;
+      }
       const batch = manager.execute(normalizedParams,signal);
       refreshWidget(ctx);
       const ordered = goMapOrdered(batch);

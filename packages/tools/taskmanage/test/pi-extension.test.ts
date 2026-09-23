@@ -54,7 +54,7 @@ describe("root Pi TaskManage extension", () => {
     expect(runtime.tools).toHaveLength(1);
     expect(runtime.tools.find((tool: any) => tool.name === "ask_user_question")).toBeUndefined();
     // The model-facing contract is Swarm's canonical TaskManage definition
-    // (tools/parity/fixtures/swarm-tools.json), overlaid on the wire by
+    // (tests/fixtures/swarm-tools.json), overlaid on the wire by
     // before_provider_request; the registered validator stays permissive so
     // the tool validates its own input exactly like Swarm's Go tool.
     const canonical = loadSwarmToolSurface().get("TaskManage")!;
@@ -68,9 +68,17 @@ describe("root Pi TaskManage extension", () => {
     });
     const overlaid = overlaySwarmToolSchemas({ tools: [{ type: "function", function: { name: "TaskManage", description: "", parameters: runtime.tools[0].parameters } }] })!.tools[0].function.parameters;
     expect(overlaid.type).toBe("object");
-    const operationSchema = (overlaid as any).properties.operations.items;
-    expect(operationSchema.properties.questions).toBeDefined();
-    expect(operationSchema.properties.answers).toBeDefined();
+    const branches = (overlaid as any).properties.operations.items.oneOf;
+    const branch = (op: string) => branches.find((candidate: any) => candidate.properties.op.const === op);
+    expect(branch("create").properties.questions).toBeDefined();
+    expect(branch("update").properties.answers).toBeDefined();
+    // A create without questions is the single most common granular-call
+    // failure, so the advertised schema must mark it required rather than
+    // leaving the runtime to reject a call the model was told was valid.
+    expect(branch("create").required).toContain("questions");
+    // Fields the validators refuse must not be advertised on that op.
+    expect(branch("update").properties.owner_id).toBeUndefined();
+    expect(branch("list").properties.include_audit).toBeUndefined();
     expect(runtime.handlers.get("session_start")).toHaveLength(3); // state, cleanup budget, audit
     // Swarm builtin pipeline (first) + task-audit coordinator (second).
     expect(runtime.handlers.get("tool_call")).toHaveLength(2);
@@ -281,7 +289,7 @@ describe("root Pi TaskManage extension", () => {
     expect(widgetEntry).toBeDefined();
     const widget = widgetEntry!.content({}, {});
     const lines = widget.render(80).join("\n");
-    expect(lines).toContain("Tasks  0 done · 1 open");
+    expect(lines).toContain("Tasks  0/1 done");
     expect(lines).toContain("#1 Build the renderer");
     expect(() => widget.invalidate()).not.toThrow();
   });

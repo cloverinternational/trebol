@@ -9,11 +9,12 @@ import { createHash } from "node:crypto";
 import { auditWithJev, collectJevEvidence, renderJevReview } from "../../lib/context/jev-knowledge-audit.ts";
 import { redactContext } from "../../lib/context/page-index-memory.ts";
 import { jevAuditEnabled, setJevAuditEnabled, bindJevAuditMode } from "../../lib/context/jev-audit-mode.ts";
+import { onAgentSettled } from "../../lib/runtime/agent-settled.ts";
 
 export const JEV_ENTRY = "pi-swarm-jev-audit";
 export const JEV_REVIEW = "pi-swarm-jev-review";
 const registered = new WeakSet<object>();
-/** Jev finds; the current agent reviews. No memory/skill mutations or wakeups. */
+/** Jev reviews operational state only; memory candidate review is independent. */
 export default function jevKnowledgeAudit(pi: any, deps = { audit: auditWithJev }): void {
   if (registered.has(pi)) return;
   registered.add(pi);
@@ -104,7 +105,7 @@ export default function jevKnowledgeAudit(pi: any, deps = { audit: auditWithJev 
   pi.on("turn_start", (_e: any, ctx: any) => run(ctx));
   // Final evidence must not wait for a sixth turn that may never occur. One
   // bounded batch only; pending review/backlog remains explicit and no wakeup.
-  pi.on("agent_end", (_e: any, ctx: any) => {
+  onAgentSettled(pi, (_e: any, ctx: any) => {
     if(config?.stopAudit===false)return Promise.resolve();
     const last = [...entries(ctx)].reverse().find(e => e.type === "message")?.id;
     const fingerprint = `${turns}:${last ?? "empty"}`;

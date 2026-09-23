@@ -7,6 +7,7 @@ import { registerMemoryMaintenance, bindMemoryMaintenance, unregisterMemoryMaint
 import { runMemoryMaintenance } from "../../lib/context/memory-maintenance-runner.ts";
 import { createMemoryQueryBudget } from "../../lib/context/memory-query-budget.ts";
 import { jevAuditEnabled, bindJevAuditMode } from "../../lib/context/jev-audit-mode.ts";
+import { onAgentSettled } from "../../lib/runtime/agent-settled.ts";
 export const MAINTENANCE_ENTRY="pi-swarm-memory-maintenance";
 const registered=new WeakSet<object>();
 export default function memoryMaintenance(pi:any,deps={run:runMemoryMaintenance}) {
@@ -52,7 +53,7 @@ export default function memoryMaintenance(pi:any,deps={run:runMemoryMaintenance}
  });
  // Print-mode must not exit before the current bounded review receipt is saved.
  // Drain only the already-dispatched job; never recursively drain an entire queue.
- pi.on("agent_end",async(_event:any,ctx:any)=>{
+ onAgentSettled(pi, async(_event:any,ctx:any)=>{
   if(!enabled||child()||ctx.hasUI!==false)return;
   const job=activeJob;if(!job)return;
   const own=generation;let timer:ReturnType<typeof setTimeout>|undefined;

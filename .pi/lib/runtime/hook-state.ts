@@ -1,6 +1,6 @@
 import { addHookObservation } from "./hook-observations.ts";
 
-export type HookGroup = "taskmanage" | "autogenskills" | "swarm-prompt" | "disk-hooks" | "annoyance";
+export type HookGroup = "taskmanage" | "autogenskills" | "swarm-prompt" | "disk-hooks" | "annoyance" | "structure-guard";
 export type HookOutcome = "executed" | "blocked" | "failed" | "skipped";
 export interface HookRecord { id: string; group: HookGroup; event: string; at: string; enabled: boolean; outcome: HookOutcome; tool?: string; toolCallId?: string; reason?: string; output?: string; }
 interface State { enabled: Record<string, boolean>; visible: boolean; recent: HookRecord[]; counts: { registered: number; executed: number; blocked: number; failed: number; skipped: number }; }
@@ -34,7 +34,7 @@ export function setHookPresenter(present?: (data: any) => void) { shared.present
 export const hooksDisabledByEnv = (env: NodeJS.ProcessEnv = process.env) => /^(1|true|yes)$/i.test((env.PI_SWARM_NO_HOOKS ?? "").trim());
 // "swarm-prompt" is prompt assembly (skills catalog + context injection), which
 // Swarm keeps even under --no-hooks; only the real hook groups are gated.
-const SWARM_HOOK_GROUPS = new Set(["taskmanage", "autogenskills", "disk-hooks", "annoyance"]);
+const SWARM_HOOK_GROUPS = new Set(["taskmanage", "autogenskills", "disk-hooks", "annoyance", "structure-guard"]);
 export function isHookEnabled(group: string) { normalizeState(); if (SWARM_HOOK_GROUPS.has(group) && hooksDisabledByEnv()) return false; return shared.state.enabled[group] !== false; }
 export function toggleHook(group: string, enabled?: boolean) { shared.state.enabled[group] = enabled ?? !isHookEnabled(group); return isHookEnabled(group); }
 export function setHookVisibility(visible?: boolean) { shared.state.visible = visible ?? !shared.state.visible; return shared.state.visible; }
@@ -50,6 +50,7 @@ function displayHookName(group: HookGroup, event: string, payload: any): string 
   if (group === "taskmanage") return payload?.hookName ?? (event === "tool_call" ? "task-enforcement-hook" : "task-maintenance-reminder-hook");
   if (group === "swarm-prompt") return "swarm-prompt";
   if (group === "annoyance") return "annoyance-nudge";
+  if (group === "structure-guard") return "project-structure-guard";
   return group;
 }
 export function recordHook(group: HookGroup, event: string, payload?: any, outcome: HookOutcome = "executed", reason?: string, output?: string) {
@@ -152,7 +153,7 @@ export async function dispatchRegisteredHook(event: string, payload: any, ctx: a
   return merged;
 }
 export function hookGroups() {
-  return ["taskmanage", "autogenskills", "swarm-prompt", "disk-hooks", "annoyance"] as const;
+  return ["taskmanage", "autogenskills", "swarm-prompt", "disk-hooks", "annoyance", "structure-guard"] as const;
 }
 export function renderHookLines() {
   const s = shared.state;

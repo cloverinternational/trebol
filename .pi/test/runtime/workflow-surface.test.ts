@@ -18,7 +18,11 @@ it("advertises mandatory task questions and answers on both wire protocols",()=>
  const a=overlaySwarmToolSchemas({tools:[{function:{name:"TaskManage",parameters:{}}}]})!;
  const b=overlaySwarmToolSchemas({tools:[{name:"TaskManage",input_schema:{}}]})!;
  const schema:any=a.tools[0].function.parameters;
- expect(schema.properties.operations.items.properties.questions.minItems).toBe(1);
- expect(schema.properties.operations.items.properties.answers).toBeDefined();
+ // operations.items is a per-op oneOf, so each rule is advertised on the branch
+ // that actually enforces it rather than on one flat property bag.
+ const branch=(op:string)=>schema.properties.operations.items.oneOf.find((b:any)=>b.properties.op.const===op);
+ expect(branch("create").properties.questions.minItems).toBe(1);
+ expect(branch("create").required).toContain("questions");
+ expect(branch("update").properties.answers).toBeDefined();
  expect(b.tools[0].input_schema).toEqual(schema);
 });

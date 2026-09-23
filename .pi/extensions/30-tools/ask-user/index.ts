@@ -11,6 +11,7 @@
  */
 
 import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
+import { withDefaultToolRenderer } from "../../../../packages/runtime/core/src/tool-renderer.ts";
 import { getMarkdownTheme } from "@earendil-works/pi-coding-agent";
 import { Type, type TUnsafe } from "@sinclair/typebox";
 import {
@@ -2034,7 +2035,7 @@ async function askViaDialogs(
 }
 
 export default function(pi: ExtensionAPI) {
-   pi.registerTool({
+   pi.registerTool(withDefaultToolRenderer({
       // Use the canonical name used by Swarm's built-in tool contract.  The
       // previous local name (ask_user) made the model call a different schema
       // and produced confusing oneOf/additional-properties validation errors.
@@ -2434,5 +2435,5 @@ export default function(pi: ExtensionAPI) {
 
          return new Text(text, 0, 0);
       },
-   });
+   }));
 }

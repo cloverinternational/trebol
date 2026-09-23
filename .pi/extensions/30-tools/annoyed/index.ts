@@ -1,4 +1,4 @@
-import { AnnoyedStore, type AnnoyedStatus, type AnnoyedSeverity } from "./store.ts";
+import { AnnoyedStore, boundTranscript, type AnnoyedStatus, type AnnoyedSeverity } from "./store.ts";
 import { registerAnnoyanceNudgeHook } from "./nudge.ts";
 import { withSwarmToolSurface } from "../../../lib/runtime/swarm-tool-surface.ts";
 import { randomBytes } from "node:crypto";
@@ -39,7 +39,7 @@ export default function annoyedExtension(rawPi: any) {
       const result = await store.upsert({
         issue: text(params.issue), title: text(params.title), category: text(params.category) || "other", severity: params.severity,
         observed: text(params.observed), expected: text(params.expected), evidence: params.evidence, acceptanceTests: params.acceptance_tests,
-        tags: params.tags, conversationId, projectCwd: pi.getCwd?.() ?? process.cwd(), transcript: Array.isArray(entries) ? entries.slice(-80) : undefined,
+        tags: params.tags, conversationId, projectCwd: pi.getCwd?.() ?? process.cwd(), transcript: Array.isArray(entries) ? boundTranscript(entries.slice(-80)) : undefined,
         metadata: { toolCallId }, source: "pi-annoyed-tool",
       });
       const body = [`## Agent complaint\n\n${issue}`, params?.observed ? `## Observed\n\n${text(params.observed)}` : "", params?.expected ? `## Expected\n\n${text(params.expected)}` : "",

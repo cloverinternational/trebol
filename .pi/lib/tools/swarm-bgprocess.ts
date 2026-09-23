@@ -3,7 +3,7 @@
  * keeps presentation (including JSON field order) next to the process state:
  * ReadBackgroundCommand's output is a wire contract, not merely diagnostics.
  */
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { accessSync, constants, existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -88,12 +88,23 @@ export function formatBackgroundDone(done: BackgroundDone): string {
 /** Go os/exec ExitError.Error() for a non-zero exit, as stored in ProcessResult.Error. */
 const goExitStatus = (code: number, signal: NodeJS.Signals | null) => signal ? `signal: ${signal.toLowerCase().replace(/^sig/, "")}` : `exit status ${code}`;
 
-/** First executable named `name` on PATH, or "" when absent. */
-function onPath(name: string): string {
+/**
+ * First runnable executable named `name` on PATH, or "" when unavailable.
+ *
+ * access(X_OK) is not enough: execve also returns ENOENT when the file exists
+ * but its ELF/shebang interpreter does not. Optional buffering wrappers must
+ * never make Bash unusable, so probe that the process can actually start.
+ * The exit status is irrelevant; BSD and GNU variants expose different flags.
+ */
+function runnableOnPath(name: string): string {
   for (const dir of (process.env.PATH ?? "").split(":")) {
     if (!dir) continue;
     const candidate = join(dir, name);
-    try { accessSync(candidate, constants.X_OK); return candidate; } catch { /* keep looking */ }
+    try {
+      accessSync(candidate, constants.X_OK);
+      const probe = spawnSync(candidate, ["--version"], { stdio: "ignore", timeout: 1000 });
+      if (!probe.error) return candidate;
+    } catch { /* keep looking */ }
   }
   return "";
 }
@@ -120,7 +131,7 @@ const shellQuote = (value: string) => `'${value.replaceAll("'", `'"'"'`)}'`;
  */
 export interface BufferingMethod { argv: string[]; pty: boolean }
 export function detectBufferingMethod(shell: string, command: string): BufferingMethod {
-  const script = onPath("script");
+  const script = runnableOnPath("script");
   // util-linux `script -q -e -c "<cmd>" /dev/null`. The BSD/macOS argument
   // order differs (`script -q /dev/null <shell> -c <cmd>`), and its -e is
   // implicit, so only take this path on Linux.
@@ -130,7 +141,7 @@ export function detectBufferingMethod(shell: string, command: string): Buffering
   if (script && process.platform === "darwin") {
     return { argv: [script, "-q", "/dev/null", shell, "-c", command], pty: true };
   }
-  const stdbuf = onPath("stdbuf");
+  const stdbuf = runnableOnPath("stdbuf");
   if (stdbuf) return { argv: [stdbuf, "-oL", "-eL", shell, "-c", command], pty: false };
   return { argv: [shell, "-c", command], pty: false };
 }

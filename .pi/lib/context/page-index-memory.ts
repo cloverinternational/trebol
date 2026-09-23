@@ -11,7 +11,7 @@ export interface ContextSource { id: string; version: number; scope: ContextScop
 export interface ContextEntry { type: typeof CONTEXT_SOURCE_ENTRY; data: ContextSource; }
 export interface ContextTombstone { type: typeof CONTEXT_TOMBSTONE_ENTRY; data: { id: string; version: number; deletedAt: string; scope: ContextScope; }; }
 
-const secretPatterns = [/(sk-[A-Za-z0-9_-]{12,})/g, /(gh[pousr]_[A-Za-z0-9_]{20,})/g, /(xai-[A-Za-z0-9_-]{12,})/g, /((?:api[_-]?key|token|secret|password)\s*[:=]\s*)([^\s,;]+)/gi, /(Bearer\s+)[A-Za-z0-9._~+\/-]{12,}/gi];
+const secretPatterns = [/(?<![A-Za-z0-9_./-])(sk-[A-Za-z0-9_-]{12,})/g, /(gh[pousr]_[A-Za-z0-9_]{20,})/g, /(xai-[A-Za-z0-9_-]{12,})/g, /((?:api[_-]?key|token|secret|password)\s*[:=]\s*)([^\s,;]+)/gi, /(Bearer\s+)[A-Za-z0-9._~+\/-]{12,}/gi];
 export function redactContext(text: string): string { let value = String(text); for (const [i, pattern] of secretPatterns.entries()) value = value.replace(pattern, i === 3 || i === 4 ? "$1[REDACTED]" : "[REDACTED]"); return value; }
 export function scopeOf(input: Partial<ContextScope> = {}, cwd = process.cwd()): ContextScope { const clean = (v: string | undefined, fallback: string) => (v ?? fallback).trim().replace(/[\\/]+/g, "/") || fallback; return { namespace: clean(input.namespace, "default"), workspace: clean(input.workspace, cwd), session: clean(input.session, "current") }; }
 function sameScope(a: ContextScope, b: ContextScope): boolean { return a.namespace === b.namespace && a.workspace === b.workspace && a.session === b.session; }

@@ -48,6 +48,11 @@ export interface BootstrapRenderOptions {
   width?: number;
 }
 
+const COLLAPSED_BRIEF_CHARS = 360;
+const FULL_BRIEF_CHARS = 12000;
+const MAX_FAILURES = 4;
+const MAX_CITATIONS = 8;
+
 const stageLabel: Record<BootstrapStage, string> = {
   scope: "scope resolution",
   selectors: "memory/skill selection",
@@ -71,6 +76,19 @@ function statusMark(status: BootstrapStatus, running: boolean): string {
   return "⋯";
 }
 
+function clip(value: string, limit: number): string {
+  const text = value.trim();
+  return text.length <= limit ? text : `${text.slice(0, Math.max(0, limit - 18)).trimEnd()} … [truncated]`;
+}
+
+function progressBar(stage: BootstrapStage, status: BootstrapStatus): string {
+  if (status === "failed") return "[████░░░░]";
+  if (status === "cancelled") return "[███░░░░░]";
+  const stages: BootstrapStage[] = ["scope", "selectors", "skills", "task-draft", "tasks", "complete"];
+  const filled = status === "complete" ? 8 : Math.max(1, Math.round(((Math.max(0, stages.indexOf(stage)) + 1) / stages.length) * 8));
+  return `[${"█".repeat(filled)}${"░".repeat(8 - filled)}]`;
+}
+
 /** Pure, test-friendly formatting. No line contains a synthetic footer/header. */
 export function formatBootstrapTool(details: BootstrapToolDetails | undefined, options: BootstrapRenderOptions = {}): string {
   if (options.isError) details = { ...(details ?? { stage: "scope" }), status: "failed" };
@@ -79,30 +97,32 @@ export function formatBootstrapTool(details: BootstrapToolDetails | undefined, o
   const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
   const mark = running && details.elapsedMs !== undefined ? frames[Math.floor(details.elapsedMs / 250) % frames.length] : statusMark(details.status, running);
   const stage = stageLabel[details.stage] ?? details.stage ?? (options.isPartial ? "starting" : "result unavailable");
-  const bits = [`${mark} bootstrap · ${stage}`];
-  if (details.mode) bits.push(details.mode);
-  if (details.model) bits.push(details.model);
-  if (details.scope) bits.push(`scope=${details.scope}`);
-  if (details.memory || details.selectors) {
-    const selected = [details.memory && `memory ${count(details.memory)}`, details.selectors && `selectors ${count(details.selectors)}`].filter(Boolean);
-    if (selected.length) bits.push(selected.join(", "));
-  }
-  if (details.skillsSelected !== undefined || details.skillsLoaded !== undefined) {
-    bits.push(`skills selected ${details.skillsSelected ?? 0}, loaded ${details.skillsLoaded ?? 0}`);
-  }
-  if (details.tasksDrafted !== undefined || details.tasksCommitted !== undefined) {
-    bits.push(`tasks drafted ${details.tasksDrafted ?? 0}, committed ${details.tasksCommitted ?? 0}`);
-  }
-  if (details.elapsedMs !== undefined) bits.push(`${Math.max(0, details.elapsedMs)}ms`);
-  const lines = [bits.slice(0, details.mode ? 3 : 1).join(" · "), ...bits.slice(details.mode ? 3 : 1).map(bit => `  ${bit}`)];
+  const lines = [
+    `${mark} bootstrap ${progressBar(details.stage, details.status)} ${stage}`,
+    `  ${details.mode ? `mode=${details.mode} · ` : ""}${details.model ? `model=${details.model}` : "session model"}${details.elapsedMs !== undefined ? ` · ${Math.max(0, details.elapsedMs)}ms` : ""}`,
+  ];
+  if (details.scope) lines.push(`  ▸ scope  ${details.scope}`);
+  const metrics = [
+    details.memory && `memory ${count(details.memory)}`,
+    details.selectors && `selectors ${count(details.selectors)}`,
+    (details.skillsSelected !== undefined || details.skillsLoaded !== undefined) && `skills ${details.skillsLoaded ?? 0}/${details.skillsSelected ?? 0}`,
+    (details.tasksDrafted !== undefined || details.tasksCommitted !== undefined) && `tasks ${details.tasksCommitted ?? 0}/${details.tasksDrafted ?? 0}`,
+  ].filter(Boolean);
+  if (metrics.length) lines.push(`  ▸ ${metrics.join("   ")}`);
   if (details.failures?.length) {
-    for (const failure of details.failures.slice(0, 3)) lines.push(`  ${failure.stage ? `${failure.stage}: ` : ""}${failure.summary}`);
-    if (details.failures.length > 3) lines.push(`  … ${details.failures.length - 3} more failures`);
+    lines.push("  ── failures ──");
+    for (const failure of details.failures.slice(0, MAX_FAILURES)) lines.push(`  ✗ ${failure.stage ? `${failure.stage}: ` : ""}${clip(failure.summary, options.expanded ? 600 : 220)}`);
+    if (details.failures.length > MAX_FAILURES) lines.push(`  … ${details.failures.length - MAX_FAILURES} more failures`);
   }
   if ((options.expanded || details.showCitations) && details.citations?.length) {
-    for (const citation of details.citations.slice(0, 8)) lines.push(`  ↳ ${citation.label}${citation.source ? `: ${citation.source}` : ""}`);
+    lines.push("  ── evidence ──");
+    for (const citation of details.citations.slice(0, MAX_CITATIONS)) lines.push(`  ↳ ${citation.label}${citation.source ? `: ${citation.source}` : ""}`);
   }
-  if (details.brief) lines.push("", details.brief);
+  if (details.brief) {
+    lines.push("", options.expanded ? "  ── handoff ──" : "  ↳ handoff ready (ctrl+o to expand)");
+    if (options.expanded) lines.push(clip(details.brief, FULL_BRIEF_CHARS));
+    else lines.push(`  ${clip(details.brief.replace(/\s+/g, " "), COLLAPSED_BRIEF_CHARS)}`);
+  }
   return lines.join("\n");
 }
 

@@ -35,7 +35,7 @@ Pi ExtensionAPI (.pi/extensions/<NN-layer>/)
         │ registration, gates, persistence, rendering
         ├── 00-runtime   ── integration boundary, hook engine, tool surface, parity
         ├── 10-context   ── swarm-prompt + swarm-context, plan mode, skills
-        ├── 20-policy    ── policy + disk hooks + policy nudges
+        ├── 20-policy    ── policy + disk hooks + structure guard + policy nudges
         ├── 30-tools     ── agents, tasks, history, fs, bash, MCP, vault, research
         ├── 40-state     ── session entries + .swarm stores
         └── 50-ui        ── renderers, widgets, status, footer, themes
@@ -56,7 +56,7 @@ address in each tree.
 | --- | --- | --- |
 | 00 | `runtime` | integration boundary, hook engine, tool surface/gating, transport parity, telemetry |
 | 10 | `context` | system prompt, prompt/context config, plan mode, thinking, skills, inspector |
-| 20 | `policy` | disk hooks, sleep blocker, nudges |
+| 20 | `policy` | disk hooks, project structure guard and `/init`, sleep blocker, nudges |
 | 30 | `tools` | every `registerTool` surface: bash, fs, search, agents, tasks, schedule, history, vault, research, MCP, ask-user, annoyed, codemode |
 | 40 | `state` | durable session entries: memory history, conversation metadata |
 | 50 | `ui` | control panel, metrics widgets, themes, tools-status command, Pi-Swarm-owned `/btw` side-question overlay |
@@ -186,9 +186,9 @@ When changing discovery, preserve these invariants:
 | --- | --- |
 | `00-runtime` | `cache-telemetry`, `swarm-update`, `bootstrap`, `hooks`, `swarm-runtime`, `swarm-transport-parity` |
 | `10-context` | `autogenskills`, `prompt-context-configure`, `swarm-plan-mode`, `swarm-prompt`, `swarm-skills`, `swarm-thinking`, `system-inspector`, `system-prompts` |
-| `20-policy` | `swarm-disk-hooks` |
+| `20-policy` | `swarm-disk-hooks`, `project-init` |
 | `30-tools` | `annoyed/`, `codemode`, `control-task-tools`, `exa-search`, `history-search`, `ask-user/`, `paseo`, `research-tools`, `swarm-goal`, `swarm-agent-tools`, `swarm-background-bash`, `swarm-bash`, `swarm-fs-tools`, `swarm-history-vault-tools`, `swarm-search`, `taskmanage`, `vault` |
-| `40-state` | `memory-history`, `knowledge-enrichment`, `jev-knowledge-audit`, `memory-maintenance`, `swarm-conversation-metadata` |
+| `40-state` | `memory-history`, `task-candidate-capture`, `knowledge-enrichment`, `candidate-memory-review`, `jev-knowledge-audit`, `memory-maintenance`, `swarm-conversation-metadata` |
 | `50-ui` | `control-panel`, `supervisor`, `conversation-metrics`, `swarm-themes`, `swarm-tools-status`, `swarm-btw`, `swarm-image-paste` |
 
 The list in each layer's `package.json` is authoritative; this table mirrors
@@ -214,6 +214,9 @@ belongs in `packages/policy/policy`, and rendering belongs in the extension/rend
 | `task_create`, `task_update`, `task_get`, `task_list`, `task_delete`, `task_claim`, `task_note`, `task_plan`, `task_complete`, `task_reopen`, `task_block`, `task_unblock`, `task_focus`, `task_unfocus`, `task_status`, `run_status` | `.pi/extensions/30-tools/taskmanage.ts`, `.pi/extensions/30-tools/control-task-tools.ts` | `packages/tools/taskmanage/src/task-manage.ts`, `packages/tools/taskmanage/src/workflow.ts`, `packages/tools/taskmanage/src/persistence.ts`, `packages/runtime/runtime-contracts/src/control-task.ts`; do not duplicate task state in extensions. |
 | `HistorySearch`, `HistoryGet` | `.pi/extensions/30-tools/swarm-history-vault-tools.ts` and `.pi/extensions/30-tools/history-search.ts` | `.pi/lib/tools/swarm-history-tools.ts`; history search/read is deliberately read-only, bounded, and redacted. |
 | `memory_history` | `.pi/extensions/40-state/memory-history.ts` | `.pi/lib/state/shared-memory.ts`: repository-default immutable records under `~/.swarm/memory` (override `PI_SWARM_MEMORY_DIR`), Git-common-dir repository identity, worktree overlay and explicit global scope. Legacy session scope remains readable. Redact before writes. |
+| `memory_history recall` | `.pi/extensions/40-state/memory-history.ts` | `.pi/lib/context/knowledge-pageindex.ts` projects scoped records into read-only PageIndex sections; `.pi/lib/context/memory-agent.ts` calls an isolated Pi model whose only tools are `memory_browse`, `memory_read`, and `memory_select` from `.pi/lib/state/memory-retrieval-worker.ts`. The parent validates selected IDs against its snapshot. Candidate results are leads, never verified recall; writes still use explicit store operations. |
+| `memory_history offer` | `.pi/extensions/40-state/memory-history.ts` | `.pi/lib/context/memory-handoff.ts` accepts bounded explicit text, source and evidence; tool-less Pi consultation judges durable project knowledge, then the parent writes only a candidate through `KnowledgeStore`. A content/source-derived ID deduplicates retries. A read-only PageIndex projection acknowledges the exact saved revision as `stored-indexed`, otherwise `stored-index-pending` with a retry hint. No global or verified write. |
+| `project_init`, `/init` | `.pi/extensions/20-policy/project-init.ts` | `.pi/lib/policy/project-scaffold.ts`, `.pi/lib/policy/project-structure.ts`. `/init` injects an interview brief via `sendUserMessage`; the agent interviews with `ask_user_question` and calls `project_init` (`inspect`/`plan`/`apply`). There is no modal wizard. `apply` never clobbers existing files. Like `memory_history`, this is an intentional model-facing extension tool, so `swarmSurfaceFor` must keep `project_init` on the surface — otherwise it registers but is gated out and the agent reports it as missing. |
 | `bootstrap` tool, `/bootstrap`, native `/settings` → Bootstrap model | `.pi/extensions/00-runtime/bootstrap.ts` | `packages/runtime/bootstrap/src/`; parallel/combined/off strategies, read-only model consultations, streaming tool renderer and startup guidance. Model inherits the current session unless overridden. Settings use Git common dir with non-Git `.swarm` fallback. Handoff invokes active Skill/TaskManage definitions through the registered policy hooks; both modes propose task reconciliation and load selected skills through the registered handoff; task changes require `commitTasks=true`, with `pi-swarm-bootstrap-task` recording retry dedup. Returned `loadedSkills` contains the instructions; `next.loadedSkillNames` identifies already-loaded skills, not work to invoke again. Plans remain proposals requiring repository verification. `.pi/lib/ui/bootstrap-settings.ts` augments the native SettingsList through an isolated, shape-checked compatibility adapter; no replacement `/settings` command or host-file edits. Recheck this adapter against Pi UI upgrades. |
 | `skills_list`, `skill_view` | `.pi/extensions/10-context/swarm-skills.ts` | `packages/context/skills/src/index.ts` and `.pi/lib/context/swarm-skill-registry.ts`; skill bodies/support files stay on disk. |
 | `Skill`, `SkillManage` | skill/autogen integration via `.pi/extensions/10-context/swarm-skills.ts`, `.pi/extensions/10-context/autogenskills.ts` | `packages/context/autogenskills/src/index.ts`; mutate skills only through the vault/revision API. |
@@ -284,14 +287,30 @@ readable and labeled unverified. Correction/deletion require revision checks.
 Agent global writes fail closed. `/memory-promote repository|worktree ID [namespace]`
 requires interactive confirmation of a verified record and rechecks its revision
 before making an explicitly approved global copy; the project record stays intact. Lifecycle candidate capture is registered in `knowledge-enrichment.ts`: on
-`agent_end` and `session_before_compact`, it processes new visible evidence,
+`agent_settled` and `session_before_compact`, it processes new visible evidence,
 persists a `pi-swarm-knowledge-enrichment` cursor, and saves cited candidates.
 It excludes reasoning/runtime reminders and suppresses child-agent capture.
 `/memory-capture on|off|status` controls this per session;
 `PI_SWARM_MEMORY_CAPTURE=off` disables it initially. Consultations are awaited
-and may add up to their timeout to turn completion. Extracted candidates are
-not automatically verified or included in bootstrap recall; automatic promotion
-and reviewed historical backfill remain unfinished. Store path checks reject
+and may add up to their timeout to turn completion. `candidate-memory-review.ts`
+reviews at most one pending record per settled turn (or `/memory-review`) using
+`PI_SWARM_MEMORY_REVIEW_MODEL` (default `clover-plexus/luna`). It reads only cited
+Pi session entries, requires a bounded model verdict with a source-matching
+quote, and corrects the existing record by exact revision; failed review leaves
+it candidate. This is a model judgment, not independent proof, and it never
+writes global scope. `task-candidate-capture.ts` projects TaskManage's current
+task snapshot into worktree-scoped candidates: each record includes every task
+question, answered or unanswered, plus answer/evidence when present. Repeated
+snapshots are idempotent and changed answers create revisions; neither capture
+nor a task's completion verifies a memory. Unverified candidates remain excluded
+from bootstrap recall. `context_search` can report candidate-leads on a session
+index miss, with Q&A projected as Markdown sections rather than raw JSON.
+`memory_history` operation `recall` invokes a bounded read-only memory agent
+using `PI_SWARM_MEMORY_RETRIEVAL_MODEL` or the session model (Luna fallback),
+while `offer` lets the main agent hand explicit “remember that” content to a
+tool-less reviewer for a durable candidate and indexed acknowledgment. Existing
+`search`/`get` and other write operations retain their contracts.
+Historical backlog review is incremental. Store path checks reject
 existing symlinks; hostile concurrent ancestor replacement is outside its current
 filesystem guarantees. No live backfill is implied by these library tests.
 
@@ -348,6 +367,7 @@ the Pi adapter only for registration/presentation concerns.
 | Central hook state and ordering | `.pi/lib/runtime/hook-state.ts` | Registration, enablement, persistence, and visibility. |
 | Prompt hook `packages/context/prompt` | `.pi/extensions/10-context/swarm-prompt.ts` | `before_agent_start`; prompt/context assembly in `packages/context/prompt/src/index.ts` and `.pi/lib/context/swarm-context.ts`. |
 | Disk hooks `disk-hooks` | `.pi/extensions/20-policy/swarm-disk-hooks.ts` | Loads project/user hook config, executes bounded commands; maps tool/session/prompt/compact events. |
+| Structure guard `structure-guard` | `.pi/extensions/20-policy/project-init.ts` | `tool_call`; denies `write`/`edit`/`apply_patch` *creations* that violate `.project/structure.json` before the tool runs. Policy and classification in `.pi/lib/policy/project-structure.ts`, tool-argument extraction in `structure-guard.ts`. Existing paths are never blocked; `PI_SWARM_NO_STRUCTURE_GUARD=1` disables it like `PI_SWARM_NO_HOOKS`. |
 | Inline hook presentation | `.pi/extensions/00-runtime/hooks.ts`, `.pi/lib/runtime/hook-render-bridge.ts`, `.pi/lib/runtime/hook-presenter.ts` | UI only; never make governance depend on rendering. |
 | Annoyance/nudge | `.pi/extensions/30-tools/annoyed/nudge.ts` | `tool_result`, `turn_end`; persistence in `annoyed/store.ts`. |
 | Task enforcement | `.pi/extensions/30-tools/taskmanage.ts` | `packages/tools/taskmanage/src/task-hooks.ts`, `swarm-hook-runtime.ts`; task state is authoritative in taskmanage. |
@@ -733,3 +753,15 @@ First code-reviewed worktree records document verified-only recall and the exact
 supervisor configuration location; tools/experiments/memory-curation/save-reviewed.ts
 writes them through the canonical store and checks production recall. This does not
 bulk-clean existing candidates, enable supervisor, or certify unrelated records.
+
+## Installed MCP adapter ownership
+
+When `pi-mcp-adapter` is installed (its `/pi-mcp` command is present), it owns
+`/mcp`, MCP connection negotiation, resources, and prompts. Pi-Swarm skips its
+fallback startup discovery; the fallback diagnostic command is `/swarm-mcp`.
+Pi-Swarm's surface filter preserves already-selected registered MCP tools,
+including adapter definitions labelled `MCP:`, but does not reactivate tools
+excluded by the user's selection. Adapter configs use literal `headers` (or
+its explicit credential-reference syntax), not Pi-Swarm's custom `apiKey` fields.
+Never print header values during diagnostics. Vendor example configs are not
+runtime configuration sources.

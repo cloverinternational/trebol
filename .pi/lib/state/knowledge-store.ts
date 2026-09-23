@@ -23,7 +23,7 @@ export interface PageIndexSource { id: string; title: string; section: string; t
 const MAX_TEXT = 20_000, MAX_EVIDENCE = 32, MAX_READ = 100;
 const digest = (v: string) => createHash("sha256").update(v).digest("hex").slice(0, 32);
 const redactions: RegExp[] = [
-  /\b(?:sk-[A-Za-z0-9_-]{12,}|gh[pousr]_[A-Za-z0-9_]{12,}|xox[baprs]-[A-Za-z0-9-]{12,}|xai-[A-Za-z0-9_-]{12,})\b/gi,
+  /(?<![A-Za-z0-9_./-])(?:sk-[A-Za-z0-9_-]{12,}|gh[pousr]_[A-Za-z0-9_]{12,}|xox[baprs]-[A-Za-z0-9-]{12,}|xai-[A-Za-z0-9_-]{12,})\b/gi,
   /\b(bearer\s+)[A-Za-z0-9._~+\/-]{12,}/gi,
   /\b((?:password|passwd|secret|api[_-]?key|token)\s*[:=]\s*)[^\s,;]+/gi,
 ];

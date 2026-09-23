@@ -14,8 +14,8 @@ describe("bootstrap tool renderer", () => {
   it("formats stages and distinguishes selected from loaded skills and committed tasks", () => {
     const text = formatBootstrapTool({ stage: "tasks", status: "running", skillsSelected: 4, skillsLoaded: 2, tasksDrafted: 3, tasksCommitted: 1, memory: { done: 2 }, selectors: { done: 1, total: 2 } });
     expect(text).toContain("authoritative task commit");
-    expect(text).toContain("skills selected 4, loaded 2");
-    expect(text).toContain("tasks drafted 3, committed 1");
+    expect(text).toContain("skills 2/4");
+    expect(text).toContain("tasks 1/3");
     expect(text).toContain("memory 2/?");
   });
 
@@ -46,11 +46,18 @@ it("never renders undefined for empty partial or final details",()=>{
  expect(formatBootstrapTool({} as any,{})).toContain("result unavailable");
 });
 
-it("shows the verbose brief without expansion and wraps without losing text",()=>{
+it("summarises the brief when collapsed, shows it whole when expanded, and never loses text",()=>{
  const brief="GOAL\nabcdefghijklmnopqrstuvwxyz\nTASKS & INSTRUCTIONS\nVerify the result.";
  const renderer=createBootstrapToolRenderer();
  const result={details:{stage:"complete",status:"complete",brief} as BootstrapToolDetails};
- expect(renderer.renderResult(result,{expanded:false}).render(200).join("\n")).toContain(brief);
+ // Collapsed flattens to one line and advertises how to see the rest.
+ const collapsed=renderer.renderResult(result,{expanded:false}).render(200).join("\n");
+ expect(collapsed).toContain("handoff ready");
+ expect(collapsed).toContain("GOAL abcdefghijklmnopqrstuvwxyz");
+ expect(collapsed).not.toContain("truncated");
+ // Expanded keeps the original line structure.
+ expect(renderer.renderResult(result,{expanded:true}).render(200).join("\n")).toContain(brief);
+ // Narrow widths wrap rather than drop content.
  expect(renderer.renderResult(result).render(10).join("")).toContain("abcdefghijklmnopqrstuvwxyz");
 });
 

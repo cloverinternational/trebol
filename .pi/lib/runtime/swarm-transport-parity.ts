@@ -106,12 +106,13 @@ export function swarmToolSchemaKeyOrder<T extends { tools?: unknown }>(payload: 
 
 /** Everything `before_provider_request` needs: key order at the top and inside tool schemas. */
 export function alignProviderPayload<T extends Record<string, unknown>>(payload: T, mode: TransportMode = {}): T | undefined {
-  // Custom (extension) messages only become role:"user" in convertToLlm,
-  // which runs after the `context` event, so collapse again here where every
-  // message already carries its provider role.
-  const collapsed = Array.isArray(payload.messages) ? collapseUserText(payload.messages as MessageLike[]) : undefined;
-  const trimmed = trimWireContent((collapsed ?? payload.messages ?? []) as MessageLike[]);
-  let withMessages: Record<string, unknown> = trimmed ? { ...payload, messages: trimmed } : collapsed ? { ...payload, messages: collapsed } : payload;
+  // Do not rewrite transcript message content here. Pi 0.87 owns image
+  // preprocessing and context projection; changing historical content at the
+  // provider boundary can invalidate otherwise stable prompt-cache prefixes.
+  // Leave historical message content untouched here. Whitespace/truncation
+  // normalization changes the serialized prefix and can defeat provider
+  // prompt caching; Pi's canonical context pipeline owns message validity.
+  let withMessages: Record<string, unknown> = payload;
   if (mode.interactive && "max_tokens" in withMessages && withMessages.max_tokens !== SWARM_TUI_MAX_TOKENS) withMessages = { ...withMessages, max_tokens: SWARM_TUI_MAX_TOKENS };
   // Canonical Swarm schemas replace the permissive validator schemas the
   // tools register with (see swarm-tool-surface.ts PERMISSIVE_PARAMETERS).
@@ -208,7 +209,8 @@ function isTextBlock(block: unknown): block is TextBlock {
  * session messages before the provider sees them:
  *  - assistant thinking is never sent as `reasoning_content` (non-GLM); when
  *    the turn produced no text at all, the reasoning IS the text content.
- *  - tool-result image blocks are dropped (tool messages are plain strings).
+ *  - tool-result image blocks are preserved; Pi 0.87 applies per-model image
+ *    limits and cache-safe resizing before provider serialization.
  *  - an unknown tool yields "Error: Tool '<name>' not found" (agent_tools.go)
  *    where pi-agent-core says "Tool <name> not found".
  * Returns undefined when nothing changed.
@@ -229,7 +231,6 @@ export function swarmMessageShapes(messages: readonly MessageLike[], knownTools:
       const blocks = message.content as any[];
       const name = typeof (message as any).toolName === "string" ? (message as any).toolName : "";
       let out = blocks;
-      if (blocks.some(b => b?.type === "image")) { out = blocks.filter(b => b?.type !== "image"); changed = true; }
       if (name && !knownTools.has(name) && out.length === 1 && isTextBlock(out[0]) && out[0].text === `Tool ${name} not found`) {
         out = [{ type: "text", text: `Error: Tool '${name}' not found` }]; changed = true;
       }

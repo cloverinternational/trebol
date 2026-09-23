@@ -1,10 +1,11 @@
 {
   "name": "@pi-swarm/ext-policy",
   "private": true,
-  "description": "Pi-Swarm extension layer 20-policy: disk hooks and policy nudges. Load order within the layer is this list; layers load in numeric prefix order.",
+  "description": "Pi-Swarm extension layer 20-policy: disk hooks, project structure guard, and policy nudges. Load order within the layer is this list; layers load in numeric prefix order.",
   "pi": {
     "extensions": [
-      "swarm-disk-hooks.ts"
+      "swarm-disk-hooks.ts",
+      "project-init.ts"
     ]
   }
 }

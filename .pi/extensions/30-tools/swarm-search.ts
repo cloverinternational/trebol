@@ -2,7 +2,7 @@
  * Port of Swarm's xAI tools (internal/tools/xai/{responses,x_search,web_search}.go).
  * Both are advertised only when xaiHasCredentials() (swarm-tool-gating.ts);
  * the description/schema on the wire come from the Swarm capture
- * (fixtures/swarm-conditional-tools.json). Results are XMLBuilder envelopes:
+ * (runtime/tool-contracts.ts). Results are XMLBuilder envelopes:
  *   <error>\n  <message><![CDATA[error: …]]></message>\n</error>
  *   <result tool="x_search"[ query="…"]>\n  <content><![CDATA[{json}]]></content>\n</result>
  */
@@ -23,7 +23,7 @@ function storedToken(): { access_token?: string; refresh_token?: string; expires
   try { const token = JSON.parse(readFileSync(file, "utf8"))?.token; return token && typeof token === "object" ? token : undefined; } catch { return undefined; }
 }
 const isExpired = (t: { expires_at?: number }) => { const at = Number(t.expires_at ?? 0); return at !== 0 && Math.floor(Date.now() / 1000) > at - 60; };
-/** responses.go HasCredentials. */
+/** True when xAI credentials resolve. */
 export function hasCredentials(): boolean {
   const token = storedToken();
   if (token && (!isExpired(token) || (token.refresh_token ?? "") !== "")) return true;
@@ -136,7 +136,7 @@ export async function executeWebSearch(params: any, signal?: AbortSignal) {
 
 export default function swarmSearchExtension(rawPi: any) {
   // Description + JSON Schema on the wire come from the Swarm capture
-  // (fixtures/swarm-conditional-tools.json) and the permissive validator.
+  // (runtime/tool-contracts.ts) and the permissive validator.
   const pi = withSwarmToolSurface(rawPi);
   pi.registerTool(withDefaultToolRenderer({ name: "xai_web_search", label: "xAI Web Search", description: "", parameters: { type: "object" }, execute: (_id: string, p: any, signal: AbortSignal) => executeWebSearch(p, signal) }));
   pi.registerTool(withDefaultToolRenderer({ name: "x_search", label: "X Search", description: "", parameters: { type: "object" }, execute: (_id: string, p: any, signal: AbortSignal) => executeXSearch(p, signal) }));

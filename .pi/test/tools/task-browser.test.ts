@@ -11,6 +11,12 @@ it('closes immediately on Escape from every view',()=>{
  view.handleInput('\x1b');
  expect(closed).toBe(1);
 });
+it('closes for the terminal-normalized Escape variants',()=>{
+ let closed=0;
+ const view=new TaskBrowserView({requestRender(){},terminal:{rows:20}}, {},()=>({tasks:[]}),()=>{closed++;},{wrapTextWithAnsi:(s,w)=>[s],truncateToWidth:(s,w)=>s});
+ view.handleInput('\x1b[27;1;9~');
+ expect(closed).toBe(1);
+});
 it('keeps selected ID after insertions and scrolls to final evidence without mutations',()=>{
  let tasks:any[]=[{id:'1',subject:'One',status:'pending'},{id:'2',subject:'Two',status:'pending',questions:Array.from({length:12},(_,i)=>({id:`q${i}`,text:'Question '.repeat(30)})),answers:[{question:'q11',answer:'answer',evidence:'LAST-EVIDENCE'}]}];
  const view=new TaskBrowserView({requestRender(){},terminal:{rows:20}}, {},()=>({tasks}),()=>{},{wrapTextWithAnsi:(s,w)=>s.match(new RegExp(`.{1,${w}}`,"g"))??[""],truncateToWidth:(s,w)=>s.slice(0,w)});

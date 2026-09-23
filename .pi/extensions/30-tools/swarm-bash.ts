@@ -8,6 +8,7 @@ import {
   bashResultComponent,
   runSwarmBash,
   timedOutMessage,
+  normalizeBashParams,
   type BashParams,
 } from "../../lib/tools/swarm-bash.ts";
 import { PERMISSIVE_PARAMETERS } from "../../lib/runtime/swarm-tool-surface.ts";
@@ -48,16 +49,13 @@ export function registerSwarmBash(pi: Pi): void {
     renderResult(result: any, options: any, theme: any) {
       return bashResultComponent(result, options, theme, wrapTextWithAnsi);
     },
-    // Swarm decodes BashParams with encoding/json: a missing command runs
-    // `bash -c ""`. The canonical schema (SWARM_BASH_PARAMETERS) is put on
-    // the wire by the transport-parity overlay; Pi must not pre-validate.
+    // A missing command runs `bash -c ""` rather than failing validation, so
+    // this tool is listed in VALIDATES_OWN_ARGUMENTS and Pi must not
+    // pre-validate; the real schema still reaches the model via the overlay.
     parameters: { ...PERMISSIVE_PARAMETERS },
-    async execute(_toolCallId: string, params: BashParams, signal: AbortSignal | undefined, onUpdate: ((update: any) => void) | undefined, ctx: any) {
-      params = { ...(params ?? {}), command: typeof params?.command === "string" ? params.command : "" };
-      const emit = (text: string, stream = "stdout") => onUpdate?.({ content: [{ type: "text", text }], details: { command: params.command, stream }, });
-      emit("");
-      let streamed = "";
-      const outcome = await runSwarmBash(params, { defaultCwd: ctx?.cwd ?? pi.getCwd?.() ?? process.cwd(), signal, onData: ({ text }) => { streamed += text; emit(streamed); } });
+    async execute(_toolCallId: string, params: BashParams, signal: AbortSignal | undefined, _onUpdate: unknown, ctx: any) {
+      params = normalizeBashParams(params);
+      const outcome = await runSwarmBash(params, { defaultCwd: ctx?.cwd ?? pi.getCwd?.() ?? process.cwd(), signal });
       if ("error" in outcome) return fail(outcome.error);
       const details = { exit_code: outcome.exitCode, duration_ms: outcome.durationMs, timed_out: outcome.timedOut, command: params.command, ...(params.description ? { description: params.description } : {}) };
       if (outcome.timedOut) return fail(timedOutMessage(outcome.effectiveSecs, outcome.exitCode));

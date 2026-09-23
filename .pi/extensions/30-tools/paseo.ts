@@ -1,5 +1,6 @@
 import { withDefaultToolRenderer } from "../../../packages/runtime/core/src/tool-renderer.ts";
 import { defaultListen, paseo, paseoBuild, paseoPair, paseoSetup, paseoStart, paseoStatus, paseoStop, paseoUpdate } from "../../lib/tools/paseo-setup.ts";
+import { pushStartupNotice } from "../../lib/ui/startup-notices.ts";
 type UI = { notify?: (message: string, type?: string) => void };
 type SessionContext = { ui?: UI };
 type CommandSpec = { description: string; handler: (args: string, context: SessionContext) => Promise<void> };
@@ -34,7 +35,7 @@ export default function paseoExtension(pi: Pi) {
     // Startup never changes network exposure; setup requires an explicit action.
     void paseoStart(pi).then(async (r) => {
       if (started !== generation) return;
-      if (!r.success) { notify(`Paseo auto-start skipped: ${r.error}`, "warning"); return; }
+      if (!r.success) { pushStartupNotice(`Paseo auto-start skipped: ${r.error}`, "warning"); return; }
       process.env.PASEO_HOST ||= `http://${r.listen}`;
       notify(r.alreadyRunning ? `Paseo connected on ${r.listen}.` : `Paseo started on ${r.listen}.`, "info");
     }).catch(() => notify("Paseo startup failed; inspect daemon status.", "warning"));

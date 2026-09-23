@@ -2,6 +2,16 @@
 
 Release metadata is kept in `package.json`, `update-manifest.json`, and this file together.
 
+## [0.4.0] - 2026-09-23
+
+- Add explicit, evidence-backed candidate memory handoff, TaskManage Q&A capture,
+  PageIndex-backed discovery, and bounded read-only memory-agent retrieval.
+- Improve bootstrap and task guidance, project structure initialization,
+  TUI rendering, tool reliability, history, MCP and vault integrations.
+- Add Clover startup UI and tighten Paseo setup behavior; retire obsolete
+  Swarm parity fixtures and probes.
+- Repair release build/test regressions and document retrieval limitations.
+
 ## [0.2.1] - 2026-09-15
 
 - Accept the Kitty keyboard protocol CSI-u encoding of Enter in the running-work

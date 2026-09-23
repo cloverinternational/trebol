@@ -1,4 +1,5 @@
 import { PERMISSIVE_PARAMETERS, overlaySwarmToolSchemas } from "../../lib/runtime/swarm-tool-surface.ts";
+import { TOOL_CONTRACTS } from "../../lib/runtime/tool-contracts.ts";
 import { afterEach, describe, expect, it } from "vitest";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -28,12 +29,11 @@ describe("Swarm history and vault surfaces", () => {
     for (const input of ["", "0s", "-1d", "+1d", "1.5d", " 1d", "1 d", "1w", "1d!", "9".repeat(65) + "d"]) expect(parseVaultDuration(input)).toBeUndefined();
   });
 
-  it("advertises fixture-byte-equivalent descriptions and schemas for all seven tools", () => {
+  it("advertises the owned contract descriptions and schemas", () => {
     const registered: any[] = [];
     registerSwarmHistoryVaultTools({ registerTool: (tool: any) => registered.push(tool), on() {}, getCwd: () => "/tmp/work" }, { historyRoot: "/tmp", cwd: "/tmp/work" });
-    const fixture = JSON.parse(require("node:fs").readFileSync(new URL("../../../tools/parity/fixtures/swarm-tools.json", import.meta.url), "utf8"));
     for (const name of ["HistorySearch", "HistoryGet"]) {
-      const actual = registered.find((x) => x.name === name), wanted = fixture.find((x: any) => x.function.name === name).function;
+      const actual = registered.find((x) => x.name === name), wanted = TOOL_CONTRACTS[name];
       expect(JSON.stringify(actual.description)).toBe(JSON.stringify(wanted.description));
       expect(actual.parameters).toEqual(PERMISSIVE_PARAMETERS);
       expect(JSON.stringify(overlaySwarmToolSchemas({ tools: [{ type: "function", function: { name, description: actual.description, parameters: actual.parameters } }] })!.tools[0].function.parameters)).toBe(JSON.stringify(wanted.parameters));

@@ -1,18 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
 import { applyWorkflowGuidance, workflowWordingOverrides } from "../src/workflow-guidance.js";
 import { forgeSwarmSystemPrompt, swarmForgeDelegationAddendum, swarmPromptPresets } from "../src/index.js";
+import { TOOL_CONTRACTS } from "../../../../.pi/lib/runtime/tool-contracts.ts";
 
-const tools = ["swarm-tools.json", "swarm-interactive-tools.json"].flatMap(name =>
-  JSON.parse(readFileSync(new URL(`../../../../tools/parity/fixtures/${name}`, import.meta.url), "utf8"))
-    .map((entry: any) => entry.function.description as string));
+/** Tool descriptions are owned locally with guidance already applied, so only
+ * the prompt presets still carry un-adapted upstream wording. */
+const toolDescriptions = Object.values(TOOL_CONTRACTS).map(contract => contract.description);
 
 describe("local workflow guidance", () => {
-  it("keeps overrides anchored to actual upstream wording", () => {
-    const sources = [forgeSwarmSystemPrompt, swarmForgeDelegationAddendum, ...tools];
-    for (const [before, after] of workflowWordingOverrides) {
-      expect(sources.some(source => source.includes(before)), before).toBe(true);
-      expect(applyWorkflowGuidance(before)).toBe(after);
+  it("rewrites every override to its adapted wording", () => {
+    for (const [before, after] of workflowWordingOverrides) expect(applyWorkflowGuidance(before)).toBe(after);
+  });
+  it("leaves no un-adapted wording in the advertised tool contracts", () => {
+    for (const [before] of workflowWordingOverrides) {
+      for (const description of toolDescriptions) expect(description, before).not.toContain(before);
     }
   });
   it("removes blanket restrictions from shipped presets", () => {
@@ -24,7 +25,7 @@ describe("local workflow guidance", () => {
     }
   });
   it("preserves capability and integrity constraints and is idempotent", () => {
-    for (const description of tools) {
+    for (const description of [...toolDescriptions, forgeSwarmSystemPrompt, swarmForgeDelegationAddendum]) {
       const adapted = applyWorkflowGuidance(description);
       expect(applyWorkflowGuidance(adapted)).toBe(adapted);
     }

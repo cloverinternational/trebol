@@ -12,12 +12,38 @@ import { MemoryHistory, scopeOf } from "../40-state/memory-history.ts";
 import { recallShared } from "../../lib/state/shared-memory.ts";
 import { dispatchBootstrapHandoff } from "../../lib/runtime/bootstrap-dispatch.ts";
 import { createBootstrapToolRenderer, type BootstrapToolDetails } from "../../lib/ui/bootstrap-tool-renderer.ts";
-import { SettingsList } from "@earendil-works/pi-tui";
+import { isKeyRelease, isKeyRepeat, matchesKey, SettingsList } from "@earendil-works/pi-tui";
 import { installBootstrapSettings } from "../../lib/ui/bootstrap-settings.ts";
+import { withDefaultToolRenderer } from "../../../packages/runtime/core/src/tool-renderer.ts";
+
+const BOOTSTRAP_REQUIREMENT_STATE = Symbol.for("pi-swarm-bootstrap-requirement-state");
+const FOOTER_SEGMENTS_KEY = Symbol.for("pi-swarm-footer-segments");
+type BootstrapRequirementState = { enabled?: boolean };
+
+function bootstrapRequirementState(): BootstrapRequirementState {
+  const root = globalThis as any;
+  return root[BOOTSTRAP_REQUIREMENT_STATE] ?? (root[BOOTSTRAP_REQUIREMENT_STATE] = {});
+}
+
+/** Effective session state for bootstrap guidance and enforcement. It defaults
+ * on for every session; Ctrl+D changes only this in-memory session override. */
+export function bootstrapRequirementEnabled(): boolean {
+  return bootstrapRequirementState().enabled !== false;
+}
+
+function installBootstrapRequirementFooter(ctx: any): void {
+  const root = globalThis as any;
+  const segments: Map<string, () => string | undefined> = root[FOOTER_SEGMENTS_KEY] ?? (root[FOOTER_SEGMENTS_KEY] = new Map());
+  // Install at session start, after extension factories have contributed their
+  // segments, so this appears directly after ctx:session-model when present.
+  segments.delete("bootstrap-requirement");
+  segments.set("bootstrap-requirement", () => `bootstrap:${bootstrapRequirementEnabled() ? "on" : "off"}`);
+}
 
 export default function bootstrapExtension(pi: any) {
   let busy = false;
   let ready = false;
+  let removeTerminalInput: (() => void) | undefined;
   const command = async (args: string, ctx: any) => {
     if (busy) { ctx.ui?.notify?.("Wait for bootstrap to finish or cancel it before changing settings.", "warning"); return; }
     const settings = readBootstrapSettings(ctx.cwd);
@@ -44,12 +70,30 @@ export default function bootstrapExtension(pi: any) {
     if (value !== "status") {
       writeBootstrapSettings(ctx.cwd, value === "on" && settings.mode === "off" ? "parallel" : settings.mode, settings.model, value === "on");
       ready = false;
+      ctx.ui?.requestRender?.();
     }
     ctx.ui.notify(`Memory enforcement: ${readBootstrapSettings(ctx.cwd).enforce ? "on" : "off"}; bootstrap: ${ready ? "ready" : "pending"}`, "info");
   } });
-  pi.on("tool_call", (event: any, ctx: any) => memoryGate(readBootstrapSettings(ctx.cwd).enforce === true, ready, event.toolName));
+  pi.on("tool_call", (event: any, ctx: any) => memoryGate(bootstrapRequirementEnabled() && readBootstrapSettings(ctx.cwd).enforce === true, ready, event.toolName));
   let removeSettings: (() => void) | undefined;
   pi.on("session_start", (_event: any, ctx: any) => {
+    bootstrapRequirementState().enabled = true;
+    installBootstrapRequirementFooter(ctx);
+    removeTerminalInput?.();
+    removeTerminalInput = ctx.ui?.onTerminalInput?.((data: string) => {
+      if (!matchesKey(data, "ctrl+d")) return undefined;
+      // Kitty keyboard mode reports press, repeat, and release separately. Only
+      // the initial press toggles, but consume all three so Pi's built-in
+      // delete-forward/exit action never also handles this session command.
+      if (!isKeyRepeat(data) && !isKeyRelease(data)) {
+        const state = bootstrapRequirementState();
+        state.enabled = !bootstrapRequirementEnabled();
+        ctx.ui?.requestRender?.();
+        ctx.ui?.notify?.(`Bootstrap requirement ${state.enabled ? "on" : "off"}`, "info");
+      }
+      return { consume: true };
+    });
+    ctx.ui?.requestRender?.();
     removeSettings?.();
     if (ctx.mode !== "tui") return;
     removeSettings = installBootstrapSettings(SettingsList, {
@@ -62,14 +106,22 @@ export default function bootstrapExtension(pi: any) {
       error: message => ctx.ui.notify(message, "error"),
     });
   });
-  pi.on("session_shutdown", () => { removeSettings?.(); removeSettings = undefined; });
+  pi.on("session_shutdown", () => {
+    removeTerminalInput?.();
+    removeTerminalInput = undefined;
+    removeSettings?.();
+    removeSettings = undefined;
+    (globalThis as any)[FOOTER_SEGMENTS_KEY]?.delete?.("bootstrap-requirement");
+    delete (globalThis as any)[BOOTSTRAP_REQUIREMENT_STATE];
+  });
   pi.on("session_start", () => { ready = false; });
   pi.on("before_agent_start", (event: any, ctx: any) => {
+    if (!bootstrapRequirementEnabled()) return;
     if (readBootstrapSettings(ctx.cwd).enforce) return { systemPrompt: memorySystemPrompt(event.systemPrompt, ctx.cwd) };
     if (ready || readBootstrapSettings(ctx.cwd).mode === "off") return;
     return { systemPrompt: event.systemPrompt + "\nBefore substantive work, call bootstrap with the user's task. Bootstrap invokes selected skills and returns their instructions in loadedSkills. Follow those instructions without invoking the same skills again. Inspect taskPlan before acting: bootstrap establishes and reconciles tasks automatically; do not recreate committed tasks. Verify proposed implementation details against the repository before editing. If bootstrap fails, explain the failure and continue with direct inspection or ask the user." };
   });
-  pi.registerTool({
+  pi.registerTool(withDefaultToolRenderer({
     name: "bootstrap", label: "Bootstrap", description: "Gather task-relevant memory, load selected skills, and propose a task plan. Loads at most two relevant skills before planning. Follow returned loadedSkills instructions without reloading them; verify task proposals against the repository before implementation. Tasks are always established and reconciled; an existing focused task is reused instead of creating another graph.",
     parameters: { type: "object", required: ["task"], properties: { task: { type: "string" }, replanKey: { type: "string", description: "Explicit scope-change identifier for re-decomposition. Reuse the same key on retries; a new key reconciles the live task graph again." }, commitTasks: { type: "boolean", description: "Deprecated; bootstrap always establishes and reconciles tasks." } } },
     ...createBootstrapToolRenderer(),
@@ -290,5 +342,5 @@ export default function bootstrapExtension(pi: any) {
         return { isError: true, content: [{ type: "text", text: details.failures[0].summary }], details: { ...details } };
       } finally { clearInterval(heartbeat); busy = false; }
     },
-  });
+  }));
 }

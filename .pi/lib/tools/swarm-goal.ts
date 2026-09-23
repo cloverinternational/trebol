@@ -5,6 +5,7 @@ import { writeFile, readFile, unlink } from "node:fs/promises";
 import { parseDelay, nextCronTime, validateCron } from "../../../packages/tools/schedule/src/cron.ts";
 import { withDefaultToolRenderer } from "../../../packages/runtime/core/src/tool-renderer.ts";
 import { createSessionWakeup } from "../runtime/session-wakeup.ts";
+import { onAgentSettled } from "../runtime/agent-settled.ts";
 
 export type GoalVerdict = "MET" | "NOT_MET" | "IMPOSSIBLE";
 export type GoalEvaluator = (condition: string, transcriptPath: string, ctx: any) => Promise<GoalVerdict>;
@@ -184,7 +185,7 @@ export function registerSwarmGoal(pi: any, options: SwarmGoalOptions = {}) {
     const last = [...entries].reverse().find((e: any) => e.customType === ENTRY);
     if (last?.data?.condition && ["active", "met", "impossible", "error"].includes(last.data.status)) goal = { ...last.data };
   });
-  pi.on("agent_end", async (event: any, ctx: any) => {
+  onAgentSettled(pi, async (_event: any, ctx: any) => {
     if (!live || !goal || goal.status !== "active" || evaluating) return;
     const owner = wake.capture(); const version = revision; const current = goal;
     evaluating = true;
@@ -192,7 +193,9 @@ export function registerSwarmGoal(pi: any, options: SwarmGoalOptions = {}) {
     try {
       // Full transcript on disk, one JSON message per line; the judge greps/reads it.
       // Include structured tool-call arguments/results; don't serialize hidden thinking.
-      const rows = (event.messages ?? []).map((m: any) => {
+      const branch = ctx?.sessionManager?.getBranch?.() ?? ctx?.sessionManager?.getEntries?.() ?? [];
+      const source = branch.length ? branch.filter((entry: any) => entry?.type === "message").map((entry: any) => entry.message ?? entry) : (_event?.messages ?? []);
+      const rows = source.map((m: any) => {
         const content = Array.isArray(m.content) ? m.content.filter((p: any) => p.type !== "thinking") : m.content;
         return JSON.stringify({ role: m.role, toolName: m.toolName, content }) + "\n";
       });

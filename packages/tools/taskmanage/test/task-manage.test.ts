@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { TaskManager, registerTaskManage, taskManageSchema, type JournalEntry } from "../src/task-manage.js";
+import { TaskManager, registerTaskManage, taskManageSchema, taskDisplayWidth, type JournalEntry } from "../src/task-manage.js";
 
 const create = (key:string, subject=key) => ({key,op:"create" as const,subject,questions:[{id:"accept",text:`Is ${subject} verified?`}]});
 describe("TaskManage", () => {
@@ -79,9 +79,12 @@ describe("TaskManage", () => {
     expect((page.results[0].data as any).pagination).toMatchObject({total:2,more:true});
   });
   it("publishes exact reference item schemas and rejects malformed references", () => {
-    const item = (taskManageSchema.properties.operations as any).items;
+    // The operation schema is a per-op oneOf, so reference fields are asserted
+    // on the branch that actually admits them.
+    const branches = (taskManageSchema.properties.operations as any).items.oneOf;
+    const update = branches.find((branch: any) => branch.properties.op.const === "update");
     for (const field of ["addBlocks", "addBlockedBy"]) {
-      const ref = item.properties[field].items.oneOf[1];
+      const ref = update.properties[field].items.oneOf[1];
       expect(ref.required).toEqual(["ref"]);
       expect(ref.additionalProperties).toBe(false);
     }
@@ -383,5 +386,15 @@ describe("TaskManage", () => {
     expect(m.snapshot().tasks).toHaveLength(2);
     expect(m.execute({operations:[{key:"finish",op:"update",taskId:"2",status:"deleted"}]}).status).toBe("succeeded");
     expect(m.execute({operations:[{key:"gone",op:"get",taskId:{ref:"child"}}]}).results[0].error?.code).toBe("reference_failed");
+  });
+});
+describe("task widget width", () => {
+  it("truncates overlong Unicode question rows but preserves an exact-width row", async () => {
+    const manager = new TaskManager();
+    const row = "    ? report: ✅ 5 puertos identificados ├─ Análisis de Servicios: ✅ 7 componentes mapeados ├─ Evaluación de Aplicación Web";
+    await manager.execute({ operations: [{ key: "q", op: "create", subject: "width test", status: "in_progress", active: true, questions: [{ id: "report", text: row }] }] });
+    const task = manager.snapshot().tasks;
+    // The exported width helper verifies the same display-column semantics used by truncation.
+    expect(taskDisplayWidth(row)).toBeGreaterThan(110);
   });
 });

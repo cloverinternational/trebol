@@ -97,7 +97,7 @@ describe("Swarm apply_patch parity", () => {
     expect(readImage(file, ws)).toEqual([{ type: "text", text: `ERROR: Read handles image files only (.gif, .jpeg, .jpg, .png, .webp). For text use the shell, e.g. \`sed -n '1,200p' ${file}\` to view a slice or \`rg PATTERN ${file}\` to search it.` }]);
   });
 
-  it("rejects explicit paths outside the workspace", async () => {
+  it("keeps apply_patch restricted to the workspace", async () => {
     const ws = root(), outside = root(), file = join(outside, "outside.txt");
     writeFileSync(file, "old\n");
     const patch = `*** Begin Patch
@@ -109,13 +109,20 @@ describe("Swarm apply_patch parity", () => {
     expect(readFileSync(file, "utf8")).toBe("old\n");
   });
 
-  it("registers byte-identical fixture descriptions and parameters", () => {
+  it("registers the contract it owns, enforcing every schema except Read's", () => {
     const tools: any[] = []; extension({ registerTool: (tool: any) => tools.push(tool), getCwd: () => process.cwd() });
     for (const name of ["apply_patch", "Undo", "Read"]) {
       const actual = tools.find(t => t.name === name), expected = loadSwarmToolSurface().get(name)!;
       expect(actual.description).toBe(expected.description);
-      expect(actual.parameters).toEqual(PERMISSIVE_PARAMETERS);
-      expect(JSON.stringify(overlaySwarmToolSchemas({ tools: [{ type: "function", function: { name, description: actual.description, parameters: actual.parameters } }] })!.tools[0].function.parameters)).toBe(JSON.stringify(expected.parameters));
+      // Read accepts file_path/file/path/filename, so it validates its own
+      // arguments; the other two are checked against their real schema.
+      if (name === "Read") expect(actual.parameters).toEqual(PERMISSIVE_PARAMETERS);
+      else expect(actual.parameters).toEqual(expected.parameters);
+      // The overlay returns undefined when nothing needs rewriting, which is
+      // now the case for any tool that already registers its real schema.
+      const payload = { tools: [{ type: "function", function: { name, description: actual.description, parameters: actual.parameters } }] };
+      const overlaid = overlaySwarmToolSchemas(payload) ?? payload;
+      expect(JSON.stringify(overlaid.tools[0].function.parameters)).toBe(JSON.stringify(expected.parameters));
     }
   });
 });

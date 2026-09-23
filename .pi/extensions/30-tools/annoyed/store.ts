@@ -34,6 +34,17 @@ export interface AnnoyedIssue {
 
 export interface AnnoyedStoreOptions { home?: string; now?: () => Date; }
 
+/**
+ * The JSON export is rewritten on every upsert, so it must stay small and
+ * bounded. Transcripts remain queryable in SQLite; re-serializing them here
+ * once grew the export to 535 MB and every `annoyed` call then failed with
+ * V8's "Invalid string length" (max string ~512 MB).
+ */
+const stripTranscript = <T extends { transcript?: unknown }>(issue: T): Omit<T, "transcript"> => {
+  const { transcript: _transcript, ...rest } = issue;
+  return rest;
+};
+
 // node:sqlite is available in the Node runtime used by Pi. Keeping the import
 // dynamic lets the extension load far enough to give a useful error on older
 // Node versions, instead of failing discovery.
@@ -46,6 +57,27 @@ const parse = <T>(value: unknown, fallback: T): T => { try { return value == nul
 const id = () => `ann-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${crypto.randomUUID().slice(0, 8)}`;
 const clean = (value: unknown, max = 12000) => String(value ?? "").trim().slice(0, max);
 const list = (value: unknown, maxItems = 32) => (Array.isArray(value) ? value : []).map(x => clean(x, 4000)).filter(Boolean).slice(0, maxItems);
+/**
+ * Transcripts are attacker-free but unbounded: a single issue used to carry
+ * multiple megabytes of conversation entries. Cap the serialized form so one
+ * noisy session cannot dominate the database or the JSON export.
+ */
+export const TRANSCRIPT_BUDGET_BYTES = 128_000;
+export function boundTranscript(value: unknown, budget = TRANSCRIPT_BUDGET_BYTES): unknown {
+  if (value == null) return undefined;
+  const entries = Array.isArray(value) ? value : [value];
+  const kept: unknown[] = [];
+  let used = 0;
+  // Keep the most recent entries: they are the ones near the failure.
+  for (let index = entries.length - 1; index >= 0; index--) {
+    const size = json(entries[index]).length;
+    if (used + size > budget) break;
+    used += size;
+    kept.unshift(entries[index]);
+  }
+  if (kept.length === entries.length) return entries;
+  return { truncated: true, omittedEntries: entries.length - kept.length, entries: kept };
+}
 
 export class AnnoyedStore {
   readonly directory: string;
@@ -113,7 +145,7 @@ export class AnnoyedStore {
     const existing = db.prepare("SELECT * FROM issues WHERE fingerprint = ?").get(fingerprint);
     if (existing) {
       const updated = db.prepare("UPDATE issues SET occurrences=occurrences+1,last_seen_at=?,updated_at=?,metadata_json=? WHERE id=?").run(now, now, json(input.metadata ?? parse(existing.metadata_json, {})), existing.id);
-      db.prepare("INSERT INTO issue_events(issue_id,event_type,at,payload_json) VALUES(?,?,?,?)").run(existing.id, "observed_again", now, json(input));
+      db.prepare("INSERT INTO issue_events(issue_id,event_type,at,payload_json) VALUES(?,?,?,?)").run(existing.id, "observed_again", now, json(stripTranscript(input)));
       await this.exportJson();
       return { issue: this.rowToIssue(db.prepare("SELECT * FROM issues WHERE id=?").get(existing.id)), duplicate: true };
     }
@@ -125,14 +157,15 @@ export class AnnoyedStore {
       toolName: clean(input.toolName, 120) || undefined, conversationId: clean(input.conversationId, 200) || undefined,
       projectCwd: clean(input.projectCwd, 1000) || undefined, source: clean(input.source, 80) || "annoyed-tool", occurrences: 1,
       firstSeenAt: now, lastSeenAt: now, createdAt: now, updatedAt: now, resolution: clean(input.resolution) || undefined,
-      tags: list(input.tags, 24), transcript: input.transcript, metadata: input.metadata ?? {},
+      tags: list(input.tags, 24), transcript: boundTranscript(input.transcript), metadata: input.metadata ?? {},
     };
     db.prepare(`INSERT INTO issues VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
       issue.id, issue.fingerprint, issue.title, issue.issue, issue.category, issue.severity, issue.status,
       issue.observed, issue.expected, json(issue.evidence), json(issue.acceptanceTests), issue.toolName ?? null,
       issue.conversationId ?? null, issue.projectCwd ?? null, issue.source, issue.occurrences, issue.firstSeenAt,
       issue.lastSeenAt, issue.createdAt, issue.updatedAt, issue.resolution ?? null, json(issue.tags), json(issue.transcript), json(issue.metadata));
-    db.prepare("INSERT INTO issue_events(issue_id,event_type,at,payload_json) VALUES(?,?,?,?)").run(issue.id, "created", now, json(issue));
+    // The event log is an audit trail; the transcript already lives on the issue row.
+    db.prepare("INSERT INTO issue_events(issue_id,event_type,at,payload_json) VALUES(?,?,?,?)").run(issue.id, "created", now, json(stripTranscript(issue)));
     await this.exportJson(); return { issue, duplicate: false };
   }
 
@@ -150,7 +183,7 @@ export class AnnoyedStore {
     return this.rowToIssue(db.prepare("SELECT * FROM issues WHERE id=?").get(id));
   }
 
-  async exportJson() { await this.open(); const issues = await this.list(); const payload = { schemaVersion: 1, exportedAt: this.now().toISOString(), database: this.databasePath, issues };
+  async exportJson() { await this.open(); const issues = await this.list(); const payload = { schemaVersion: 1, exportedAt: this.now().toISOString(), database: this.databasePath, issues: issues.map(stripTranscript) };
     const temp = `${this.exportPath}.tmp-${process.pid}`; await writeFile(temp, JSON.stringify(payload, null, 2) + "\n", { mode: 0o600 }); await rename(temp, this.exportPath); await chmod(this.exportPath, 0o600).catch(() => undefined); return payload;
   }
 

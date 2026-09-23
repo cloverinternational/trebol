@@ -1,14 +1,12 @@
 type Layout = { visibleWidth?:(text:string)=>number; wrapTextWithAnsi:(text:string,width:number)=>string[]; truncateToWidth:(text:string,width:number)=>string };
-// Keep this extension testable without requiring the host TUI package at
-// module-load time. Terminals may encode Escape as the plain byte or as a
-// kitty/modifyOtherKeys CSI sequence.
-const isEscape = (data:string) => data === "\x1b" || /^\x1b\[27;\d+(?:;\d+)?~$/.test(data);
+type EscapeMatcher = (data:string) => boolean;
+const fallbackEscape = (data:string) => data === "\x1b" || /^\x1b\[27;\d+(?:;\d+)?~$/.test(data);
 export interface BrowserTask { id:string; subject:string; description?:string; status?:string; active?:boolean; dependsOn?:string[]; parentTaskId?:string; questions?:Array<{id:string;text:string}>; answers?:Array<{question:string;answer:string;evidence:string}>; notes?:string[] }
 export interface BrowserSnapshot {tasks:BrowserTask[]}
 export class TaskBrowserView {
  private id:string|undefined; private detail=false; private scroll=0; private filter="open"; private query=""; private search=false; private collapsed=new Set<string>();
  private closed=false;
- constructor(private tui:any,private theme:any,private read:()=>BrowserSnapshot,private close:()=>void, private layout:Layout){}
+ constructor(private tui:any,private theme:any,private read:()=>BrowserSnapshot,private close:()=>void, private layout:Layout, private isEscape:EscapeMatcher = fallbackEscape){}
  private rows(){
   const all=this.read().tasks.filter(t=>t.status!=="deleted"); const byId=new Map(all.map(t=>[t.id,t]));
   const blocked=(t:BrowserTask)=>(t.dependsOn??[]).some(id=>byId.get(id)?.status!=="completed");
@@ -23,7 +21,7 @@ export class TaskBrowserView {
   // Use the TUI key matcher rather than comparing against one terminal's raw
   // byte sequence. Kitty/modifyOtherKeys terminals can encode Escape
   // differently, which previously left this overlay capturing input forever.
-  if(isEscape(data)){if(!this.closed){this.closed=true;this.close();}return;}
+  if(this.isEscape(data)){if(!this.closed){this.closed=true;this.close();}return;}
   if(this.search){if(data==="\r")this.search=false;else if(data==="\x7f")this.query=Array.from(this.query).slice(0,-1).join("");else if(!/[\x00-\x1f]/.test(data))this.query+=data;this.scroll=0;this.invalidate();return;}
   const rows=this.rows();const i=rows.findIndex(r=>r.task.id===this.id);
   const delta=data==="\x1b[A"||data==="k"?-1:data==="\x1b[B"||data==="j"?1:data==="\x1b[6~"?10:data==="\x1b[5~"?-10:0;
@@ -53,5 +51,5 @@ export class TaskBrowserView {
 const openManagers=new WeakSet<object>();
 export async function openTaskBrowser(ctx:any,manager:{snapshot():BrowserSnapshot}){
  if(openManagers.has(manager))return;openManagers.add(manager);
- try{const layout = await import("@earendil-works/pi-tui"); await ctx.ui.custom((tui:any,theme:any,_keys:any,done:()=>void)=>new TaskBrowserView(tui,theme,()=>manager.snapshot(),done,layout),{overlay:true,overlayOptions:{width:"88%",minWidth:48,maxHeight:"82%",anchor:"center",margin:1}});}finally{openManagers.delete(manager);}
+ try{const layout = await import("@earendil-works/pi-tui"); await ctx.ui.custom((tui:any,theme:any,_keys:any,done:()=>void)=>new TaskBrowserView(tui,theme,()=>manager.snapshot(),done,layout, (data:string)=>layout.matchesKey(data, layout.Key.escape)),{overlay:true,overlayOptions:{width:"88%",minWidth:48,maxHeight:"82%",anchor:"center",margin:1}});}finally{openManagers.delete(manager);}
 }

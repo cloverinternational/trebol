@@ -1,8 +1,9 @@
 import { executionLog } from "../../lib/context/execution-log.ts";
-import { jevAuditEnabled, bindJevAuditMode } from "../../lib/context/jev-audit-mode.ts";
+import { bindJevAuditMode } from "../../lib/context/jev-audit-mode.ts";
 import { captureEvidence, knowledgeCapturePrompt, parseKnowledgeCandidates } from "../../lib/context/knowledge-capture.ts";
 import { consultWithPi } from "../../lib/context/context-consult.ts";
 import { openKnowledgeStore } from "../../lib/state/knowledge-store.ts";
+import { onAgentSettled } from "../../lib/runtime/agent-settled.ts";
 
 export const ENRICHMENT_ENTRY = "pi-swarm-knowledge-enrichment";
 const registered = new WeakSet<object>();
@@ -38,7 +39,7 @@ export default function knowledgeEnrichment(pi: any): void {
     },
   });
   const run = (ctx: any): Promise<void> => {
-    if (jevAuditEnabled(pi) || !enabled || process.env.PI_SWARM_SUBAGENT === "1") return Promise.resolve();
+    if (!enabled || process.env.PI_SWARM_SUBAGENT === "1") return Promise.resolve();
     if (busy) return busy;
     const ownGeneration = generation;
     const ownController = new AbortController(); controller = ownController;
@@ -52,7 +53,7 @@ export default function knowledgeEnrichment(pi: any): void {
         const response = await consultWithPi(pi, { prompt: knowledgeCapturePrompt(batch.evidence, ctx.cwd, ["repository", "worktree"].flatMap(scope => openKnowledgeStore({ cwd: ctx.cwd, scope: scope as "repository" | "worktree" }).snapshot().filter(r => !r.deleted).slice(-40).map(r => ({ id: r.id, text: r.text.slice(0, 500) })))), cwd: ctx.cwd, model: ctx.model, signal: ownController.signal, generation: ownGeneration, currentGeneration: () => generation });
         if (response.status !== "completed") { if (generation === ownGeneration) status = response.status; return; }
         const candidates = parseKnowledgeCandidates(JSON.stringify(response.value), batch.evidence);
-        if (ownController.signal.aborted || generation !== ownGeneration || jevAuditEnabled(pi)) return;
+        if (ownController.signal.aborted || generation !== ownGeneration) return;
         const session = String(ctx.sessionManager?.getSessionFile?.() ?? "session");
         for (const candidate of candidates) {
           // Do not persist large raw evidence excerpts; IDs resolve back to the
@@ -72,6 +73,6 @@ export default function knowledgeEnrichment(pi: any): void {
   };
   // Awaiting keeps persistence ordered before shutdown/compaction; the isolated
   // consultation has a timeout. This can add latency, never a new agent turn.
-  pi.on("agent_end", (_event: unknown, ctx: any) => run(ctx));
+  onAgentSettled(pi, (_event: unknown, ctx: any) => run(ctx));
   pi.on("session_before_compact", (_event: unknown, ctx: any) => run(ctx));
 }

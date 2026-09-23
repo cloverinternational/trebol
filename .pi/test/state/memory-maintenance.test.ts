@@ -18,12 +18,12 @@ it("routes Jev from a distinct extension API by exact session identity",async()=
 
 it("headless stop waits for dispatched receipt without draining queued work",async()=>{
  let finish:any;const t=h(()=>new Promise(r=>finish=r));await t.on();dispatchMemoryMaintenance(t.pi,"finding",t.ctx);
- let stopped=false;const end=t.hooks.get("agent_end")({}, {...t.ctx,hasUI:false}).then(()=>{stopped=true;});
+ let stopped=false;const end=t.hooks.get("agent_settled")({}, {...t.ctx,hasUI:false}).then(()=>{stopped=true;});
  await Promise.resolve();expect(stopped).toBe(false);finish({status:"completed",receipt:{operations:[]}});await end;
  expect(t.entries.at(-1).data.status).toBe("completed");expect(t.exec).toHaveBeenCalledTimes(1);
 });
 it("interactive stop remains nonblocking",async()=>{
  let finish:any;const t=h(()=>new Promise(r=>finish=r));await t.on();dispatchMemoryMaintenance(t.pi,"finding",t.ctx);
- await t.hooks.get("agent_end")({}, {...t.ctx,hasUI:true});expect(t.entries.at(-1).data.status).toBe("running");
+ await t.hooks.get("agent_settled")({}, {...t.ctx,hasUI:true});expect(t.entries.at(-1).data.status).toBe("running");
  finish({status:"completed"});await new Promise(r=>setTimeout(r,0));
 });

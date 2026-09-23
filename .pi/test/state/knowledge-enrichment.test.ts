@@ -24,7 +24,7 @@ function harness(exec?: (...args: any[]) => Promise<any>) {
   enrichment(pi); enrichment(pi);
   const ctx = { cwd: root, model: { provider: "test", id: "model" }, sessionManager: { getBranch: () => entries, getSessionFile: () => join(root, "session.jsonl") }, ui: { notify: vi.fn() } };
   handlers.get("session_start")({}, ctx);
-  return { pi, root, entries, handlers, commands, execute, ctx, run: () => handlers.get("agent_end")({}, ctx), store: () => openKnowledgeStore({ cwd: root }) };
+  return { pi, root, entries, handlers, commands, execute, ctx, run: () => handlers.get("agent_settled")({}, ctx), store: () => openKnowledgeStore({ cwd: root }) };
 }
 it("captures cited candidates once across repeated hooks and reload", async () => {
   const h = harness(); await h.run();
@@ -56,7 +56,7 @@ it("honors explicit capture off and refuses invented citations", async () => {
   await h.commands.get("memory-capture").handler("on", h.ctx); await h.run(); expect(h.store().list()).toEqual([]); expect(h.entries).toHaveLength(1);
 });
 
-it("defers to Jev first-finder while enabled and resumes legacy when off", async()=>{
- const h=harness();setJevAuditEnabled(h.pi,true);await h.run();expect(h.execute).not.toHaveBeenCalled();
+it("captures independently of Jev audit mode", async()=>{
+ const h=harness();setJevAuditEnabled(h.pi,true);await h.run();expect(h.execute).toHaveBeenCalledTimes(1);
  setJevAuditEnabled(h.pi,false);await h.run();expect(h.execute).toHaveBeenCalledTimes(1);
 });
