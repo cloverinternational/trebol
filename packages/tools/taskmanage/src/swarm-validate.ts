@@ -207,7 +207,9 @@ export function swarmValidateTaskManageParams(params: unknown): string | undefin
     const raw = isObj(normalized) ? normalized : {};
     for (const field of Object.keys(raw)) if (field !== "operations" && field !== "mode") fail(`unknown top-level field ${q(field)}`);
     const ops = raw.operations;
-    if (!Array.isArray(ops) || ops.length === 0) fail("operations must contain at least one operation");
+    if (ops === undefined) fail("operations is required");
+    if (!Array.isArray(ops)) fail("operations must be an array");
+    if ((ops as unknown[]).length === 0) fail("operations must contain at least one operation");
     if ((ops as unknown[]).length > MAX_OPERATIONS) fail(`operations exceeds maximum of ${MAX_OPERATIONS}`);
     let mode = "sequential";
     if ("mode" in raw) { if (typeof raw.mode !== "string") fail("mode must be a string"); mode = raw.mode as string; }

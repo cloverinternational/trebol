@@ -41,7 +41,7 @@ describe('compact task completion questions',()=>{
  it('names only the unresolvable reference in a multi-file citation',()=>{
   const {manager}=fixture();
   const batch=manager.execute({operations:[{...done,answers:[{...answer,evidence:'proof.md#Proof; absent.md#L1-L2'}]}]});
-  expect(batch.results[0].error?.message).toBe('evidence reference is unavailable: absent.md#L1-L2');
+  expect(batch.results[0].error?.message).toBe('evidence reference is unavailable: absent.md#L1-L2 (missing_file)');
  });
  it('splits multi-file citations without corrupting headings that contain separators',()=>{
   expect(splitEvidence('a.ts#L1-L2; b.ts#L3')).toEqual(['a.ts#L1-L2','b.ts#L3']);

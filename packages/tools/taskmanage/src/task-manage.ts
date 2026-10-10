@@ -94,7 +94,7 @@ import { resolve as resolvePath, relative as relativePath, isAbsolute } from "no
 export type JournalEntry = { type: "pi-swarm-task-state"; data: VersionedSnapshot<State> | State } | OperationEvent;
 export interface State { nextId: number; tasks: Task[]; keys: Record<string, string> }
 /** `evidenceRoots` is host-owned trusted configuration; task input can never set it. */
-export interface TaskManagerOptions { workspaceRoot?: string; evidenceRoots?: readonly string[]; resolveEvidence?: (reference: string) => boolean | string; resolveSessionEvidence?: (reference: string) => boolean }
+export interface TaskManagerOptions { workspaceRoot?: string; evidenceRoots?: readonly string[]; canReadEvidence?: (path: string) => boolean; toolAliases?: Readonly<Record<string, readonly string[]>>; canonicalizeToolEvidence?: (reference: string) => string; resolveEvidence?: (reference: string) => boolean | string; resolveSessionEvidence?: (reference: string) => boolean }
 export interface TaskMetrics { mutations: number; reads: number; failures: number; lastRevision: number }
 
 const fail = (code: string, message: string, retryable = false): Failure => ({ code, message, retryable });
@@ -644,7 +644,11 @@ export class TaskManager {
   private mergeAnswers(task: Task, op: Operation): TaskAnswer[] {
     const questions = op.questions ?? task.questions ?? [];
     const merged = new Map(this.retainedAnswers(task, op.questions).map(answer => [answer.question, answer]));
-    for (const answer of op.answers ?? []) merged.set(answer.question, clone(answer));
+    for (const answer of op.answers ?? []) {
+      const saved = clone(answer);
+      if (this.options.canonicalizeToolEvidence) saved.evidence = splitEvidence(saved.evidence).map(ref => this.options.canonicalizeToolEvidence!(ref)).join("; ");
+      merged.set(answer.question, saved);
+    }
     return questions.filter(question => merged.has(question.id)).map(question => merged.get(question.id)!);
   }
   private completionError(task: Task, op: Operation): Failure | undefined {
@@ -668,7 +672,10 @@ export class TaskManager {
     if (missing.length) return fail("validation_failed", `missing answers for question(s): ${missing.map(question => `${question.id} (${question.text})`).join("; ")}. Re-read the task, then retry with status:"completed" and answers:[{question:"<question id>",answer:"<truthful answer>",evidence:"path/to/file.md#Heading, path/to/file.ts#L1-L2, or tool:<ToolName>#<n> for a live tool result from this session"}] for every listed question; do not invent answers or evidence`);
     for (const answer of answers) {
       if (!answer.evidence) continue;
-      const unresolved = splitEvidence(answer.evidence).filter(reference => !this.resolveEvidence(reference));
+      const unresolved = splitEvidence(answer.evidence).flatMap(reference => {
+        this.evidenceReason = "unavailable";
+        return this.resolveEvidence(reference) ? [] : [`${reference} (${this.evidenceReason})`];
+      });
       // Name the reference that failed: echoing the whole string forces the
       // caller to bisect a citation list to find the one bad entry.
       if (unresolved.length) return fail("validation_failed", `evidence reference is unavailable: ${unresolved.join("; ")}`);
@@ -679,32 +686,39 @@ export class TaskManager {
    * file; `#Lx`, `#Lx-Ly` and `#Heading` narrow it. Multi-file citations are
    * split by `splitEvidence` before reaching here.
    */
+  private evidenceReason = "unavailable";
   private resolveEvidence(reference: string): boolean {
     if (this.options.resolveEvidence) return this.options.resolveEvidence(reference) === true;
-    if (/^tool:/i.test(reference)) return this.options.resolveSessionEvidence?.(reference) === true;
+    if (/^tool:/i.test(reference)) { this.evidenceReason = "tool_result_unavailable: use an exact registered tool name and a current-branch result index"; return this.options.resolveSessionEvidence?.(reference) === true; }
     const match = /^([^#]+?)(?:#(L\d+(?:-L\d+)?|[^#\s].*))?$/.exec(reference.trim());
-    if (!match || !this.options.workspaceRoot) return false;
+    if (!match || !this.options.workspaceRoot) { this.evidenceReason = "invalid_reference_or_missing_workspace"; return false; }
     // A workspace-relative citation resolves against the primary root first;
     // failing that, against the repository's linked worktrees (trebol#124,
     // trebol#127): agents routinely work in an isolated worktree while the
     // host process keeps the main checkout as cwd, and absolute citations
     // into that worktree must resolve too.
     const roots = [resolvePath(this.options.workspaceRoot), ...this.linkedWorktreeRoots(), ...(this.options.evidenceRoots ?? []).map(root => resolvePath(root))];
+    this.evidenceReason = "outside_allowed_roots: use the workspace, a linked worktree, or a host-authorized evidence root";
     for (const root of roots) {
       const file = resolvePath(root, match[1]);
       const rel = relativePath(root, file);
       if (isAbsolute(rel) || rel === ".." || rel.startsWith("../")) continue;
       try {
+        this.evidenceReason = "missing_file";
         const physical = relativePath(realpathSync(root), realpathSync(file));
-        if (isAbsolute(physical) || physical === ".." || physical.startsWith("../")) continue;
-        const stat = statSync(file); if (!stat.isFile() || stat.size > 1024 * 1024) continue;
+        if (isAbsolute(physical) || physical === ".." || physical.startsWith("../")) { this.evidenceReason = "outside_allowed_roots: symlink escape"; continue; }
+        if (this.options.canReadEvidence && this.options.canReadEvidence(realpathSync(file)) !== true) { this.evidenceReason = "access_denied"; continue; }
+        const stat = statSync(file); if (!stat.isFile()) { this.evidenceReason = "not_a_file"; continue; }
+        if (stat.size > 1024 * 1024) { this.evidenceReason = "file_too_large"; continue; }
         const text = readFileSync(file, "utf8"), section = match[2];
         if (section === undefined) return true;
         const lines = /^L(\d+)(?:-L(\d+))?$/.exec(section);
         if (lines) {
           const start = Number(lines[1]), end = lines[2] === undefined ? start : Number(lines[2]);
+          this.evidenceReason = "invalid_line_range";
           return start >= 1 && end >= start && end <= text.split("\n").length;
         }
+        this.evidenceReason = "missing_heading";
         if (!/\.md$/i.test(file)) return false;
         // Headings legally contain ?, parentheses, commas and other punctuation
         // (trebol#36). Match the quoted section exactly, as a GitHub-style dash
@@ -724,12 +738,12 @@ export class TaskManager {
   }
   /**
    * Linked worktrees of the workspace repository, primary root excluded.
-   * Discovery shells out to `git worktree list` at most once per 60 seconds
+   * Discovery refreshes `git worktree list` for each evidence check
    * and degrades to an empty list outside a git repository or without git.
    */
   private linkedWorktreeRoots(): string[] {
     const now = Date.now();
-    if (!this.worktrees || now - this.worktrees.at > 60_000) {
+    {
       let list: string[] = [];
       try {
         const out = execFileSync("git", ["-C", String(this.options.workspaceRoot), "worktree", "list", "--porcelain"], { timeout: 5000, stdio: ["ignore", "pipe", "ignore"] }).toString();
@@ -862,6 +876,9 @@ export class TaskManager {
     if (typeof id !== "string") return {key:op.key,op:op.op,status:"failed",error:id};
     const task=this.find(id); if (!task) return {key:op.key,op:op.op,status:"failed",error:fail("not_found",`task ${id} not found`)};
     if (op.op==="get") return {key:op.key,op:op.op,status:"succeeded",data:{task:this.outputTask(task, op.include_audit)}};
+    const questionIds = new Set((op.questions ?? task.questions ?? []).map(q => q.id));
+    for (const answer of op.answers ?? []) if (!questionIds.has(answer.question))
+      return {key:op.key,op:op.op,status:"failed",error:fail("validation_failed", `unknown question id: ${answer.question}`)};
     const completionError = this.completionError(task, op);
     if (completionError) return {key:op.key,op:op.op,status:"failed",error:completionError};
     if (op.active === true && op.status === undefined && task.status !== "in_progress")
@@ -1009,10 +1026,17 @@ export class TaskManager {
  * the same turn are visible. Unknown tools, absent indices and out-of-range
  * indices all fail closed.
  */
-export function resolveToolEvidence(reference: string, sessionManager: { getEntries(): readonly unknown[]; getBranch?(): readonly unknown[] } | undefined): boolean {
+export function resolveToolEvidence(reference: string, sessionManager: { getEntries(): readonly unknown[]; getBranch?(): readonly unknown[] } | undefined, aliases: Readonly<Record<string, readonly string[]>> = {}): boolean {
   const match = /^tool:([A-Za-z0-9_-]+)(?:#(\d+))?$/i.exec(reference.trim());
   if (!match || !sessionManager) return false;
-  const name = match[1];
+  let name = match[1];
+  const entries = (sessionManager.getBranch?.() ?? sessionManager.getEntries()) as any[];
+  const exact = entries.some(entry => entry?.type === "message" && entry.message?.role === "toolResult" && entry.message?.toolName === name);
+  if (!exact && aliases[name]) {
+    const targets = [...new Set(aliases[name])];
+    if (targets.length !== 1) return false;
+    name = targets[0];
+  }
   const results = ((sessionManager.getBranch?.() ?? sessionManager.getEntries()) as any[])
     .filter(entry => entry?.type === "message" && entry.message?.role === "toolResult" && entry.message?.toolName === name);
   if (!match[2]) return results.length > 0;
@@ -1042,8 +1066,17 @@ export function registerTaskManage(pi: { registerTool(tool: unknown): void; appe
     manager.rehydrate((ctx.sessionManager?.getBranch?.() ?? ctx.sessionManager?.getEntries() ?? []) as JournalEntry[]);
     refreshWidget(ctx);
   });
+  // Persist canonical names so later alias configuration cannot retarget saved answers.
+  options.canonicalizeToolEvidence ??= reference => {
+    const match = /^tool:([A-Za-z0-9_-]+)(#\d+)?$/i.exec(reference.trim());
+    if (!match || !sessionManager) return reference;
+    if (resolveToolEvidence(reference, sessionManager)) return reference;
+    const targets = [...new Set(options.toolAliases?.[match[1]] ?? [])];
+    if (targets.length !== 1 || !resolveToolEvidence(reference, sessionManager, options.toolAliases)) return reference;
+    return `tool:${targets[0]}${match[2] ?? ""}`;
+  };
   options.resolveSessionEvidence ??= reference => resolveToolEvidence(reference, sessionManager);
-  pi.registerTool({ name:"TaskManage", label:"Manage tasks", description:"Manage ordered tasks. Optional compact questions {id,text}; answer each with {question,answer,evidence} in the same completed update. Evidence uses workspace file#heading, file#Lx-Ly, or tool:<ToolName>[#<n>] for a live tool result from this session. Keep detail in files. sequential commits the successful prefix; atomic commits all or rolls back.", parameters:taskManageSchema,
+  pi.registerTool({ name:"TaskManage", label:"Manage tasks", description:"Manage ordered tasks. Optional compact questions {id,text}; Saved answers for unchanged questions are reused; supply missing or replacement {question,answer,evidence} answers. Completion revalidates all evidence. Evidence uses workspace file#heading, file#Lx-Ly, or tool:<ToolName>[#<n>] for a live tool result from this session. Keep detail in files. sequential commits the successful prefix; atomic commits all or rolls back.", parameters:taskManageSchema,
     renderShell: "self",
     promptSnippet: "TaskManage: track multi-step work with durable ordered tasks.",
     promptGuidelines: ["Use TaskManage for multi-step work; keep exactly one active task when working sequentially; before starting work set the selected task status=\"in_progress\" and active=true; after verifying a task's acceptance criteria, explicitly update it with status=\"completed\" and activate the next unblocked task."],

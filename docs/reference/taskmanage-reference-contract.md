@@ -26,3 +26,29 @@ compaction-time Todo tool. Pi extensions are registered in load order, so
 `TaskHooksCoordinator` is the deterministic lifecycle coordinator for this
 adapter. Future work can add explicit hook priority metadata without changing the
 TaskManage wire schema.
+
+## Saved answers and evidence
+
+Saved answers are reused for unchanged question IDs and text. Supplied answers
+merge by ID; rewording/removing a question invalidates its answer, while reordering
+and reopening do not. Completion revalidates every reference and still requires
+all questions and children to be satisfied. An omitted answers field is valid;
+an explicitly empty array is not. Unknown supplied question IDs are rejected.
+
+References are existence/availability checks, not semantic proof of a claim.
+Files must remain inside the workspace, linked worktrees or host-authorized
+`evidenceRoots`, including after realpath resolution. Host integrations can pass
+`canReadEvidence` to enforce additional restrictions; task arguments cannot grant
+permissions. `registerTaskManageExtension(..., {evidence: {...}})` exposes these
+host options, not a model-facing authorization mechanism. Default registration
+does not grant extra roots.
+
+Tool references use exact current-branch result names and per-tool indices.
+Integrations may supply explicit `toolAliases`; ambiguous mappings fail closed.
+The registered adapter persists successfully resolved aliases as canonical names,
+so later alias configuration does not retarget saved answers. No global case-fold
+or MCP-prefix stripping occurs. Default registration invents no aliases.
+
+Rejected operations remain atomic. Save a note on a blocked pending task in its
+own operation rather than coupling it to activation. Sequential batches retain
+the successful prefix; atomic batches roll back all state changes.

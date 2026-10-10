@@ -2,6 +2,7 @@ import {
   registerTaskHooks,
   registerTaskManage,
   type HookConfig,
+  type TaskManagerOptions,
 } from "../../packages/tools/taskmanage/src/index.ts";
 import "../../.pi/lib/runtime/hook-state.ts";
 import { withSwarmToolSurface, rawPi } from "../../.pi/lib/runtime/swarm-tool-surface.ts";
@@ -29,7 +30,7 @@ export interface TaskManageExtensionAPI {
   ): void;
 }
 
-export interface TaskManageExtensionOptions extends HookConfig { headless?: boolean; interactionTimeoutMs?: number; }
+export interface TaskManageExtensionOptions extends HookConfig { headless?: boolean; interactionTimeoutMs?: number; evidence?: Pick<TaskManagerOptions, "evidenceRoots" | "toolAliases" | "canReadEvidence">; }
 
 /**
  * Register the canonical TaskManage tool and its lifecycle coordinator.
@@ -48,9 +49,9 @@ export function registerTaskManageExtension(
   if (existing) return existing;
   const bridged: any[] = [];
   const registrationPi = { ...pi, registerTool: (tool: unknown) => { registerBootstrapHandoff(pi, tool); bridged.push(tool); pi.registerTool(tool); } };
-  const manager = registerTaskManage(registrationPi, undefined, { workspaceRoot: process.cwd() });
+  const manager = registerTaskManage(registrationPi, undefined, { workspaceRoot: process.cwd(), ...options?.evidence });
   pi.on("before_agent_start", (event: any) => ({
-    systemPrompt: String(event.systemPrompt ?? "") + "\n<task_completion_contract>Read each task's questions before implementation and treat them as explicit acceptance obligations. A successful code edit or test is not a successful TaskManage completion. To complete a question-bearing task, supply answers:[{question:QUESTION_ID,answer:TRUTHFUL_ANSWER,evidence:EVIDENCE_REFERENCE}] covering every question in the same completion operation. Evidence must use a real workspace reference (file#Heading or file#Lx-Ly) or a live tool-result reference (tool:<ToolName> or tool:<ToolName>#<n>, 1-based chronological result of that tool in this session) when the evidence is a tool call/output rather than a file. If TaskManage rejects completion, acknowledge the failure, read the current task and exact error, and change the missing/invalid input before retrying. Never repeat an unchanged rejected completion, delete questions to bypass validation, or invent evidence. If an answer cannot be established, keep the task unfinished with a blocker and clearly distinguish implemented changes from verified completion in your final response. Use ask_user_question only for decisions requiring the user, not questions you can answer by inspecting or testing.</task_completion_contract>"
+    systemPrompt: String(event.systemPrompt ?? "") + "\n<task_completion_contract>Read each task's questions before implementation and treat them as explicit acceptance obligations. A successful code edit or test is not a successful TaskManage completion. To complete a question-bearing task, supply answers:[{question:QUESTION_ID,answer:TRUTHFUL_ANSWER,evidence:EVIDENCE_REFERENCE}] for missing or changed answers; saved answers for unchanged questions are reused and all evidence is revalidated at completion. Evidence must use a real workspace reference (file#Heading or file#Lx-Ly) or a live tool-result reference (tool:<ToolName> or tool:<ToolName>#<n>, 1-based chronological result of that tool in this session) when the evidence is a tool call/output rather than a file. If TaskManage rejects completion, acknowledge the failure, read the current task and exact error, and change the missing/invalid input before retrying. Never repeat an unchanged rejected completion, delete questions to bypass validation, or invent evidence. If an answer cannot be established, keep the task unfinished with a blocker and clearly distinguish implemented changes from verified completion in your final response. Use ask_user_question only for decisions requiring the user, not questions you can answer by inspecting or testing.</task_completion_contract>"
   }));
   // Swarm's builtin task hooks (.pi/lib/runtime/swarm-builtin-hooks.ts) read
   // task state through this handle; the coordinator below keeps only the
