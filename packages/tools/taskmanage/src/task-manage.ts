@@ -1078,6 +1078,7 @@ export function resolveToolEvidence(reference: string, sessionManager: EvidenceS
 }
 
 export function registerTaskManage(pi: { registerTool(tool: unknown): void; appendEntry(type: string, data: unknown): void; on(event: string, handler: (event: unknown, ctx: {sessionManager?: {getEntries(): readonly unknown[]; getBranch?(): readonly unknown[]}; ui?: {setWidget(key: string, content: unknown): void}})=>void): void }, presentation = taskManageRenderers, options: TaskManagerOptions = {}): TaskManager {
+  options = { ...options }; // Each registration owns its defaults and session closures.
   const manager = new TaskManager(
     entry => pi.appendEntry(entry.type, entry.data),
     event => pi.appendEntry(event.type, event.data),

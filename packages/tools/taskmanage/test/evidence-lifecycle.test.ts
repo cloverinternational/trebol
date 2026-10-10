@@ -101,3 +101,21 @@ describe('historical alias migration safety',()=>{
   expect(manager.execute({operations:[{key:'finish',op:'update',taskId:'1',status:'completed'}]}).status).toBe('failed');
  });
 });
+
+describe('registration configuration ownership',()=>{
+ it('accepts frozen options without installing callbacks on the caller object',()=>{
+  const options=Object.freeze({});
+  expect(()=>registerTaskManage({registerTool:()=>{},appendEntry:()=>{},on:()=>{}} as any,undefined,options)).not.toThrow();
+  expect(Object.keys(options)).toEqual([]);
+ });
+ it('does not share session callbacks when registrations reuse options',()=>{
+  const options={};const make=()=>{
+   const handlers=new Map<string,Function>();const m=registerTaskManage({registerTool:()=>{},appendEntry:()=>{},on:(n:string,h:Function)=>handlers.set(n,h)} as any,undefined,options);
+   return {m,bind:(entries:any[])=>handlers.get('session_start')!({}, {sessionManager:{getEntries:()=>entries}})};
+  };
+  const first=make(),second=make();first.bind([result]);second.bind([]);
+  first.m.execute(create as any);second.m.execute(create as any);
+  expect(first.m.execute(done('tool:Bash') as any).status).toBe('succeeded');
+  expect(second.m.execute(done('tool:Bash') as any).status).toBe('failed');
+ });
+});
