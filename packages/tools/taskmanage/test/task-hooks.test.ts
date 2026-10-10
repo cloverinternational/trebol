@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { TaskHooksCoordinator } from "../src/task-hooks.js";
 import { TaskManager, type JournalEntry } from "../src/task-manage.js";
 
@@ -9,6 +9,12 @@ const pi = (entries: JournalEntry[] = []) => ({
   appendEntry(type: string, data: any) { this.entries.push({ type, data } as any); },
 });
 const event = (type: string, more: any = {}) => ({ type, ...more });
+
+// The gate bypasses itself when PI_SWARM_SUBAGENT=1 (inherited from a subagent parent shell).
+// Isolate that ambient state so these tests exercise the parent-session gate deterministically.
+let savedSubagentEnv: string | undefined;
+beforeEach(() => { savedSubagentEnv = process.env.PI_SWARM_SUBAGENT; delete process.env.PI_SWARM_SUBAGENT; });
+afterEach(() => { if (savedSubagentEnv === undefined) delete process.env.PI_SWARM_SUBAGENT; else process.env.PI_SWARM_SUBAGENT = savedSubagentEnv; });
 
 describe("TaskManage hooks coordinator", () => {
   it("queues advisory guidance until before_agent_start can inject a model message", () => {
