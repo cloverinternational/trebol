@@ -23,3 +23,10 @@ it('discovers worktrees once per batch, refreshing on the next batch',()=>{
 it('ignores malformed session entries',()=>{
  expect(resolveToolEvidence('tool:Bash',{getEntries:()=>[null,{}, {type:'message',message:null},{type:'message',message:{role:'toolResult',toolName:42}}]})).toBe(false);
 });
+it('contains host callback exceptions and rolls back atomic prefixes without leaking details',()=>{
+ const m=new TaskManager(undefined,undefined,{canonicalizeToolEvidence:()=>{throw new Error('SECRET_HOST_DETAIL');}});
+ const batch=m.execute({mode:'atomic',operations:[{key:'c',op:'create',subject:'test',questions:[{id:'q',text:'Proof?'}]},{key:'a',op:'update',taskId:{ref:'c'},answers:[{question:'q',answer:'yes',evidence:'proof.md'}]}]});
+ expect(batch.status).toBe('failed');expect(m.snapshot().tasks).toHaveLength(0);
+ expect(JSON.stringify(batch)).not.toContain('SECRET_HOST_DETAIL');
+ expect(batch.results[1].error?.code).toBe('validation_failed');
+});

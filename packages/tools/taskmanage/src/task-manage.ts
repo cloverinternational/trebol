@@ -798,7 +798,14 @@ export class TaskManager {
       // Create keys are idempotency keys for retries. Update keys are ordinary
       // per-call aliases and may intentionally be reused as work progresses.
       const existingMutation = op.op === "create" ? this.state.keys[op.key] : undefined;
-      const result = existingMutation ? this.replayedMutation(op, existingMutation) : this.run(op, local);
+      let result: Result;
+      try {
+        result = existingMutation ? this.replayedMutation(op, existingMutation) : this.run(op, local);
+      } catch {
+        // Host callbacks are fallible. Roll back through the normal failure path
+        // and never expose callback exception text (which may contain secrets).
+        result = { key: op.key, op: op.op, status: "failed", error: fail("validation_failed", "operation validation failed unexpectedly; inspect host evidence configuration") };
+      }
       results.push(result);
       if (result.status === "succeeded" && !existingMutation &&
         (op.op === "create" || (op.op === "update" && op.status !== "deleted"))) {
@@ -1110,6 +1117,9 @@ export function registerTaskManage(pi: { registerTool(tool: unknown): void; appe
     if (targets.length !== 1 || !resolveToolEvidence(reference, sessionManager, options.toolAliases)) return reference;
     return `tool:${targets[0]}${match[2] ?? ""}`;
   };
+  // Intentionally exact-only here: supplied aliases are canonicalized above.
+  // Retained aliases have no historical mapping provenance; resolving them
+  // with today's alias map could silently retarget already-saved evidence.
   options.resolveSessionEvidence ??= reference => resolveToolEvidence(reference, sessionManager);
   pi.registerTool({ name:"TaskManage", label:"Manage tasks", description:"Manage ordered tasks. Optional compact questions {id,text}; Saved answers for unchanged questions are reused; supply missing or replacement {question,answer,evidence} answers. Completion revalidates all evidence. Evidence uses workspace file#heading, file#Lx-Ly, or tool:<ToolName>[#<n>] for a live tool result from this session. Keep detail in files. sequential commits the successful prefix; atomic commits all or rolls back.", parameters:taskManageSchema,
     renderShell: "self",
