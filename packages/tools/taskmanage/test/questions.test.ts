@@ -79,10 +79,10 @@ describe('compact task completion questions',()=>{
   expect(manager.execute({operations:[done]}).status).toBe('succeeded');
   expect(manager.execute({operations:[{key:'reopen',op:'update',taskId:'1',status:'in_progress'}]}).status).toBe('succeeded');
   expect(manager.snapshot().tasks[0].answers).toEqual([answer]);
-  // The completion gate is deliberately unchanged: reopened work must be
-  // re-evidenced in the completing call. Preserving the prior answers keeps
-  // them readable via `get` so they can be restated rather than invented.
-  expect(manager.execute({operations:[{key:'again',op:'update',taskId:'1',status:'completed'}]}).status).toBe('failed');
+  // Saved answers for unchanged questions are reused on completion without
+  // resubmission (approved #176/#184 behaviour); evidence is still revalidated.
+  expect(manager.execute({operations:[{key:'again',op:'update',taskId:'1',status:'completed'}]}).status).toBe('succeeded');
+  expect(manager.execute({operations:[{key:'re2',op:'update',taskId:'1',status:'in_progress'}]}).status).toBe('succeeded');
   expect(manager.execute({operations:[done]}).status).toBe('succeeded');
   // Replacing the questions invalidates the answers that referenced them.
   expect(manager.execute({operations:[{key:'re',op:'update',taskId:'1',status:'in_progress'}]}).status).toBe('succeeded');

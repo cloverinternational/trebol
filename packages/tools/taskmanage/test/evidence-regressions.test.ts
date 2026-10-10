@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { existsSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, symlinkSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { TaskManager, type JournalEntry } from '../src/task-manage.js';
@@ -132,6 +132,35 @@ describe('#187/#194 trusted extra evidence roots', () => {
     } finally { rmSync(root, { recursive: true, force: true }); rmSync(sibling, { recursive: true, force: true }); }
   });
 
+  it('does not follow a symlink inside an extra root that escapes it', () => {
+    const root = workspace();
+    const extra = mkdtempSync(join(tmpdir(), 'taskmanage-regress-extra-'));
+    const outside = mkdtempSync(join(tmpdir(), 'taskmanage-regress-outside-'));
+    writeFileSync(join(outside, 'secret.md'), '# Notes\nESCAPED-BODY-19c\n');
+    symlinkSync(join(outside, 'secret.md'), join(extra, 'link.md'));
+    const manager = new TaskManager(undefined, undefined, { workspaceRoot: root, evidenceRoots: [extra] } as any);
+    try {
+      manager.execute({ operations: [{ key: 'new', op: 'create', subject: 'Link', questions: [q1] }] });
+      const result = manager.execute({ operations: [{ key: 'done', op: 'update', taskId: '1', status: 'completed', answers: [{ question: 'q1', answer: 'Via link.', evidence: `${join(extra, 'link.md')}#Notes` }] }] });
+      expect(result.status).toBe('failed');
+      expect(JSON.stringify(result)).not.toContain('ESCAPED-BODY');
+    } finally { rmSync(root, { recursive: true, force: true }); rmSync(extra, { recursive: true, force: true }); rmSync(outside, { recursive: true, force: true }); }
+  });
+
+  it('does not let an extra root reach a sibling through parent traversal', () => {
+    const root = workspace();
+    const extra = mkdtempSync(join(tmpdir(), 'taskmanage-regress-extra-'));
+    const outside = mkdtempSync(join(tmpdir(), 'taskmanage-regress-outside-'));
+    writeFileSync(join(outside, 'secret.md'), '# Notes\nTRAVERSAL-BODY-5d\n');
+    const manager = new TaskManager(undefined, undefined, { workspaceRoot: root, evidenceRoots: [extra] } as any);
+    try {
+      manager.execute({ operations: [{ key: 'new', op: 'create', subject: 'Trav', questions: [q1] }] });
+      const result = manager.execute({ operations: [{ key: 'done', op: 'update', taskId: '1', status: 'completed', answers: [{ question: 'q1', answer: 'Traversed.', evidence: `../${outside.split('/').pop()}/secret.md#Notes` }] }] });
+      expect(result.status).toBe('failed');
+      expect(JSON.stringify(result)).not.toContain('TRAVERSAL-BODY');
+    } finally { rmSync(root, { recursive: true, force: true }); rmSync(extra, { recursive: true, force: true }); rmSync(outside, { recursive: true, force: true }); }
+  });
+
   it('rejects task input that tries to grant itself an evidence root', () => {
     const root = workspace();
     const manager = new TaskManager(undefined, undefined, { workspaceRoot: root } as any);
@@ -143,23 +172,75 @@ describe('#187/#194 trusted extra evidence roots', () => {
 });
 
 describe('#153 blocked-task note batches', () => {
+  // Real prerequisite: task 2 is blocked by pending task 1. Setup is asserted
+  // so a fixture that silently fails to block cannot produce a false result.
+  function blockedFixture() {
+    const f = fixture([q1]);
+    const setup = f.manager.execute({ operations: [{ key: 'dep', op: 'create', subject: 'Blocked', questions: [q1], addBlockedBy: ['1'] }] });
+    expect(setup.status).toBe('succeeded');
+    const blocked = f.manager.snapshot().tasks.find(t => t.id === '2')!;
+    expect(blocked.dependsOn).toEqual(['1']);
+    expect(blocked.status).toBe('pending');
+    expect(f.manager.snapshot().tasks.find(t => t.id === '1')!.status).toBe('pending');
+    return f;
+  }
+
   it('accepts a note-only update on a blocked pending task', () => {
-    const { manager, cleanup } = fixture();
+    const { manager, cleanup } = blockedFixture();
     try {
-      manager.execute({ operations: [{ key: 'block', op: 'update', taskId: '1', addNote: 'waiting', noteType: 'blocker' }] });
-      const result = manager.execute({ operations: [{ key: 'note', op: 'update', taskId: '1', addNote: 'more context', noteType: 'observation' }] });
+      const result = manager.execute({ operations: [{ key: 'note', op: 'update', taskId: '2', addNote: 'more context', noteType: 'observation' }] });
       expect(result.status).toBe('succeeded');
-      expect(manager.snapshot().tasks[0].notes).toContain('more context');
+      expect(manager.snapshot().tasks.find(t => t.id === '2')!.notes).toContain('more context');
     } finally { cleanup(); }
   });
 
   it('rejects combined activation plus note on a blocked task with no state or note change', () => {
-    const { manager, cleanup } = fixture();
+    const { manager, cleanup } = blockedFixture();
     try {
       const before = JSON.stringify(manager.snapshot().tasks);
-      const result = manager.execute({ operations: [{ key: 'both', op: 'update', taskId: '1', status: 'in_progress', active: true, addNote: 'start', noteType: 'milestone' }] });
+      const result = manager.execute({ operations: [{ key: 'both', op: 'update', taskId: '2', status: 'in_progress', active: true, addNote: 'start', noteType: 'milestone' }] });
+      expect(result.status).toBe('failed');
+      expect(result.results[0].error?.message).toMatch(/dependency 1 is not completed/);
+      expect(JSON.stringify(manager.snapshot().tasks)).toBe(before);
+    } finally { cleanup(); }
+  });
+
+  it('sequential batch persists the note and skips the blocked activation that follows', () => {
+    const { manager, cleanup } = blockedFixture();
+    try {
+      const result = manager.execute({ mode: 'sequential', operations: [
+        { key: 'note', op: 'update', taskId: '2', addNote: 'waiting on 1', noteType: 'blocker' },
+        { key: 'start', op: 'update', taskId: '2', status: 'in_progress', active: true },
+        { key: 'after', op: 'update', taskId: '1', addNote: 'later', noteType: 'observation' },
+      ] } as any);
+      expect(result.status).toBe('partial');
+      expect(result.results.map(r => r.status)).toEqual(['succeeded', 'failed', 'skipped']);
+      const task2 = manager.snapshot().tasks.find(t => t.id === '2')!;
+      expect(task2.notes).toContain('waiting on 1');
+      expect(task2.status).toBe('pending');
+      expect(task2.active).toBeFalsy();
+      expect(manager.snapshot().tasks.find(t => t.id === '1')!.notes).not.toContain('later');
+    } finally { cleanup(); }
+  });
+
+  it('atomic batch rolls back the earlier note when a later activation fails', () => {
+    const { manager, cleanup } = blockedFixture();
+    try {
+      const before = JSON.stringify(manager.snapshot().tasks);
+      const result = manager.execute({ mode: 'atomic', operations: [
+        { key: 'note', op: 'update', taskId: '2', addNote: 'waiting on 1', noteType: 'blocker' },
+        { key: 'start', op: 'update', taskId: '2', status: 'in_progress', active: true },
+      ] } as any);
       expect(result.status).toBe('failed');
       expect(JSON.stringify(manager.snapshot().tasks)).toBe(before);
+    } finally { cleanup(); }
+  });
+
+  it('completed dependency permits activation of the previously blocked task', () => {
+    const { manager, cleanup } = blockedFixture();
+    try {
+      expect(manager.execute({ operations: [{ key: 'd1', op: 'update', taskId: '1', status: 'completed', answers: [a1] }] }).status).toBe('succeeded');
+      expect(manager.execute({ operations: [{ key: 'start', op: 'update', taskId: '2', status: 'in_progress', active: true }] }).status).toBe('succeeded');
     } finally { cleanup(); }
   });
 });

@@ -93,7 +93,8 @@ import { resolve as resolvePath, relative as relativePath, isAbsolute } from "no
 
 export type JournalEntry = { type: "pi-swarm-task-state"; data: VersionedSnapshot<State> | State } | OperationEvent;
 export interface State { nextId: number; tasks: Task[]; keys: Record<string, string> }
-export interface TaskManagerOptions { workspaceRoot?: string; resolveEvidence?: (reference: string) => boolean | string; resolveSessionEvidence?: (reference: string) => boolean }
+/** `evidenceRoots` is host-owned trusted configuration; task input can never set it. */
+export interface TaskManagerOptions { workspaceRoot?: string; evidenceRoots?: readonly string[]; resolveEvidence?: (reference: string) => boolean | string; resolveSessionEvidence?: (reference: string) => boolean }
 export interface TaskMetrics { mutations: number; reads: number; failures: number; lastRevision: number }
 
 const fail = (code: string, message: string, retryable = false): Failure => ({ code, message, retryable });
@@ -453,7 +454,7 @@ export class TaskManager {
       if (normalized.parentTaskId === normalized.id || typeof normalized.parentTaskId !== "string") delete normalized.parentTaskId;
       normalized.audit_events = Array.isArray(normalized.audit_events) ? normalized.audit_events.filter(event =>
         isObj(event) && typeof event.at === "string" && typeof event.action === "string") as AuditEvent[] : [];
-      normalized.typed_notes = Array.isArray(normalized.typed_notes) ? normalized.typed_notes : [];
+      if (!Array.isArray(normalized.typed_notes)) delete normalized.typed_notes;
       return normalized;
     });
     const ids = new Set(tasks.map(task => task.id));
@@ -627,22 +628,42 @@ export class TaskManager {
     const duplicate = answers.findIndex((answer, index) => answers.findIndex(other => (other as TaskAnswer).question === (answer as TaskAnswer).question) !== index);
     if (duplicate >= 0) return fail("validation_failed", `operation ${key}: answers[${duplicate}].question duplicates an earlier question id`);
   }
+  /**
+   * Saved answers survive when their question still exists with identical
+   * text; a reworded or removed question drops only its own answer.
+   */
+  private retainedAnswers(task: Task, questions: TaskQuestion[] | undefined): TaskAnswer[] {
+    if (!questions) return [...(task.answers ?? [])];
+    const textById = new Map((task.questions ?? []).map(question => [question.id, question.text]));
+    return (task.answers ?? []).filter(answer => {
+      const current = questions.find(question => question.id === answer.question);
+      return !!current && textById.get(answer.question) === current.text;
+    });
+  }
+  /** Supplied answers override saved ones by question ID; order follows the question list. */
+  private mergeAnswers(task: Task, op: Operation): TaskAnswer[] {
+    const questions = op.questions ?? task.questions ?? [];
+    const merged = new Map(this.retainedAnswers(task, op.questions).map(answer => [answer.question, answer]));
+    for (const answer of op.answers ?? []) merged.set(answer.question, clone(answer));
+    return questions.filter(question => merged.has(question.id)).map(question => merged.get(question.id)!);
+  }
   private completionError(task: Task, op: Operation): Failure | undefined {
     if (task.status === "completed" && op.questions !== undefined && (op.status === undefined || op.status === "completed")) return fail("validation_failed", "reopen task before changing questions");
     if (op.status !== "completed" && op.status !== "in_progress") return;
     if (!task.questions?.length) return fail("validation_failed", `task ${task.id} is a legacy questionless task; repair it with task-specific questions before resuming or completing`);
     if (op.status !== "completed") return;
     if (op.questions !== undefined) return fail("validation_failed", "cannot replace or drop questions while completing a task");
-    const answers = op.answers ?? [];
     const ids = new Set<string>();
     const malformed = task.questions.some(question => !this.validQuestion(question) || ids.has(question.id) || !ids.add(question.id));
     if (malformed) return fail("validation_failed", `cannot complete task ${task.id}: task questions are malformed or duplicated. Re-read the task and repair questions before completing`);
-    const seen = new Set<string>();
-    for (const answer of answers) {
-      if (seen.has(answer.question)) return fail("validation_failed", `duplicate answer for question id: ${answer.question}`);
-      seen.add(answer.question);
+    const supplied = new Set<string>();
+    for (const answer of op.answers ?? []) {
+      if (supplied.has(answer.question)) return fail("validation_failed", `duplicate answer for question id: ${answer.question}`);
+      supplied.add(answer.question);
       if (!ids.has(answer.question)) return fail("validation_failed", `unknown question id: ${answer.question}`);
     }
+    const answers = this.mergeAnswers(task, op);
+    const seen = new Set(answers.map(answer => answer.question));
     const missing = task.questions.filter(question => !seen.has(question.id));
     if (missing.length) return fail("validation_failed", `missing answers for question(s): ${missing.map(question => `${question.id} (${question.text})`).join("; ")}. Re-read the task, then retry with status:"completed" and answers:[{question:"<question id>",answer:"<truthful answer>",evidence:"path/to/file.md#Heading, path/to/file.ts#L1-L2, or tool:<ToolName>#<n> for a live tool result from this session"}] for every listed question; do not invent answers or evidence`);
     for (const answer of answers) {
@@ -668,7 +689,7 @@ export class TaskManager {
     // trebol#127): agents routinely work in an isolated worktree while the
     // host process keeps the main checkout as cwd, and absolute citations
     // into that worktree must resolve too.
-    const roots = [resolvePath(this.options.workspaceRoot), ...this.linkedWorktreeRoots()];
+    const roots = [resolvePath(this.options.workspaceRoot), ...this.linkedWorktreeRoots(), ...(this.options.evidenceRoots ?? []).map(root => resolvePath(root))];
     for (const root of roots) {
       const file = resolvePath(root, match[1]);
       const rel = relativePath(root, file);
@@ -884,12 +905,11 @@ export class TaskManager {
     const parentTaskId = op.parentTaskId === undefined
       ? task.parentTaskId
       : target(op.parentTaskId) || undefined;
-    const questionsChanged = op.questions !== undefined && JSON.stringify(op.questions) !== JSON.stringify(task.questions);
-    // Answers are tied to the questions they answer, not to the status. Only
-    // a genuine change of questions invalidates them; reopening a completed
-    // task used to erase them silently, so the next completion failed with
-    // "missing answers" for work that had already been evidenced.
-    const answers = questionsChanged ? undefined : (op.answers ? clone(op.answers) : task.answers);
+    // Answers are tied to the questions they answer, not to the status.
+    // Reopening keeps them; a changed or removed question drops only its own
+    // answer, and supplied answers merge over saved ones by question ID.
+    const merged = this.mergeAnswers(task, op);
+    const answers = merged.length ? merged : undefined;
     Object.assign(task, { subject:op.subject?.trim()||task.subject, description:op.description??task.description, activeForm:op.activeForm??task.activeForm, category:op.category??task.category, priority:op.priority??task.priority, metadata:mergedMetadata, questions:op.questions ? clone(op.questions) : task.questions, answers, status:op.status??task.status, active:op.active??task.active, parentTaskId, dependsOn:deps, updatedAt:goNow() });
     if (op.status === "in_progress") {
       for (const other of this.state.tasks) other.active = other.id === id;
