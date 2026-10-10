@@ -77,3 +77,13 @@ describe('MCP registration to task evidence integration',()=>{
   } finally {await mcp.close();vi.unstubAllGlobals();}
  });
 });
+
+describe('atomic cancellation rollback',()=>{
+ it('rolls back a successful prefix when cancellation occurs before the next operation',async()=>{
+  const {TaskManager}=await import('../src/task-manage.js');const manager=new TaskManager();
+  let checks=0;const signal={get aborted(){return ++checks>1;}} as AbortSignal;
+  const before=manager.snapshot().tasks;
+  const batch=manager.execute({mode:'atomic',operations:[{...create.operations[0],key:'first'} as any,{...create.operations[0],key:'second'} as any]},signal);
+  expect(batch.status).toBe('failed');expect(manager.snapshot().tasks).toEqual(before);
+ });
+});

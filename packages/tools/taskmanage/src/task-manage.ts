@@ -814,6 +814,7 @@ export class TaskManager {
     if (params.mode === "atomic" && !stopped &&
       ops.some((op, i) => (op.op === "create" || op.op === "update") && results[i]?.status === "succeeded")) this.commit();
     if (params.mode === "atomic" && stopped) {
+      this.restore(before); // Includes cancellation, which bypasses run() failure handling.
       const failedIndex = results.findIndex(r => r.status === "failed");
       for (let i = 0; i < failedIndex; i++) {
         results[i] = { ...results[i], status: "failed", data: undefined,

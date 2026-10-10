@@ -80,3 +80,21 @@ The earlier 41-failure result used macOS's noncanonical /var temp path; use the
 canonical-path result above for this host. Earlier limitations about missing
 citation suggestions and absence of MCP registration coverage are superseded.
 Independent review remains unavailable and has not been represented as a PASS.
+
+## Final direct coverage audit
+
+Final-commit full rerun initially passed 918 tests with 9 existing skips. Audit
+then found a missing cancellation branch: an atomic batch cancelled after its
+first successful operation kept that mutation in memory. Added a red regression
+and fixed rollback in the atomic stopped path. Full rerun after that fix:
+**919 passed, 9 skipped, zero failures**, 150 passing files / 7 skipped files.
+TaskManage build and diff whitespace checks passed.
+
+Remaining audit gaps (not claimed covered): live third-party adapter/provider
+sessions, all host-policy integrations, canonical path identity under filesystem
+TOCTOU changes, and exhaustive linked-worktree removal/recreation combinations.
+No new aliases or extra roots are granted by default. Host configuration is an
+explicit integration API, not a new user-facing permission workflow.
+
+Independent review remains blocked by delegated agents returning unrelated work.
+This report is direct implementation verification, not independent approval.
