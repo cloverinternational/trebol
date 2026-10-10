@@ -87,3 +87,17 @@ describe('atomic cancellation rollback',()=>{
   expect(batch.status).toBe('failed');expect(manager.snapshot().tasks).toEqual(before);
  });
 });
+
+describe('historical alias migration safety',()=>{
+ it('does not reinterpret a retained alias using a new host mapping',()=>{
+  const tools:any[]=[];const handlers=new Map<string,Function>();
+  const entries:any[]=[{type:'message',message:{role:'toolResult',toolName:'Other'}}];
+  const manager=registerTaskManage({registerTool:(t:any)=>tools.push(t),appendEntry:()=>{},on:(n:string,h:Function)=>handlers.set(n,h)} as any,undefined,{toolAliases:{legacy:['Other']}});
+  handlers.get('session_start')!({}, {sessionManager:{getEntries:()=>entries}});
+  manager.execute(create as any);
+  manager.execute({operations:[{key:'save',op:'update',taskId:'1',answers:[{question:'q',answer:'historical',evidence:'tool:legacy'}]}]});
+  // Restore a historical snapshot whose alias provenance is unavailable.
+  const snapshot=manager.snapshot();snapshot.tasks[0].answers![0].evidence='tool:legacy';manager.restore(snapshot);
+  expect(manager.execute({operations:[{key:'finish',op:'update',taskId:'1',status:'completed'}]}).status).toBe('failed');
+ });
+});

@@ -52,3 +52,11 @@ or MCP-prefix stripping occurs. Default registration invents no aliases.
 Rejected operations remain atomic. Save a note on a blocked pending task in its
 own operation rather than coupling it to activation. Sequential batches retain
 the successful prefix; atomic batches roll back all state changes.
+
+The legacy `resolveEvidence` callback is an exclusive trusted resolver. Combining
+it with `evidenceRoots` or `canReadEvidence` is rejected; hosts must use either
+complete custom resolution or built-in containment plus policy. Worktree discovery
+is cached only within one execution batch and refreshed on the next call.
+Retained historical alias references are deliberately not migrated using a new
+alias map: without their original mapping that could change what they cite.
+Resubmit a verified canonical citation when a historical alias no longer resolves.

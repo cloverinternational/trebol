@@ -6,6 +6,8 @@ Release metadata is kept in `package.json`, `update-manifest.json`, and this fil
 
 ### Fixed
 
+- TaskManage reuses saved answers with evidence revalidation, supports trusted evidence roots and explicit aliases, reports actionable citation errors, rebinds on session switches, and rolls back atomic cancellation. Add regression coverage and isolate hook-test environment state.
+
 - Headless sub-agents no longer send `temperature`; `claude-haiku-5-5` rejects it with a 400. Model-default temperature is removed in headless mode too.
 - Restore the bounded, centered overlay options for the `/btw` side-question view.
 - Running-work detail view: PageUp/PageDown only scroll in detail mode.

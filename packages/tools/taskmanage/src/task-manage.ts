@@ -415,7 +415,9 @@ export class TaskManager {
     private readonly emitOperation?: (event: OperationEvent) => void,
     private readonly options: TaskManagerOptions = {},
   private worktrees: { at: number; roots: string[] } | undefined = undefined,
-  ) {}
+  ) {
+    if (options.resolveEvidence && (options.evidenceRoots !== undefined || options.canReadEvidence !== undefined)) throw new Error("resolveEvidence is an exclusive trusted resolver; do not combine it with evidenceRoots or canReadEvidence");
+  }
   snapshot(): State { return clone(this.state); }
   metrics(): TaskMetrics { return { ...this.stats }; }
   /** Append a compact, already-sanitized tool observation to the focused task. */
@@ -688,7 +690,10 @@ export class TaskManager {
    */
   private evidenceReason = "unavailable";
   private resolveEvidence(reference: string): boolean {
-    if (this.options.resolveEvidence) return this.options.resolveEvidence(reference) === true;
+    if (this.options.resolveEvidence) {
+      if (this.options.evidenceRoots !== undefined || this.options.canReadEvidence !== undefined) { this.evidenceReason = "conflicting_resolver_policy"; return false; }
+      return this.options.resolveEvidence(reference) === true;
+    }
     if (/^tool:/i.test(reference)) { this.evidenceReason = "tool_result_unavailable: use an exact registered tool name and a current-branch result index" + (this.options.sessionEvidenceHints?.() ?? ""); return this.options.resolveSessionEvidence?.(reference) === true; }
     const match = /^([^#]+?)(?:#(L\d+(?:-L\d+)?|[^#\s].*))?$/.exec(reference.trim());
     if (!match || !this.options.workspaceRoot) { this.evidenceReason = "invalid_reference_or_missing_workspace"; return false; }
@@ -742,12 +747,12 @@ export class TaskManager {
   }
   /**
    * Linked worktrees of the workspace repository, primary root excluded.
-   * Discovery refreshes `git worktree list` for each evidence check
+   * Discovery refreshes `git worktree list` once per execute batch
    * and degrades to an empty list outside a git repository or without git.
    */
   private linkedWorktreeRoots(): string[] {
     const now = Date.now();
-    {
+    if (!this.worktrees) {
       let list: string[] = [];
       try {
         const out = execFileSync("git", ["-C", String(this.options.workspaceRoot), "worktree", "list", "--porcelain"], { timeout: 5000, stdio: ["ignore", "pipe", "ignore"] }).toString();
@@ -760,6 +765,7 @@ export class TaskManager {
     return this.worktrees.roots.filter(root => root !== primary).filter(root => existsSync(root));
   }
   execute(params: Params, signal?: AbortSignal): Batch {
+    this.worktrees = undefined; // One discovery per batch; never retain revoked worktrees across calls.
     if (!isObj(params) || Object.keys(params).some(key => key !== "operations" && key !== "mode"))
       return { status: "failed", results: [{ key: "batch", op: "list", status: "failed", error: fail("validation_failed", "unknown batch field") }] };
     const ops = Array.isArray(params.operations)
@@ -1032,22 +1038,36 @@ export class TaskManager {
  * the same turn are visible. Unknown tools, absent indices and out-of-range
  * indices all fail closed.
  */
-export function resolveToolEvidence(reference: string, sessionManager: { getEntries(): readonly unknown[]; getBranch?(): readonly unknown[] } | undefined, aliases: Readonly<Record<string, readonly string[]>> = {}): boolean {
+export interface EvidenceSessionManager {
+  getEntries(): readonly unknown[];
+  getBranch?(): readonly unknown[];
+}
+interface EvidenceContext {
+  sessionManager?: EvidenceSessionManager;
+  ui?: { setWidget(key: string, content: unknown): void };
+}
+function sessionResultNames(session: EvidenceSessionManager | undefined): string[] {
+  if (!session) return [];
+  const entries = session.getBranch?.() ?? session.getEntries();
+  return entries.flatMap(entry => {
+    if (!isObj(entry) || entry.type !== "message" || !isObj(entry.message)) return [];
+    return entry.message.role === "toolResult" && typeof entry.message.toolName === "string" ? [entry.message.toolName] : [];
+  });
+}
+export function resolveToolEvidence(reference: string, sessionManager: EvidenceSessionManager | undefined, aliases: Readonly<Record<string, readonly string[]>> = {}): boolean {
   const match = /^tool:([A-Za-z0-9_-]+)(?:#(\d+))?$/i.exec(reference.trim());
   if (!match || !sessionManager) return false;
   let name = match[1];
-  const entries = (sessionManager.getBranch?.() ?? sessionManager.getEntries()) as any[];
-  const exact = entries.some(entry => entry?.type === "message" && entry.message?.role === "toolResult" && entry.message?.toolName === name);
-  if (!exact && aliases[name]) {
+  const names = sessionResultNames(sessionManager);
+  if (!names.includes(name) && aliases[name]) {
     const targets = [...new Set(aliases[name])];
     if (targets.length !== 1) return false;
     name = targets[0];
   }
-  const results = ((sessionManager.getBranch?.() ?? sessionManager.getEntries()) as any[])
-    .filter(entry => entry?.type === "message" && entry.message?.role === "toolResult" && entry.message?.toolName === name);
-  if (!match[2]) return results.length > 0;
+  const count = names.filter(value => value === name).length;
+  if (!match[2]) return count > 0;
   const index = Number(match[2]);
-  return index >= 1 && index <= results.length;
+  return index >= 1 && index <= count;
 }
 
 export function registerTaskManage(pi: { registerTool(tool: unknown): void; appendEntry(type: string, data: unknown): void; on(event: string, handler: (event: unknown, ctx: {sessionManager?: {getEntries(): readonly unknown[]; getBranch?(): readonly unknown[]}; ui?: {setWidget(key: string, content: unknown): void}})=>void): void }, presentation = taskManageRenderers, options: TaskManagerOptions = {}): TaskManager {
@@ -1057,7 +1077,7 @@ export function registerTaskManage(pi: { registerTool(tool: unknown): void; appe
     options,
   );
   let ui: {setWidget(key: string, content: unknown): void} | undefined;
-  let sessionManager: { getEntries(): readonly unknown[]; getBranch?(): readonly unknown[] } | undefined;
+  let sessionManager: EvidenceSessionManager | undefined;
   const refreshWidget = (ctx?: {ui?: {setWidget(key: string, content: unknown): void}}) => {
     ui = ctx?.ui ?? ui;
     if (!ui) return;
@@ -1067,7 +1087,7 @@ export function registerTaskManage(pi: { registerTool(tool: unknown): void; appe
       ? ((_tui: unknown, theme: RenderTheme) => taskWidgetRenderer(tasks, theme))
       : undefined);
   };
-  const bindSession = (_event: unknown, ctx: any) => {
+  const bindSession = (_event: unknown, ctx: EvidenceContext) => {
     sessionManager = ctx.sessionManager;
     manager.rehydrate((ctx.sessionManager?.getBranch?.() ?? ctx.sessionManager?.getEntries() ?? []) as JournalEntry[]);
     refreshWidget(ctx);
@@ -1076,9 +1096,8 @@ export function registerTaskManage(pi: { registerTool(tool: unknown): void; appe
   pi.on("session_switch", bindSession);
   options.sessionEvidenceHints ??= () => {
     const counts = new Map<string, number>();
-    for (const entry of (sessionManager?.getBranch?.() ?? sessionManager?.getEntries() ?? []) as any[]) {
-      const name = entry?.message?.toolName;
-      if (entry?.type === "message" && entry.message?.role === "toolResult" && typeof name === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(name)) counts.set(name, (counts.get(name) ?? 0) + 1);
+    for (const name of sessionResultNames(sessionManager)) {
+      if (/^[A-Za-z0-9_-]{1,64}$/.test(name)) counts.set(name, (counts.get(name) ?? 0) + 1);
     }
     return counts.size ? `; available: ${[...counts].slice(0, 8).map(([name, count]) => `tool:${name}#${count}`).join(", ")}` : "; no tool results on the current branch";
   };
