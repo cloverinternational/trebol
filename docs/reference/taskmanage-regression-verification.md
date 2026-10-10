@@ -55,3 +55,28 @@ an independent PASS and changes are not merge-ready on that basis alone.
 
 No push, merge, deployment, or GitHub issue closure was performed. Main remains
 unchanged except the approved untracked plan; existing user files are preserved.
+
+## Continuation: lifecycle and transport coverage
+
+- New lifecycle slice first ran 2 failures / 2 passes: session switching retained
+  stale tasks/results, and error messages lacked valid citation suggestions.
+  Both are fixed. session_switch now rehydrates/rebinds like session_start.
+- Another red regression demonstrated a deleted workspace root throwing instead
+  of rejecting evidence; fixed with safe root discovery and IO reason handling.
+- Added cancellation-before-create/completion, recovery, simultaneous tool-entry,
+  same-turn result, current-branch and exact MCP-name controls.
+- Exercised actual MCPManager discovery/registration/execution into TaskManage
+  evidence with a deterministic mocked HTTP response. This tests repository
+  transport code, not third-party adapters or a live remote service.
+- Canonical suggestions are bounded to eight names (64 characters each), contain
+  latest per-tool indices and never include tool output bodies.
+- Full suite with repository-prescribed macOS TMPDIR=/private/tmp: 917 passed,
+  9 existing skipped, zero failures before the final MCP integration test.
+  An earlier run had one background-shell timing failure; its isolated rerun
+  passed all 16 tests and the subsequent full run passed.
+- Workspace build and diff whitespace checks passed.
+
+The earlier 41-failure result used macOS's noncanonical /var temp path; use the
+canonical-path result above for this host. Earlier limitations about missing
+citation suggestions and absence of MCP registration coverage are superseded.
+Independent review remains unavailable and has not been represented as a PASS.

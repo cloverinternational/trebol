@@ -94,7 +94,7 @@ import { resolve as resolvePath, relative as relativePath, isAbsolute } from "no
 export type JournalEntry = { type: "pi-swarm-task-state"; data: VersionedSnapshot<State> | State } | OperationEvent;
 export interface State { nextId: number; tasks: Task[]; keys: Record<string, string> }
 /** `evidenceRoots` is host-owned trusted configuration; task input can never set it. */
-export interface TaskManagerOptions { workspaceRoot?: string; evidenceRoots?: readonly string[]; canReadEvidence?: (path: string) => boolean; toolAliases?: Readonly<Record<string, readonly string[]>>; canonicalizeToolEvidence?: (reference: string) => string; resolveEvidence?: (reference: string) => boolean | string; resolveSessionEvidence?: (reference: string) => boolean }
+export interface TaskManagerOptions { workspaceRoot?: string; evidenceRoots?: readonly string[]; canReadEvidence?: (path: string) => boolean; toolAliases?: Readonly<Record<string, readonly string[]>>; canonicalizeToolEvidence?: (reference: string) => string; sessionEvidenceHints?: () => string; resolveEvidence?: (reference: string) => boolean | string; resolveSessionEvidence?: (reference: string) => boolean }
 export interface TaskMetrics { mutations: number; reads: number; failures: number; lastRevision: number }
 
 const fail = (code: string, message: string, retryable = false): Failure => ({ code, message, retryable });
@@ -689,7 +689,7 @@ export class TaskManager {
   private evidenceReason = "unavailable";
   private resolveEvidence(reference: string): boolean {
     if (this.options.resolveEvidence) return this.options.resolveEvidence(reference) === true;
-    if (/^tool:/i.test(reference)) { this.evidenceReason = "tool_result_unavailable: use an exact registered tool name and a current-branch result index"; return this.options.resolveSessionEvidence?.(reference) === true; }
+    if (/^tool:/i.test(reference)) { this.evidenceReason = "tool_result_unavailable: use an exact registered tool name and a current-branch result index" + (this.options.sessionEvidenceHints?.() ?? ""); return this.options.resolveSessionEvidence?.(reference) === true; }
     const match = /^([^#]+?)(?:#(L\d+(?:-L\d+)?|[^#\s].*))?$/.exec(reference.trim());
     if (!match || !this.options.workspaceRoot) { this.evidenceReason = "invalid_reference_or_missing_workspace"; return false; }
     // A workspace-relative citation resolves against the primary root first;
@@ -732,7 +732,11 @@ export class TaskManager {
             heading.toLowerCase().replace(/[^\p{L}\p{N} _-]/gu, "").replace(/ /g, "-") === section ||
             loose(heading) === loose(section);
         });
-      } catch { continue; }
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException)?.code;
+        this.evidenceReason = code === "ENOENT" || code === "ENOTDIR" ? "missing_file" : code === "EACCES" || code === "EPERM" ? "access_denied" : "evidence_io_error";
+        continue;
+      }
     }
     return false;
   }
@@ -751,7 +755,8 @@ export class TaskManager {
       } catch { list = []; }
       this.worktrees = { at: now, roots: list };
     }
-    const primary = this.options.workspaceRoot ? realpathSync(this.options.workspaceRoot) : "";
+    let primary = "";
+    try { primary = this.options.workspaceRoot ? realpathSync(this.options.workspaceRoot) : ""; } catch { /* Missing roots fail evidence resolution, not execution. */ }
     return this.worktrees.roots.filter(root => root !== primary).filter(root => existsSync(root));
   }
   execute(params: Params, signal?: AbortSignal): Batch {
@@ -1061,11 +1066,21 @@ export function registerTaskManage(pi: { registerTool(tool: unknown): void; appe
       ? ((_tui: unknown, theme: RenderTheme) => taskWidgetRenderer(tasks, theme))
       : undefined);
   };
-  pi.on("session_start", (_event, ctx) => {
+  const bindSession = (_event: unknown, ctx: any) => {
     sessionManager = ctx.sessionManager;
     manager.rehydrate((ctx.sessionManager?.getBranch?.() ?? ctx.sessionManager?.getEntries() ?? []) as JournalEntry[]);
     refreshWidget(ctx);
-  });
+  };
+  pi.on("session_start", bindSession);
+  pi.on("session_switch", bindSession);
+  options.sessionEvidenceHints ??= () => {
+    const counts = new Map<string, number>();
+    for (const entry of (sessionManager?.getBranch?.() ?? sessionManager?.getEntries() ?? []) as any[]) {
+      const name = entry?.message?.toolName;
+      if (entry?.type === "message" && entry.message?.role === "toolResult" && typeof name === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(name)) counts.set(name, (counts.get(name) ?? 0) + 1);
+    }
+    return counts.size ? `; available: ${[...counts].slice(0, 8).map(([name, count]) => `tool:${name}#${count}`).join(", ")}` : "; no tool results on the current branch";
+  };
   // Persist canonical names so later alias configuration cannot retarget saved answers.
   options.canonicalizeToolEvidence ??= reference => {
     const match = /^tool:([A-Za-z0-9_-]+)(#\d+)?$/i.exec(reference.trim());

@@ -120,3 +120,16 @@ describe('session evidence safety controls', () => {
     expect(resolveToolEvidence('tool:Bash',session,{Bash:['Other','Third']})).toBe(true);
   });
 });
+
+describe('missing workspace and IO safety',()=>{
+ it('returns an evidence failure instead of throwing after the workspace disappears',()=>{
+  const root=mkdtempSync(join(tmpdir(),'tm-removed-'));
+  const m=new TaskManager(undefined,undefined,{workspaceRoot:root});
+  m.execute({operations:[{key:'c',op:'create',subject:'removed',questions:[{id:'q',text:'Proof?'}]}]});
+  rmSync(root,{recursive:true,force:true});
+  let outcome:any;
+  expect(()=>{outcome=m.execute({operations:[{key:'d',op:'update',taskId:'1',status:'completed',answers:[{question:'q',answer:'yes',evidence:'proof.md'}]}]});}).not.toThrow();
+  expect(outcome.status).toBe('failed');
+  expect(outcome.results[0].error.message).toContain('missing_file');
+ });
+});

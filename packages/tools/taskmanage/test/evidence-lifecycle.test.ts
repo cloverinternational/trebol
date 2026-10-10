@@ -1,0 +1,79 @@
+import {describe,it,expect,vi} from 'vitest';
+import {registerTaskManage} from '../src/task-manage.js';
+function fixture() {
+ const handlers=new Map<string,Function[]>(),tools:any[]=[];
+ const pi={registerTool:(t:any)=>tools.push(t),appendEntry:()=>{},on:(e:string,h:Function)=>handlers.set(e,[...(handlers.get(e)??[]),h])};
+ const manager=registerTaskManage(pi as any);
+ const bind=(event:string,entries:any[])=>{for(const h of handlers.get(event)??[])h({}, {sessionManager:{getEntries:()=>entries,getBranch:()=>entries}});};
+ return {manager,tool:tools[0],bind};
+}
+const result={type:'message',message:{role:'toolResult',toolName:'Bash',content:[{type:'text',text:'PRIVATE_RESULT_BODY'}]}};
+const create={operations:[{key:'c',op:'create',subject:'lifecycle',questions:[{id:'q',text:'Proof?'}]}]};
+const done=(evidence:string)=>({operations:[{key:'d',op:'update',taskId:'1',status:'completed',answers:[{question:'q',answer:'yes',evidence}]}]});
+describe('evidence lifecycle',()=>{
+ it('rebinds session_switch and discards previous-session tasks/results',async()=>{
+  const f=fixture();f.bind('session_start',[result]);await f.tool.execute('c',create);
+  f.bind('session_switch',[]);
+  expect(f.manager.snapshot().tasks).toHaveLength(0);
+  await f.tool.execute('c2',create);
+  expect((await f.tool.execute('d',done('tool:Bash'))).isError).toBe(true);
+ });
+ it('pre-aborted execution persists no tasks',async()=>{
+  const f=fixture();f.bind('session_start',[]);const controller=new AbortController();controller.abort();
+  expect((await f.tool.execute('c',create,controller.signal)).isError).toBe(true);
+  expect(f.manager.snapshot().tasks).toHaveLength(0);
+ });
+ it('suggests bounded canonical citations without exposing result bodies',async()=>{
+  const f=fixture();f.bind('session_start',[result]);await f.tool.execute('c',create);
+  const failure=await f.tool.execute('d',done('tool:Typo'));
+  const message=JSON.stringify(failure);
+  expect(message).toContain('tool:Bash#1');expect(message).not.toContain('PRIVATE_RESULT_BODY');
+ });
+ it('sees results appended in the same session turn',async()=>{
+  const f=fixture(),entries:any[]=[];f.bind('session_start',entries);await f.tool.execute('c',create);
+  entries.push(result);expect((await f.tool.execute('d',done('tool:Bash#1'))).isError).toBe(false);
+ });
+});
+
+describe('parallel entry and cancelled completion controls',()=>{
+ it('serializes synchronous manager mutations from concurrent tool invocations',async()=>{
+  const f=fixture();f.bind('session_start',[result]);
+  await Promise.all(['a','b'].map(key=>f.tool.execute(key,{operations:[{...create.operations[0],key}]})));
+  expect(f.manager.snapshot().tasks.map(t=>t.id)).toEqual(['1','2']);
+  expect(f.manager.snapshot().tasks.every(t=>t.status==='pending')).toBe(true);
+ });
+ it('cancelled completion preserves saved answers and allows recovery',async()=>{
+  const f=fixture();f.bind('session_start',[result]);await f.tool.execute('c',create);
+  const abort=new AbortController();abort.abort();
+  const before=f.manager.snapshot().tasks;
+  expect((await f.tool.execute('cancel',done('tool:Bash'),abort.signal)).isError).toBe(true);
+  expect(f.manager.snapshot().tasks).toEqual(before);
+  expect((await f.tool.execute('retry',done('tool:Bash'))).isError).toBe(false);
+ });
+ it('never treats a provider-visible prefix as an implicit alias',async()=>{
+  const f=fixture();f.bind('session_start',[{...result,message:{...result.message,toolName:'mcp__github__list_issues'}}]);
+  await f.tool.execute('c',create);
+  expect((await f.tool.execute('wrong',done('tool:list_issues'))).isError).toBe(true);
+  expect((await f.tool.execute('exact',done('tool:mcp__github__list_issues'))).isError).toBe(false);
+ });
+});
+
+describe('MCP registration to task evidence integration',()=>{
+ it('uses the actual MCPManager registered name without guessing aliases',async()=>{
+  const {MCPManager}=await import('../../mcp/src/index.js');
+  const tools:any[]=[];
+  vi.stubGlobal('fetch',vi.fn(async(_url:any,init:any)=>{
+   const request=JSON.parse(init.body);
+   const payload=request.method==='tools/list'?{tools:[{name:'inspect',inputSchema:{type:'object'}}]}:request.method==='tools/call'?{content:[{type:'text',text:'fixture result'}]}:{};
+   return new Response(JSON.stringify({jsonrpc:'2.0',id:request.id,result:payload}),{status:200});
+  }));
+  const mcp=new MCPManager([{id:'fixture',type:'http',url:'http://localhost.invalid/mcp'}],{registerTool:t=>tools.push(t)});
+  try {
+   await mcp.discover('fixture');expect(tools[0].name).toBe('mcp__fixture__inspect');
+   const output=await tools[0].execute('call',{});
+   const f=fixture();f.bind('session_start',[{type:'message',message:{role:'toolResult',toolName:tools[0].name,...output}}]);
+   await f.tool.execute('c',create);
+   expect((await f.tool.execute('d',done(`tool:${tools[0].name}#1`))).isError).toBe(false);
+  } finally {await mcp.close();vi.unstubAllGlobals();}
+ });
+});
