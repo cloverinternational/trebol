@@ -30,3 +30,10 @@ it('contains host callback exceptions and rolls back atomic prefixes without lea
  expect(JSON.stringify(batch)).not.toContain('SECRET_HOST_DETAIL');
  expect(batch.results[1].error?.code).toBe('validation_failed');
 });
+it('preserves legacy answers on unrelated edits without permitting questionless completion',()=>{
+ const m=new TaskManager();m.execute({operations:[{key:'c',op:'create',subject:'legacy',questions:[{id:'q',text:'Proof?'}]}]});
+ const state=m.snapshot();state.tasks[0].questions=undefined;state.tasks[0].answers=[{question:'q',answer:'historical',evidence:'proof.md'}];m.restore(state);
+ expect(m.execute({operations:[{key:'note',op:'update',taskId:'1',addNote:'retained'}]}).status).toBe('succeeded');
+ expect(m.snapshot().tasks[0].answers).toEqual(state.tasks[0].answers);
+ expect(m.execute({operations:[{key:'done',op:'update',taskId:'1',status:'completed'}]}).status).toBe('failed');
+});

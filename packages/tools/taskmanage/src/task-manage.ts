@@ -644,6 +644,7 @@ export class TaskManager {
   }
   /** Supplied answers override saved ones by question ID; order follows the question list. */
   private mergeAnswers(task: Task, op: Operation): TaskAnswer[] {
+    if (op.questions === undefined && !task.questions?.length && !op.answers?.length) return clone(task.answers ?? []);
     const questions = op.questions ?? task.questions ?? [];
     const merged = new Map(this.retainedAnswers(task, op.questions).map(answer => [answer.question, answer]));
     for (const answer of op.answers ?? []) {
