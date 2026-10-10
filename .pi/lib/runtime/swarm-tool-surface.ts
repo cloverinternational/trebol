@@ -31,7 +31,7 @@ export function loadSwarmCanonicalTools(): Map<string, CanonicalTool> {
   // TaskManage's schema is owned by the tool module itself.
   const task = conditionalCache.get("TaskManage");
   if (task) conditionalCache.set("TaskManage", {...task, parameters:taskManageSchema,
-    description:"Manage ordered tasks. Every new task requires 1–12 task-specific questions {id,text}. Complete with answers [{question,answer,evidence}] covering every question in the same update; evidence must be a workspace file#Heading or file#Lx-Ly reference, or tool:<ToolName>[#<n>] (1-based) for a live tool result from this session. Repair questionless legacy tasks before activation/completion. Parent completion requires finished children. Use parentTaskId for hierarchy and addBlockedBy for dependencies. Atomic batches roll back on failure. Read errors and change invalid input before retrying; never fabricate answers."});
+    description:"Manage ordered tasks. Every new task requires 1–12 task-specific questions {id,text}. Complete using saved answers plus supplied missing or replacement answers [{question,answer,evidence}]; all questions must be covered and every evidence reference is revalidated; evidence must be a workspace file#Heading or file#Lx-Ly reference, or tool:<ToolName>[#<n>] (1-based) for a live tool result from this session. Repair questionless legacy tasks before activation/completion. Parent completion requires finished children. Use parentTaskId for hierarchy and addBlockedBy for dependencies. Atomic batches roll back on failure. Read errors and change invalid input before retrying; never fabricate answers."});
   return conditionalCache;
 }
 

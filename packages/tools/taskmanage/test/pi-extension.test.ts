@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import extension, { registerTaskManageExtension } from "../../../../extensions/taskmanage/extension.ts";
 import promptExtension from "../../../../extensions/swarm-prompt/extension.ts";
 import thinkingExtension from "../../../../extensions/swarm-thinking/extension.ts";
@@ -7,6 +7,12 @@ import { PERMISSIVE_PARAMETERS, loadSwarmToolSurface, overlaySwarmToolSchemas } 
 import { bashCallComponent, bashResultComponent } from "../../../../.pi/lib/tools/swarm-bash.ts";
 
 type Handler = (event: any, ctx: any) => unknown;
+
+// The gate bypasses itself when PI_SWARM_SUBAGENT=1 (inherited from a subagent parent shell).
+// Isolate that ambient state so these tests exercise the parent-session gate deterministically.
+let savedSubagentEnv: string | undefined;
+beforeEach(() => { savedSubagentEnv = process.env.PI_SWARM_SUBAGENT; delete process.env.PI_SWARM_SUBAGENT; });
+afterEach(() => { if (savedSubagentEnv === undefined) delete process.env.PI_SWARM_SUBAGENT; else process.env.PI_SWARM_SUBAGENT = savedSubagentEnv; });
 
 function fakePi(entries: any[] = []) {
   const tools: any[] = [];

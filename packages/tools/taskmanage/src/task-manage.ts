@@ -93,7 +93,8 @@ import { resolve as resolvePath, relative as relativePath, isAbsolute } from "no
 
 export type JournalEntry = { type: "pi-swarm-task-state"; data: VersionedSnapshot<State> | State } | OperationEvent;
 export interface State { nextId: number; tasks: Task[]; keys: Record<string, string> }
-export interface TaskManagerOptions { workspaceRoot?: string; resolveEvidence?: (reference: string) => boolean | string; resolveSessionEvidence?: (reference: string) => boolean }
+/** `evidenceRoots` is host-owned trusted configuration; task input can never set it. */
+export interface TaskManagerOptions { workspaceRoot?: string; evidenceRoots?: readonly string[]; canReadEvidence?: (path: string) => boolean; toolAliases?: Readonly<Record<string, readonly string[]>>; canonicalizeToolEvidence?: (reference: string) => string; sessionEvidenceHints?: () => string; resolveEvidence?: (reference: string) => boolean | string; resolveSessionEvidence?: (reference: string) => boolean }
 export interface TaskMetrics { mutations: number; reads: number; failures: number; lastRevision: number }
 
 const fail = (code: string, message: string, retryable = false): Failure => ({ code, message, retryable });
@@ -414,7 +415,9 @@ export class TaskManager {
     private readonly emitOperation?: (event: OperationEvent) => void,
     private readonly options: TaskManagerOptions = {},
   private worktrees: { at: number; roots: string[] } | undefined = undefined,
-  ) {}
+  ) {
+    if (options.resolveEvidence && (options.evidenceRoots !== undefined || options.canReadEvidence !== undefined)) throw new Error("resolveEvidence is an exclusive trusted resolver; do not combine it with evidenceRoots or canReadEvidence");
+  }
   snapshot(): State { return clone(this.state); }
   metrics(): TaskMetrics { return { ...this.stats }; }
   /** Append a compact, already-sanitized tool observation to the focused task. */
@@ -453,7 +456,7 @@ export class TaskManager {
       if (normalized.parentTaskId === normalized.id || typeof normalized.parentTaskId !== "string") delete normalized.parentTaskId;
       normalized.audit_events = Array.isArray(normalized.audit_events) ? normalized.audit_events.filter(event =>
         isObj(event) && typeof event.at === "string" && typeof event.action === "string") as AuditEvent[] : [];
-      normalized.typed_notes = Array.isArray(normalized.typed_notes) ? normalized.typed_notes : [];
+      if (!Array.isArray(normalized.typed_notes)) delete normalized.typed_notes;
       return normalized;
     });
     const ids = new Set(tasks.map(task => task.id));
@@ -627,27 +630,55 @@ export class TaskManager {
     const duplicate = answers.findIndex((answer, index) => answers.findIndex(other => (other as TaskAnswer).question === (answer as TaskAnswer).question) !== index);
     if (duplicate >= 0) return fail("validation_failed", `operation ${key}: answers[${duplicate}].question duplicates an earlier question id`);
   }
+  /**
+   * Saved answers survive when their question still exists with identical
+   * text; a reworded or removed question drops only its own answer.
+   */
+  private retainedAnswers(task: Task, questions: TaskQuestion[] | undefined): TaskAnswer[] {
+    if (!questions) return [...(task.answers ?? [])];
+    const textById = new Map((task.questions ?? []).map(question => [question.id, question.text]));
+    return (task.answers ?? []).filter(answer => {
+      const current = questions.find(question => question.id === answer.question);
+      return !!current && textById.get(answer.question) === current.text;
+    });
+  }
+  /** Supplied answers override saved ones by question ID; order follows the question list. */
+  private mergeAnswers(task: Task, op: Operation): TaskAnswer[] {
+    if (op.questions === undefined && !task.questions?.length && !op.answers?.length) return clone(task.answers ?? []);
+    const questions = op.questions ?? task.questions ?? [];
+    const merged = new Map(this.retainedAnswers(task, op.questions).map(answer => [answer.question, answer]));
+    for (const answer of op.answers ?? []) {
+      const saved = clone(answer);
+      if (this.options.canonicalizeToolEvidence) saved.evidence = splitEvidence(saved.evidence).map(ref => this.options.canonicalizeToolEvidence!(ref)).join("; ");
+      merged.set(answer.question, saved);
+    }
+    return questions.filter(question => merged.has(question.id)).map(question => merged.get(question.id)!);
+  }
   private completionError(task: Task, op: Operation): Failure | undefined {
     if (task.status === "completed" && op.questions !== undefined && (op.status === undefined || op.status === "completed")) return fail("validation_failed", "reopen task before changing questions");
     if (op.status !== "completed" && op.status !== "in_progress") return;
     if (!task.questions?.length) return fail("validation_failed", `task ${task.id} is a legacy questionless task; repair it with task-specific questions before resuming or completing`);
     if (op.status !== "completed") return;
     if (op.questions !== undefined) return fail("validation_failed", "cannot replace or drop questions while completing a task");
-    const answers = op.answers ?? [];
     const ids = new Set<string>();
     const malformed = task.questions.some(question => !this.validQuestion(question) || ids.has(question.id) || !ids.add(question.id));
     if (malformed) return fail("validation_failed", `cannot complete task ${task.id}: task questions are malformed or duplicated. Re-read the task and repair questions before completing`);
-    const seen = new Set<string>();
-    for (const answer of answers) {
-      if (seen.has(answer.question)) return fail("validation_failed", `duplicate answer for question id: ${answer.question}`);
-      seen.add(answer.question);
+    const supplied = new Set<string>();
+    for (const answer of op.answers ?? []) {
+      if (supplied.has(answer.question)) return fail("validation_failed", `duplicate answer for question id: ${answer.question}`);
+      supplied.add(answer.question);
       if (!ids.has(answer.question)) return fail("validation_failed", `unknown question id: ${answer.question}`);
     }
+    const answers = this.mergeAnswers(task, op);
+    const seen = new Set(answers.map(answer => answer.question));
     const missing = task.questions.filter(question => !seen.has(question.id));
     if (missing.length) return fail("validation_failed", `missing answers for question(s): ${missing.map(question => `${question.id} (${question.text})`).join("; ")}. Re-read the task, then retry with status:"completed" and answers:[{question:"<question id>",answer:"<truthful answer>",evidence:"path/to/file.md#Heading, path/to/file.ts#L1-L2, or tool:<ToolName>#<n> for a live tool result from this session"}] for every listed question; do not invent answers or evidence`);
     for (const answer of answers) {
       if (!answer.evidence) continue;
-      const unresolved = splitEvidence(answer.evidence).filter(reference => !this.resolveEvidence(reference));
+      const unresolved = splitEvidence(answer.evidence).flatMap(reference => {
+        this.evidenceReason = "unavailable";
+        return this.resolveEvidence(reference) ? [] : [`${reference} (${this.evidenceReason})`];
+      });
       // Name the reference that failed: echoing the whole string forces the
       // caller to bisect a citation list to find the one bad entry.
       if (unresolved.length) return fail("validation_failed", `evidence reference is unavailable: ${unresolved.join("; ")}`);
@@ -658,32 +689,42 @@ export class TaskManager {
    * file; `#Lx`, `#Lx-Ly` and `#Heading` narrow it. Multi-file citations are
    * split by `splitEvidence` before reaching here.
    */
+  private evidenceReason = "unavailable";
   private resolveEvidence(reference: string): boolean {
-    if (this.options.resolveEvidence) return this.options.resolveEvidence(reference) === true;
-    if (/^tool:/i.test(reference)) return this.options.resolveSessionEvidence?.(reference) === true;
+    if (this.options.resolveEvidence) {
+      if (this.options.evidenceRoots !== undefined || this.options.canReadEvidence !== undefined) { this.evidenceReason = "conflicting_resolver_policy"; return false; }
+      return this.options.resolveEvidence(reference) === true;
+    }
+    if (/^tool:/i.test(reference)) { this.evidenceReason = "tool_result_unavailable: use an exact registered tool name and a current-branch result index" + (this.options.sessionEvidenceHints?.() ?? ""); return this.options.resolveSessionEvidence?.(reference) === true; }
     const match = /^([^#]+?)(?:#(L\d+(?:-L\d+)?|[^#\s].*))?$/.exec(reference.trim());
-    if (!match || !this.options.workspaceRoot) return false;
+    if (!match || !this.options.workspaceRoot) { this.evidenceReason = "invalid_reference_or_missing_workspace"; return false; }
     // A workspace-relative citation resolves against the primary root first;
     // failing that, against the repository's linked worktrees (trebol#124,
     // trebol#127): agents routinely work in an isolated worktree while the
     // host process keeps the main checkout as cwd, and absolute citations
     // into that worktree must resolve too.
-    const roots = [resolvePath(this.options.workspaceRoot), ...this.linkedWorktreeRoots()];
+    const roots = [resolvePath(this.options.workspaceRoot), ...this.linkedWorktreeRoots(), ...(this.options.evidenceRoots ?? []).map(root => resolvePath(root))];
+    this.evidenceReason = "outside_allowed_roots: use the workspace, a linked worktree, or a host-authorized evidence root";
     for (const root of roots) {
       const file = resolvePath(root, match[1]);
       const rel = relativePath(root, file);
       if (isAbsolute(rel) || rel === ".." || rel.startsWith("../")) continue;
       try {
+        this.evidenceReason = "missing_file";
         const physical = relativePath(realpathSync(root), realpathSync(file));
-        if (isAbsolute(physical) || physical === ".." || physical.startsWith("../")) continue;
-        const stat = statSync(file); if (!stat.isFile() || stat.size > 1024 * 1024) continue;
+        if (isAbsolute(physical) || physical === ".." || physical.startsWith("../")) { this.evidenceReason = "outside_allowed_roots: symlink escape"; continue; }
+        if (this.options.canReadEvidence && this.options.canReadEvidence(realpathSync(file)) !== true) { this.evidenceReason = "access_denied"; continue; }
+        const stat = statSync(file); if (!stat.isFile()) { this.evidenceReason = "not_a_file"; continue; }
+        if (stat.size > 1024 * 1024) { this.evidenceReason = "file_too_large"; continue; }
         const text = readFileSync(file, "utf8"), section = match[2];
         if (section === undefined) return true;
         const lines = /^L(\d+)(?:-L(\d+))?$/.exec(section);
         if (lines) {
           const start = Number(lines[1]), end = lines[2] === undefined ? start : Number(lines[2]);
+          this.evidenceReason = "invalid_line_range";
           return start >= 1 && end >= start && end <= text.split("\n").length;
         }
+        this.evidenceReason = "missing_heading";
         if (!/\.md$/i.test(file)) return false;
         // Headings legally contain ?, parentheses, commas and other punctuation
         // (trebol#36). Match the quoted section exactly, as a GitHub-style dash
@@ -697,18 +738,22 @@ export class TaskManager {
             heading.toLowerCase().replace(/[^\p{L}\p{N} _-]/gu, "").replace(/ /g, "-") === section ||
             loose(heading) === loose(section);
         });
-      } catch { continue; }
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException)?.code;
+        this.evidenceReason = code === "ENOENT" || code === "ENOTDIR" ? "missing_file" : code === "EACCES" || code === "EPERM" ? "access_denied" : "evidence_io_error";
+        continue;
+      }
     }
     return false;
   }
   /**
    * Linked worktrees of the workspace repository, primary root excluded.
-   * Discovery shells out to `git worktree list` at most once per 60 seconds
+   * Discovery refreshes `git worktree list` once per execute batch
    * and degrades to an empty list outside a git repository or without git.
    */
   private linkedWorktreeRoots(): string[] {
     const now = Date.now();
-    if (!this.worktrees || now - this.worktrees.at > 60_000) {
+    if (!this.worktrees) {
       let list: string[] = [];
       try {
         const out = execFileSync("git", ["-C", String(this.options.workspaceRoot), "worktree", "list", "--porcelain"], { timeout: 5000, stdio: ["ignore", "pipe", "ignore"] }).toString();
@@ -716,10 +761,12 @@ export class TaskManager {
       } catch { list = []; }
       this.worktrees = { at: now, roots: list };
     }
-    const primary = this.options.workspaceRoot ? realpathSync(this.options.workspaceRoot) : "";
+    let primary = "";
+    try { primary = this.options.workspaceRoot ? realpathSync(this.options.workspaceRoot) : ""; } catch { /* Missing roots fail evidence resolution, not execution. */ }
     return this.worktrees.roots.filter(root => root !== primary).filter(root => existsSync(root));
   }
   execute(params: Params, signal?: AbortSignal): Batch {
+    this.worktrees = undefined; // One discovery per batch; never retain revoked worktrees across calls.
     if (!isObj(params) || Object.keys(params).some(key => key !== "operations" && key !== "mode"))
       return { status: "failed", results: [{ key: "batch", op: "list", status: "failed", error: fail("validation_failed", "unknown batch field") }] };
     const ops = Array.isArray(params.operations)
@@ -752,7 +799,14 @@ export class TaskManager {
       // Create keys are idempotency keys for retries. Update keys are ordinary
       // per-call aliases and may intentionally be reused as work progresses.
       const existingMutation = op.op === "create" ? this.state.keys[op.key] : undefined;
-      const result = existingMutation ? this.replayedMutation(op, existingMutation) : this.run(op, local);
+      let result: Result;
+      try {
+        result = existingMutation ? this.replayedMutation(op, existingMutation) : this.run(op, local);
+      } catch {
+        // Host callbacks are fallible. Roll back through the normal failure path
+        // and never expose callback exception text (which may contain secrets).
+        result = { key: op.key, op: op.op, status: "failed", error: fail("validation_failed", "operation validation failed unexpectedly; inspect host evidence configuration") };
+      }
       results.push(result);
       if (result.status === "succeeded" && !existingMutation &&
         (op.op === "create" || (op.op === "update" && op.status !== "deleted"))) {
@@ -774,6 +828,7 @@ export class TaskManager {
     if (params.mode === "atomic" && !stopped &&
       ops.some((op, i) => (op.op === "create" || op.op === "update") && results[i]?.status === "succeeded")) this.commit();
     if (params.mode === "atomic" && stopped) {
+      this.restore(before); // Includes cancellation, which bypasses run() failure handling.
       const failedIndex = results.findIndex(r => r.status === "failed");
       for (let i = 0; i < failedIndex; i++) {
         results[i] = { ...results[i], status: "failed", data: undefined,
@@ -841,6 +896,9 @@ export class TaskManager {
     if (typeof id !== "string") return {key:op.key,op:op.op,status:"failed",error:id};
     const task=this.find(id); if (!task) return {key:op.key,op:op.op,status:"failed",error:fail("not_found",`task ${id} not found`)};
     if (op.op==="get") return {key:op.key,op:op.op,status:"succeeded",data:{task:this.outputTask(task, op.include_audit)}};
+    const questionIds = new Set((op.questions ?? task.questions ?? []).map(q => q.id));
+    for (const answer of op.answers ?? []) if (!questionIds.has(answer.question))
+      return {key:op.key,op:op.op,status:"failed",error:fail("validation_failed", `unknown question id: ${answer.question}`)};
     const completionError = this.completionError(task, op);
     if (completionError) return {key:op.key,op:op.op,status:"failed",error:completionError};
     if (op.active === true && op.status === undefined && task.status !== "in_progress")
@@ -884,12 +942,11 @@ export class TaskManager {
     const parentTaskId = op.parentTaskId === undefined
       ? task.parentTaskId
       : target(op.parentTaskId) || undefined;
-    const questionsChanged = op.questions !== undefined && JSON.stringify(op.questions) !== JSON.stringify(task.questions);
-    // Answers are tied to the questions they answer, not to the status. Only
-    // a genuine change of questions invalidates them; reopening a completed
-    // task used to erase them silently, so the next completion failed with
-    // "missing answers" for work that had already been evidenced.
-    const answers = questionsChanged ? undefined : (op.answers ? clone(op.answers) : task.answers);
+    // Answers are tied to the questions they answer, not to the status.
+    // Reopening keeps them; a changed or removed question drops only its own
+    // answer, and supplied answers merge over saved ones by question ID.
+    const merged = this.mergeAnswers(task, op);
+    const answers = merged.length ? merged : undefined;
     Object.assign(task, { subject:op.subject?.trim()||task.subject, description:op.description??task.description, activeForm:op.activeForm??task.activeForm, category:op.category??task.category, priority:op.priority??task.priority, metadata:mergedMetadata, questions:op.questions ? clone(op.questions) : task.questions, answers, status:op.status??task.status, active:op.active??task.active, parentTaskId, dependsOn:deps, updatedAt:goNow() });
     if (op.status === "in_progress") {
       for (const other of this.state.tasks) other.active = other.id === id;
@@ -989,25 +1046,47 @@ export class TaskManager {
  * the same turn are visible. Unknown tools, absent indices and out-of-range
  * indices all fail closed.
  */
-export function resolveToolEvidence(reference: string, sessionManager: { getEntries(): readonly unknown[]; getBranch?(): readonly unknown[] } | undefined): boolean {
+export interface EvidenceSessionManager {
+  getEntries(): readonly unknown[];
+  getBranch?(): readonly unknown[];
+}
+interface EvidenceContext {
+  sessionManager?: EvidenceSessionManager;
+  ui?: { setWidget(key: string, content: unknown): void };
+}
+function sessionResultNames(session: EvidenceSessionManager | undefined): string[] {
+  if (!session) return [];
+  const entries = session.getBranch?.() ?? session.getEntries();
+  return entries.flatMap(entry => {
+    if (!isObj(entry) || entry.type !== "message" || !isObj(entry.message)) return [];
+    return entry.message.role === "toolResult" && typeof entry.message.toolName === "string" ? [entry.message.toolName] : [];
+  });
+}
+export function resolveToolEvidence(reference: string, sessionManager: EvidenceSessionManager | undefined, aliases: Readonly<Record<string, readonly string[]>> = {}): boolean {
   const match = /^tool:([A-Za-z0-9_-]+)(?:#(\d+))?$/i.exec(reference.trim());
   if (!match || !sessionManager) return false;
-  const name = match[1];
-  const results = ((sessionManager.getBranch?.() ?? sessionManager.getEntries()) as any[])
-    .filter(entry => entry?.type === "message" && entry.message?.role === "toolResult" && entry.message?.toolName === name);
-  if (!match[2]) return results.length > 0;
+  let name = match[1];
+  const names = sessionResultNames(sessionManager);
+  if (!names.includes(name) && aliases[name]) {
+    const targets = [...new Set(aliases[name])];
+    if (targets.length !== 1) return false;
+    name = targets[0];
+  }
+  const count = names.filter(value => value === name).length;
+  if (!match[2]) return count > 0;
   const index = Number(match[2]);
-  return index >= 1 && index <= results.length;
+  return index >= 1 && index <= count;
 }
 
 export function registerTaskManage(pi: { registerTool(tool: unknown): void; appendEntry(type: string, data: unknown): void; on(event: string, handler: (event: unknown, ctx: {sessionManager?: {getEntries(): readonly unknown[]; getBranch?(): readonly unknown[]}; ui?: {setWidget(key: string, content: unknown): void}})=>void): void }, presentation = taskManageRenderers, options: TaskManagerOptions = {}): TaskManager {
+  options = { ...options }; // Each registration owns its defaults and session closures.
   const manager = new TaskManager(
     entry => pi.appendEntry(entry.type, entry.data),
     event => pi.appendEntry(event.type, event.data),
     options,
   );
   let ui: {setWidget(key: string, content: unknown): void} | undefined;
-  let sessionManager: { getEntries(): readonly unknown[]; getBranch?(): readonly unknown[] } | undefined;
+  let sessionManager: EvidenceSessionManager | undefined;
   const refreshWidget = (ctx?: {ui?: {setWidget(key: string, content: unknown): void}}) => {
     ui = ctx?.ui ?? ui;
     if (!ui) return;
@@ -1017,13 +1096,34 @@ export function registerTaskManage(pi: { registerTool(tool: unknown): void; appe
       ? ((_tui: unknown, theme: RenderTheme) => taskWidgetRenderer(tasks, theme))
       : undefined);
   };
-  pi.on("session_start", (_event, ctx) => {
+  const bindSession = (_event: unknown, ctx: EvidenceContext) => {
     sessionManager = ctx.sessionManager;
     manager.rehydrate((ctx.sessionManager?.getBranch?.() ?? ctx.sessionManager?.getEntries() ?? []) as JournalEntry[]);
     refreshWidget(ctx);
-  });
+  };
+  pi.on("session_start", bindSession);
+  pi.on("session_switch", bindSession);
+  options.sessionEvidenceHints ??= () => {
+    const counts = new Map<string, number>();
+    for (const name of sessionResultNames(sessionManager)) {
+      if (/^[A-Za-z0-9_-]{1,64}$/.test(name)) counts.set(name, (counts.get(name) ?? 0) + 1);
+    }
+    return counts.size ? `; available: ${[...counts].slice(0, 8).map(([name, count]) => `tool:${name}#${count}`).join(", ")}` : "; no tool results on the current branch";
+  };
+  // Persist canonical names so later alias configuration cannot retarget saved answers.
+  options.canonicalizeToolEvidence ??= reference => {
+    const match = /^tool:([A-Za-z0-9_-]+)(#\d+)?$/i.exec(reference.trim());
+    if (!match || !sessionManager) return reference;
+    if (resolveToolEvidence(reference, sessionManager)) return reference;
+    const targets = [...new Set(options.toolAliases?.[match[1]] ?? [])];
+    if (targets.length !== 1 || !resolveToolEvidence(reference, sessionManager, options.toolAliases)) return reference;
+    return `tool:${targets[0]}${match[2] ?? ""}`;
+  };
+  // Intentionally exact-only here: supplied aliases are canonicalized above.
+  // Retained aliases have no historical mapping provenance; resolving them
+  // with today's alias map could silently retarget already-saved evidence.
   options.resolveSessionEvidence ??= reference => resolveToolEvidence(reference, sessionManager);
-  pi.registerTool({ name:"TaskManage", label:"Manage tasks", description:"Manage ordered tasks. Optional compact questions {id,text}; answer each with {question,answer,evidence} in the same completed update. Evidence uses workspace file#heading, file#Lx-Ly, or tool:<ToolName>[#<n>] for a live tool result from this session. Keep detail in files. sequential commits the successful prefix; atomic commits all or rolls back.", parameters:taskManageSchema,
+  pi.registerTool({ name:"TaskManage", label:"Manage tasks", description:"Manage ordered tasks. Optional compact questions {id,text}; Saved answers for unchanged questions are reused; supply missing or replacement {question,answer,evidence} answers. Completion revalidates all evidence. Evidence uses workspace file#heading, file#Lx-Ly, or tool:<ToolName>[#<n>] for a live tool result from this session. Keep detail in files. sequential commits the successful prefix; atomic commits all or rolls back.", parameters:taskManageSchema,
     renderShell: "self",
     promptSnippet: "TaskManage: track multi-step work with durable ordered tasks.",
     promptGuidelines: ["Use TaskManage for multi-step work; keep exactly one active task when working sequentially; before starting work set the selected task status=\"in_progress\" and active=true; after verifying a task's acceptance criteria, explicitly update it with status=\"completed\" and activate the next unblocked task."],
