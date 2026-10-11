@@ -429,24 +429,9 @@ export function gitCommonDir(dir: string): string {
   }
 }
 
-/** True when both paths are checkouts of the same repository. */
-export function sharesGitCommonDir(workspace: string, target: string): boolean {
-  let common: string;
-  try { common = gitCommonDir(workspace); } catch { return false; }
-  if (!common) return false;
-  let resolved: string;
-  try { resolved = resolvePathForCheck(resolve(target)); } catch { return false; }
-  if (!existsSync(resolved)) return false;
-  try { return gitCommonDir(resolved) === common; } catch { return false; }
-}
-
-export function resolveWorkdir(cwd: string | undefined, defaultCwd: string, allowedPaths: readonly string[] = defaultAllowedPaths(defaultCwd)): { dir: string } | { error: string } {
+export function resolveWorkdir(cwd: string | undefined, defaultCwd: string): { dir: string } | { error: string } {
   if (!cwd) return { dir: defaultCwd };
   const abs = resolve(cwd);
-  const denied = checkAllowedPath(abs, allowedPaths);
-  // Git worktrees are deliberately permitted: they are repository-controlled
-  // sibling directories, not arbitrary escapes from the selected workspace.
-  if (denied && !sharesGitCommonDir(defaultCwd, abs)) return { error: denied };
   if (!existsSync(abs)) return { error: `cwd does not exist: ${abs}` };
   try { if (!statSync(abs).isDirectory()) return { error: `cwd is not a directory: ${abs}` }; } catch (e) { return { error: `failed to access cwd ${abs}: ${String(e)}` }; }
   return { dir: abs };
@@ -487,7 +472,7 @@ export function killProcessTree(child: { pid?: number; kill: (s: NodeJS.Signals)
 export function runSwarmBash(params: BashParams, options: RunOptions): Promise<BashOutcome | { error: string }> {
   const requestedSecs = Number.isFinite(params.timeout_seconds) ? Math.trunc(params.timeout_seconds as number) : 0;
   const effectiveSecs = requestedSecs > 0 ? Math.max(requestedSecs, 60) : 60;
-  const wd = resolveWorkdir(params.cwd, options.defaultCwd, defaultAllowedPaths(options.defaultCwd, homedir()));
+  const wd = resolveWorkdir(params.cwd, options.defaultCwd);
   if ("error" in wd) return Promise.resolve({ error: invalidCwdMessage(wd.error) });
   const env: NodeJS.ProcessEnv = { ...process.env, TERM: "dumb", DEBIAN_FRONTEND: "noninteractive", CI: "true", PS1: "", PROMPT_COMMAND: "", ...(params.env ?? {}) };
   return new Promise((resolveP) => {
