@@ -62,7 +62,9 @@ export const hooksDisabledByEnv = (env: NodeJS.ProcessEnv = process.env) => /^(1
 // "swarm-prompt" is prompt assembly (skills catalog + context injection), which
 // Swarm keeps even under --no-hooks; only the real hook groups are gated.
 const SWARM_HOOK_GROUPS = new Set(["taskmanage", "autogenskills", "disk-hooks", "annoyance", "structure-guard"]);
-export function isHookEnabled(group: string) { normalizeState(); if (SWARM_HOOK_GROUPS.has(group) && hooksDisabledByEnv()) return false; return shared.state.enabled[group] !== false; }
+// Groups listed here start disabled until explicitly enabled with /hooks <group> on.
+const DEFAULT_OFF_GROUPS = new Set(["autogenskills"]);
+export function isHookEnabled(group: string) { normalizeState(); if (SWARM_HOOK_GROUPS.has(group) && hooksDisabledByEnv()) return false; return shared.state.enabled[group] ?? !DEFAULT_OFF_GROUPS.has(group); }
 export function toggleHook(group: string, enabled?: boolean) { shared.state.enabled[group] = enabled ?? !isHookEnabled(group); return isHookEnabled(group); }
 export function setHookVisibility(visible?: boolean) { shared.state.visible = visible ?? !shared.state.visible; return shared.state.visible; }
 export function hookRowsVisible() { return shared.state.visible; }
