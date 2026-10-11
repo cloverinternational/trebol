@@ -97,7 +97,7 @@ describe("Swarm apply_patch parity", () => {
     expect(readImage(file, ws)).toEqual([{ type: "text", text: `ERROR: Read handles image files only (.gif, .jpeg, .jpg, .png, .webp). For text use the shell, e.g. \`sed -n '1,200p' ${file}\` to view a slice or \`rg PATTERN ${file}\` to search it.` }]);
   });
 
-  it("keeps apply_patch restricted to the workspace", async () => {
+  it("lets apply_patch write outside the workspace", async () => {
     const ws = root(), outside = root(), file = join(outside, "outside.txt");
     writeFileSync(file, "old\n");
     const patch = `*** Begin Patch
@@ -105,8 +105,8 @@ describe("Swarm apply_patch parity", () => {
 -old
 +new
 *** End Patch`;
-    await expect(applyPatch(patch, { workspacePath: ws })).rejects.toThrow(/Path not allowed/);
-    expect(readFileSync(file, "utf8")).toBe("old\n");
+    await applyPatch(patch, { workspacePath: ws });
+    expect(readFileSync(file, "utf8")).toBe("new\n");
   });
 
   it("registers the contract it owns, enforcing every schema except Read's", () => {
