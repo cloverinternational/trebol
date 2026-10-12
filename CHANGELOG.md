@@ -6,6 +6,8 @@ Release metadata is kept in `package.json`, `update-manifest.json`, and this fil
 
 ### Fixed
 
+- Preserve `--append-system-prompt` when the Forge prompt extension replaces Pi's default system prompt.
+
 - TaskManage reuses saved answers with evidence revalidation, supports trusted evidence roots and explicit aliases, reports actionable citation errors, rebinds on session switches, and rolls back atomic cancellation. Add regression coverage and isolate hook-test environment state.
 
 - `apply_patch` and Bash `cwd` no longer reject paths outside the workspace. The workspace-only `checkAllowedPath` check is removed from both.
