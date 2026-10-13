@@ -6,6 +6,8 @@ Release metadata is kept in `package.json`, `update-manifest.json`, and this fil
 
 ### Fixed
 
+- Preserve `--append-system-prompt` when the Forge prompt extension replaces Pi's default system prompt.
+
 - TaskManage reuses saved answers with evidence revalidation, supports trusted evidence roots and explicit aliases, reports actionable citation errors, rebinds on session switches, and rolls back atomic cancellation. Add regression coverage and isolate hook-test environment state.
 
 - `autogenskills` hook group starts disabled by default; enable it explicitly with `/hooks autogenskills on`.

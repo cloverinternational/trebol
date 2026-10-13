@@ -101,7 +101,7 @@ const assembledKind = (prompt: string): "interactive" | "headless" | undefined =
 export interface PromptExtensionEvent {
   systemPrompt: string;
   prompt?: string;
-  systemPromptOptions?: { cwd?: string };
+  systemPromptOptions?: { cwd?: string; appendSystemPrompt?: string };
   /** Optional Forge prompt controls supplied by the host/bridge. */
   swarmPrompt?: PromptAssemblyOptions;
 }
@@ -538,8 +538,17 @@ export function registerSwarmPrompt(pi: PromptExtensionAPI): void {
     return { systemPrompt };
     };
     const assembled = assemble();
-    const base = assembled?.systemPrompt ?? event.systemPrompt;
+    // Pi renders --append-system-prompt as an <addendum> section before this
+    // hook runs. Forge assembly deliberately replaces Pi's base prompt, but
+    // the user-supplied addendum must survive that replacement. Use the
+    // structured value rather than extracting text from the rendered prompt.
+    const append = event.systemPromptOptions?.appendSystemPrompt;
+    const addendum = append ? `<addendum>\n${append}\n</addendum>` : undefined;
+    const base = assembled?.systemPrompt && addendum && !assembled.systemPrompt.includes(addendum)
+      ? `${assembled.systemPrompt}\n\n${addendum}`
+      : assembled?.systemPrompt ?? event.systemPrompt;
     const final = memorySystemPrompt(base, cwd);
+    if (assembled) assembled.systemPrompt = final;
     if (assembled) assembledPromptKinds.set(hash(final), (ctx as { hasUI?: boolean }).hasUI === true ? "interactive" : "headless");
     const result = assembled || final !== base ? { systemPrompt: final } : undefined;
     if (footerExplanationRequested(String(event.prompt ?? "")) && selectedBaseIsForge(cwd)) {
