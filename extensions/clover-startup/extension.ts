@@ -1,13 +1,17 @@
 import { execFile } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
 import { promisify } from "node:util";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { cloverRows } from "../../.pi/lib/ui/clover-layout.ts";
 import { gitPanel } from "../../.pi/lib/ui/git-panel-layout.ts";
 import { setStartupNoticeRender, startupNotices } from "../../.pi/lib/ui/startup-notices.ts";
+import { ternSetupWizard } from "../../.pi/lib/ui/tern-setup-wizard.ts";
 
 const exec = promisify(execFile);
 const MAX_OUTPUT_BYTES = 12000;
 const MAX_LINES = 32;
+const REPO_ROOT = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 
 type StartupData = { cwd: string; branch: string; added: number; removed: number; commits: string[] };
 
@@ -80,6 +84,13 @@ export default function cloverStartupExtension(pi: any) {
   let shown = false;
   let generation = 0;
   let activeCtx: any;
+  pi.registerCommand?.("tern-setup", {
+    description: "Install or remove the optional Tern Pi shell integration",
+    handler: async (_args: string, ctx: any) => {
+      try { ctx.ui.notify(await ternSetupWizard(ctx, REPO_ROOT), "info"); }
+      catch (error) { ctx.ui.notify(`Tern setup failed: ${error instanceof Error ? error.message : String(error)}`, "error"); }
+    },
+  });
   pi.on?.("session_start", async (event: any, ctx: any) => {
     const own = ++generation;
     activeCtx = ctx;
@@ -103,6 +114,16 @@ export default function cloverStartupExtension(pi: any) {
       },
       invalidate() {},
     }));
+    // The optional setup runs after Pi has started its UI. Decline/EOF and
+    // print/RPC modes never write shell files. Only one startup prompt per session.
+    if (own === generation && activeCtx === ctx) {
+      try {
+        const result = await ternSetupWizard(ctx, REPO_ROOT, { startup: true });
+        if (result.startsWith("installed:") || result.startsWith("conflict:")) ctx.ui?.notify?.(result, result.startsWith("conflict:") ? "warning" : "info");
+      } catch (error) {
+        ctx.ui?.notify?.(`Tern setup failed: ${error instanceof Error ? error.message : String(error)}`, "error");
+      }
+    }
   });
   pi.on?.("session_shutdown", () => {
     generation++;

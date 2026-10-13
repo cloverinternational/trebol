@@ -1,0 +1,350 @@
+import { describe, expect, it } from "vitest";
+import { PiTernBridge, TranscriptProjector, type PiEventLike, type PiSessionLike } from "../../lib/tern/bridge.ts";
+import { ESC, ST, parseTspMessages, type TspMessage } from "../../lib/tern/tsp.ts";
+
+function fakeSession() {
+	const listeners = new Set<(e: PiEventLike) => void>();
+	const calls: string[] = [];
+	let resolvePrompt: (() => void) | null = null;
+	const session: PiSessionLike & { emit(e: PiEventLike): void; disposed: boolean } = {
+		disposed: false,
+		subscribe(l) {
+			listeners.add(l);
+			return () => listeners.delete(l);
+		},
+		prompt(text) {
+			calls.push(`prompt:${text}`);
+			return new Promise<void>((r) => {
+				resolvePrompt = r;
+			});
+		},
+		async abort() {
+			calls.push("abort");
+		},
+		dispose() {
+			this.disposed = true;
+			calls.push("dispose");
+		},
+		emit(e) {
+			for (const l of listeners) l(e);
+		},
+	};
+	return { session, calls, finish: () => resolvePrompt?.(), listenerCount: () => listeners.size };
+}
+
+function capture() {
+	const writes: string[] = [];
+	return { writes, write: (d: string) => writes.push(d) };
+}
+
+// Credits are high so content assertions see the latest frame without acks.
+const CREDITS = 1000;
+
+function action(body: Record<string, unknown>): TspMessage {
+	return { verb: "e", body: { ev: "action", sf: "pi", ...body } };
+}
+
+function lastFrame(writes: string[]): unknown {
+	const frames = writes.filter((w) => w.startsWith(`${ESC}_tsp;f;`));
+	const last = frames.at(-1);
+	if (!last) throw new Error("no frame written");
+	return parseTspMessages(last)[0]?.body;
+}
+
+describe("TranscriptProjector", () => {
+	it("streams assistant text deltas into one stable node", () => {
+		const p = new TranscriptProjector();
+		p.apply({ type: "message_start", message: { role: "assistant", content: [] } });
+		p.apply({ type: "message_update", message: {}, assistantMessageEvent: { type: "text_delta", delta: "Hel" } });
+		p.apply({ type: "message_update", message: {}, assistantMessageEvent: { type: "text_delta", delta: "lo" } });
+		p.apply({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "Hello" }] } });
+		expect(p.items).toHaveLength(1);
+		expect(p.items[0]).toMatchObject({ role: "assistant", text: "Hello" });
+		expect(p.nodes()[0]).toEqual({ id: `msg-${p.items[0].id}`, k: "col", p: { role: "pi.assistant" }, c: [{ id: `msg-${p.items[0].id}.body`, k: "md", p: { text: "Hello", stream: true } }] });
+	});
+
+	it("tracks tool execution start and end by toolCallId", () => {
+		const p = new TranscriptProjector();
+		p.apply({ type: "tool_execution_start", toolCallId: "c1", toolName: "read", args: {} });
+		expect(p.items[0]).toMatchObject({ id: "t-c1", status: "running" });
+		expect(p.apply({ type: "tool_execution_update", toolCallId: "c1", partialResult: { content: [{ type: "text", text: "partial" }] } })).toBe(true);
+		expect(p.items[0]).toMatchObject({ output: "partial" });
+		expect(p.apply({ type: "tool_execution_update", toolCallId: "missing", partialResult: "ignored" })).toBe(false);
+		p.apply({ type: "tool_execution_end", toolCallId: "c1", toolName: "read", result: {}, isError: true });
+		expect(p.items[0]).toMatchObject({ status: "error", text: "tool read error" });
+	});
+
+	it("does not duplicate toolResult messages as system transcript rows", () => {
+		const p = new TranscriptProjector();
+		expect(p.apply({ type: "message_start", message: { role: "toolResult", content: [{ type: "text", text: "done" }] } })).toBe(false);
+		expect(p.apply({ type: "message_end", message: { role: "toolResult", content: [{ type: "text", text: "done" }] } })).toBe(false);
+		expect(p.items).toHaveLength(0);
+	});
+
+	it("does not duplicate a user prompt echoed by Pi after a local submit", () => {
+		const p = new TranscriptProjector();
+		p.add("user", "hi");
+		p.apply({ type: "message_start", message: { role: "user", content: "hi" } });
+		expect(p.items.filter((i) => i.role === "user")).toHaveLength(1);
+	});
+
+	it("ignores unrelated events", () => {
+		expect(new TranscriptProjector().apply({ type: "compaction_start", reason: "manual" })).toBe(false);
+	});
+});
+
+describe("PiTernBridge", () => {
+	it("pastes clipboard file paths, image references, and text in Pi's priority order", async () => {
+		const fake = fakeSession();
+		const out = capture();
+		const bridge = new PiTernBridge(fake.session, {
+			write: out.write, surfaceId: "pi", credits: CREDITS,
+			clipboard: {
+				filePaths: async () => ["/tmp/a file.png"],
+				image: async () => new Uint8Array([1]),
+				text: async () => "unused",
+			},
+		});
+		bridge.start();
+		await bridge.pasteClipboard();
+		expect(bridge.draft).toBe("/tmp/a file.png");
+		bridge.close();
+	});
+
+	it("pastes image file reference when no file paths are copied", async () => {
+		const fake = fakeSession();
+		const bridge = new PiTernBridge(fake.session, {
+			write: capture().write, surfaceId: "pi",
+			clipboard: {
+				filePaths: async () => null,
+				image: async () => new Uint8Array([1]),
+				text: async () => "fallback",
+				saveImage: () => "/tmp/pi-clipboard-test.png",
+			},
+		});
+		bridge.start();
+		await bridge.pasteClipboard();
+		expect(bridge.draft).toBe("/tmp/pi-clipboard-test.png");
+		bridge.close();
+	});
+
+	it("falls back to clipboard text when there are no files or image", async () => {
+		const fake = fakeSession();
+		const bridge = new PiTernBridge(fake.session, {
+			write: capture().write, surfaceId: "pi",
+			clipboard: { filePaths: async () => null, image: async () => null, text: async () => "first\nsecond" },
+		});
+		bridge.start();
+		await bridge.pasteClipboard();
+		expect(bridge.draft).toBe("first second");
+		bridge.close();
+	});
+
+	it("opens one inline surface and renders the projected transcript", () => {
+		const out = capture();
+		const { session } = fakeSession();
+		const bridge = new PiTernBridge(session, { write: out.write, surfaceId: "pi", credits: CREDITS });
+		bridge.start("pi");
+		expect(out.writes[0]).toContain('"mode":"inline"');
+		expect(out.writes.some((w) => w.startsWith(`${ESC}_tsp;f;`))).toBe(true);
+	});
+
+	it("submits typed text as one prompt and blocks a second while busy", async () => {
+		const out = capture();
+		const fake = fakeSession();
+		const bridge = new PiTernBridge(fake.session, { write: out.write, surfaceId: "pi", credits: CREDITS });
+		bridge.start();
+		const first = bridge.submit("  what is 2+2?  ");
+		expect(fake.calls).toEqual(["prompt:what is 2+2?"]);
+		fake.session.emit({ type: "agent_start" });
+		expect(bridge.busy).toBe(true);
+		await bridge.submit("second");
+		expect(fake.calls).toEqual(["prompt:what is 2+2?"]);
+		expect(JSON.stringify(lastFrame(out.writes))).toContain("prompt not queued");
+		fake.finish();
+		await first;
+	});
+
+	it("ignores blank submissions", async () => {
+		const fake = fakeSession();
+		const bridge = new PiTernBridge(fake.session, { write: capture().write, surfaceId: "pi" });
+		bridge.start();
+		await bridge.submit("   ");
+		expect(fake.calls).toEqual([]);
+	});
+
+	it("routes a submit action from Tern through values.text", () => {
+		const fake = fakeSession();
+		const bridge = new PiTernBridge(fake.session, { write: capture().write, surfaceId: "pi" });
+		bridge.start();
+		void bridge.handle(action({ act: "submit", values: { text: "ping" } }));
+		expect(fake.calls).toEqual(["prompt:ping"]);
+	});
+
+	it("cancels a running turn through abort and reports it", async () => {
+		const out = capture();
+		const fake = fakeSession();
+		const bridge = new PiTernBridge(fake.session, { write: out.write, surfaceId: "pi", credits: CREDITS });
+		bridge.start();
+		void bridge.submit("long");
+		fake.session.emit({ type: "agent_start" });
+		await bridge.cancel();
+		expect(fake.calls).toContain("abort");
+		expect(bridge.busy).toBe(false);
+		expect(JSON.stringify(lastFrame(out.writes))).toContain("cancelled");
+	});
+
+	it("cancel is a no-op when idle", async () => {
+		const fake = fakeSession();
+		const bridge = new PiTernBridge(fake.session, { write: capture().write, surfaceId: "pi" });
+		bridge.start();
+		await bridge.cancel();
+		expect(fake.calls).toEqual([]);
+	});
+
+	it("close unsubscribes, closes the surface, disposes the session, and ignores later events", () => {
+		const out = capture();
+		const fake = fakeSession();
+		let closed = 0;
+		const bridge = new PiTernBridge(fake.session, { write: out.write, surfaceId: "pi", onClose: () => closed++ });
+		bridge.start();
+		expect(fake.listenerCount()).toBe(1);
+		bridge.handle(action({ act: "close" }));
+		expect(bridge.closed).toBe(true);
+		expect(fake.listenerCount()).toBe(0);
+		expect(fake.session.disposed).toBe(true);
+		expect(closed).toBe(1);
+		expect(out.writes.at(-1)?.startsWith(`${ESC}_tsp;x;`)).toBe(true);
+		const before = out.writes.length;
+		fake.session.emit({ type: "message_start", message: { role: "assistant", content: "late" } });
+		expect(out.writes.length).toBe(before);
+		bridge.close();
+		expect(closed).toBe(1);
+	});
+
+	it("ignores submit and cancel after close", async () => {
+		const fake = fakeSession();
+		const bridge = new PiTernBridge(fake.session, { write: capture().write, surfaceId: "pi" });
+		bridge.start();
+		bridge.close();
+		await bridge.submit("nope");
+		await bridge.cancel();
+		expect(fake.calls).toEqual(["dispose"]);
+	});
+
+	it("surfaces prompt rejection as a system item and clears busy", async () => {
+		const out = capture();
+		const session: PiSessionLike = {
+			subscribe: () => () => {},
+			prompt: () => Promise.reject(new Error("no model configured")),
+			abort: async () => {},
+			dispose: () => {},
+		};
+		const bridge = new PiTernBridge(session, { write: out.write, surfaceId: "pi", credits: CREDITS });
+		bridge.start();
+		await bridge.submit("hi");
+		expect(bridge.busy).toBe(false);
+		expect(JSON.stringify(lastFrame(out.writes))).toContain("no model configured");
+	});
+
+	it("does not auto-approve: unbound UI prompts never reach the bridge as grants", () => {
+		const fake = fakeSession();
+		const bridge = new PiTernBridge(fake.session, { write: capture().write, surfaceId: "pi" });
+		bridge.start();
+		bridge.handle({ verb: "e", body: { ev: "action", sf: "pi", act: "approve" } } as TspMessage);
+		expect(fake.calls).toEqual([]);
+	});
+
+	it("ignores acks for other surfaces and non-action events", () => {
+		const fake = fakeSession();
+		const bridge = new PiTernBridge(fake.session, { write: capture().write, surfaceId: "pi" });
+		bridge.start();
+		expect(bridge.handle({ verb: "e", body: { ev: "focus", id: "x" } })).toBeUndefined();
+		expect(fake.calls).toEqual([]);
+	});
+});
+
+describe("bridge rendering and draft ownership", () => {
+	it("renders tool calls as keyed tool cards with status and target", () => {
+		const out = capture();
+		const fake = fakeSession();
+		const bridge = new PiTernBridge(fake.session, { write: out.write, surfaceId: "pi", credits: CREDITS });
+		bridge.start();
+		fake.session.emit({ type: "tool_execution_start", toolCallId: "c9", toolName: "bash", args: { command: "ls -la" } });
+		fake.session.emit({ type: "tool_execution_end", toolCallId: "c9", toolName: "bash", result: "ok", isError: false });
+		const all = out.writes.join("");
+		expect(all).toContain('"k":"tool"');
+		expect(all).toContain('"target":"ls -la"');
+		expect(all).toContain('"status":"done"');
+	});
+
+	it("keeps the draft in the bridge and clears it on submit", async () => {
+		const fake = fakeSession();
+		const bridge = new PiTernBridge(fake.session, { write: capture().write, surfaceId: "pi", credits: CREDITS });
+		bridge.start();
+		bridge.appendDraft("hi");
+		bridge.backspaceDraft();
+		bridge.appendDraft("ey");
+		expect(bridge.draft).toBe("hey");
+		void bridge.submitDraft();
+		expect(fake.calls).toEqual(["prompt:hey"]);
+		expect(bridge.draft).toBe("");
+	});
+
+	it("Ctrl+C draft clearing leaves an active turn alone", async () => {
+		const fake = fakeSession();
+		const bridge = new PiTernBridge(fake.session, { write: capture().write, surfaceId: "pi", credits: CREDITS });
+		bridge.start();
+		const submitted = bridge.submit("running");
+		bridge.appendDraft("clear me");
+		bridge.clearDraft();
+		expect(bridge.draft).toBe("");
+		expect(bridge.busy).toBe(true);
+		expect(fake.calls).not.toContain("abort");
+		fake.finish();
+		await submitted;
+	});
+
+	it("escape clears a non-empty draft first, then closes when idle", () => {
+		const fake = fakeSession();
+		const bridge = new PiTernBridge(fake.session, { write: capture().write, surfaceId: "pi", credits: CREDITS });
+		bridge.start();
+		bridge.appendDraft("stray");
+		expect(bridge.escape()).toBe(false);
+		expect(bridge.draft).toBe("");
+		expect(bridge.closed).toBe(false);
+		expect(bridge.escape()).toBe(true);
+		expect(bridge.closed).toBe(true);
+	});
+
+	it("escape while running cancels and does not close", async () => {
+		const fake = fakeSession();
+		const bridge = new PiTernBridge(fake.session, { write: capture().write, surfaceId: "pi", credits: CREDITS });
+		bridge.start();
+		void bridge.submit("long");
+		fake.session.emit({ type: "agent_start" });
+		expect(bridge.escape()).toBe(false);
+		await Promise.resolve();
+		expect(fake.calls).toContain("abort");
+		expect(bridge.closed).toBe(false);
+	});
+
+	it("never renders a grant action in the dock", () => {
+		const out = capture();
+		const bridge = new PiTernBridge(fakeSession().session, { write: out.write, surfaceId: "pi", credits: CREDITS });
+		bridge.start();
+		const frame = JSON.stringify(lastFrame(out.writes));
+		expect(frame).not.toContain('"approve"');
+	});
+});
+
+describe("bridge wire compatibility", () => {
+	it("produces frames parseable by the TSP reader", () => {
+		const out = capture();
+		const fake = fakeSession();
+		const bridge = new PiTernBridge(fake.session, { write: out.write, surfaceId: "pi", credits: CREDITS });
+		bridge.start();
+		for (const w of out.writes) expect(w.startsWith(`${ESC}_tsp;`)).toBe(true);
+		expect(out.writes.every((w) => w.endsWith(ST))).toBe(true);
+	});
+});

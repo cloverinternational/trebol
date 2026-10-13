@@ -43,6 +43,8 @@ export function registerSwarmTransportParity(pi: Pi): void {
   // Hide Pi-only tools from the model surface and mirror Swarm's environment
   // gates (interactive-only + xAI-credentialed tools), then sort bytewise.
   let interactive = false;
+  // Tern runs a TUI without bound UI; its ask_user_question answers through remote-ask events.
+  let remoteAsk = false;
   const alignTools = () => {
     const active: string[] = pi.getActiveTools?.() ?? [];
     const available: string[] = (pi.getAllTools?.() ?? []).map((tool: any) => tool.name).filter((name: any): name is string => typeof name === "string");
@@ -57,7 +59,7 @@ export function registerSwarmTransportParity(pi: Pi): void {
       const definition = pi.getToolDefinition?.(name);
       return name === "mcp" || name === "mcpScript" || name.startsWith("mcp__") || definition?.label?.startsWith("MCP:");
     });
-    const gated = gateActiveTools(selected, { interactive, mcpTools }, process.env, available) ?? selected;
+    const gated = gateActiveTools(selected, { interactive, remoteAsk, mcpTools }, process.env, available) ?? selected;
     const ordered = swarmToolOrder(gated) ?? (gated === active ? undefined : gated);
     if (ordered) pi.setActiveTools?.(ordered);
   };
@@ -81,11 +83,11 @@ export function registerSwarmTransportParity(pi: Pi): void {
   };
   const currentMode = () => "act";
 
-  pi.on?.("session_start", (_event: unknown, ctx: any) => { interactive = ctx?.hasUI === true; (globalThis as any)[CONVERSATION_ID] = swarmConversationId(); alignTools(); alignModel(ctx); });
+  pi.on?.("session_start", (_event: unknown, ctx: any) => { interactive = ctx?.hasUI === true; remoteAsk = ctx?.mode === "tui" && !interactive; (globalThis as any)[CONVERSATION_ID] = swarmConversationId(); alignTools(); alignModel(ctx); });
   pi.on?.("model_select", (_event: unknown, ctx: any) => { alignModel(ctx); });
   // Tool sets and model can change mid-session (extensions, /model, /tools).
   // Re-check right before every request; both operations are idempotent.
-  pi.on?.("before_agent_start", (_event: unknown, ctx: any) => { if (typeof ctx?.hasUI === "boolean") interactive = ctx.hasUI; alignTools(); alignModel(ctx); });
+  pi.on?.("before_agent_start", (_event: unknown, ctx: any) => { if (typeof ctx?.hasUI === "boolean") interactive = ctx.hasUI; if (typeof ctx?.mode === "string") remoteAsk = ctx.mode === "tui" && !interactive; alignTools(); alignModel(ctx); });
   pi.on?.("context", (event: { messages: any[] }) => {
     let messages: any[] = event.messages ?? [];
     let changed = false;

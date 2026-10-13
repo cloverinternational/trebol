@@ -24,6 +24,8 @@ export const REQUIRED_PI_EXTENSION_TOOLS = ["change_context", "context_index", "
 
 export interface GatingEnvironment {
   interactive: boolean;
+  /** A TUI session without bound UI (Tern) that answers ask_user_question through remote-ask events. */
+  remoteAsk?: boolean;
   home?: string;
   env?: NodeJS.ProcessEnv;
   now?: () => number;
@@ -60,6 +62,7 @@ export function swarmSurfaceFor(environment: GatingEnvironment): Set<string> {
     for (const name of INTERACTIVE_ONLY_TOOLS) names.add(name);
     for (const name of HEADLESS_ONLY_TOOLS) names.delete(name);
   }
+  if (environment.remoteAsk) names.add("ask_user_question");
   for (const name of REQUIRED_PI_EXTENSION_TOOLS) names.add(name);
   for (const name of configuredExtraTools(environment.env)) names.add(name);
   return names;

@@ -1,0 +1,4 @@
+tern.d.luau
+__pycache__/
+.pytest_cache/
+*.pyc

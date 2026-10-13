@@ -1,0 +1,32 @@
+# Tern SDK source manifest
+
+- Upstream: https://github.com/stencil-hq/tern-sdk (org `stencil-hq`, public, MIT)
+- Pinned commit: `38a4c06224a32ae81d1c7af67b1b386422f3fc7b` (default-branch HEAD at capture time; commit message `chore: synced the sdk`, 2026-10-11T18:16:52Z)
+- Tree listing: 193 entries, not truncated (GitHub git/trees API, recursive)
+- Captured with: raw.githubusercontent.com URLs pinned to the SHA above
+- Hashes: SHA-256 of the bytes as stored in this repo
+
+| Local path | Bytes | SHA-256 | Upstream path | Source link |
+| --- | ---: | --- | --- | --- |
+| `api/tern.d.luau` | 90656 | `7921837fe4a15abdddc63c791d9c946a9000a49899613609b7daaab53d77845b` | `plugins/tern.d.luau` | https://raw.githubusercontent.com/stencil-hq/tern-sdk/38a4c06224a32ae81d1c7af67b1b386422f3fc7b/plugins/tern.d.luau |
+| `examples/plugins/examples/canvas/plugin.toml` | 198 | `a16cdd59399f42db74ab4b679c50dde4037a7e1f15e6485865129c991d5031ed` | `plugins/examples/canvas/plugin.toml` | https://raw.githubusercontent.com/stencil-hq/tern-sdk/38a4c06224a32ae81d1c7af67b1b386422f3fc7b/plugins/examples/canvas/plugin.toml |
+| `examples/plugins/examples/dirvars/plugin.toml` | 271 | `67c2ad9220ba6230ee3dc8696541067aff69ad290e80401a9c12f4df17e43133` | `plugins/examples/dirvars/plugin.toml` | https://raw.githubusercontent.com/stencil-hq/tern-sdk/38a4c06224a32ae81d1c7af67b1b386422f3fc7b/plugins/examples/dirvars/plugin.toml |
+| `examples/plugins/examples/jsonx/plugin.toml` | 375 | `84e154e17a7c10d746d92354b2ccf2556d6177763a940bc6a78a709710aaf3b8` | `plugins/examples/jsonx/plugin.toml` | https://raw.githubusercontent.com/stencil-hq/tern-sdk/38a4c06224a32ae81d1c7af67b1b386422f3fc7b/plugins/examples/jsonx/plugin.toml |
+| `examples/plugins/examples/longrun/plugin.toml` | 339 | `0f29972cd58b418d5858e1ec9a275a91f583a3ba617679744ae679950cea2802` | `plugins/examples/longrun/plugin.toml` | https://raw.githubusercontent.com/stencil-hq/tern-sdk/38a4c06224a32ae81d1c7af67b1b386422f3fc7b/plugins/examples/longrun/plugin.toml |
+| `examples/plugins/examples/review-queue/plugin.toml` | 252 | `00948e583f8348791914172ef0923d24ddea616e61f113169ee21dfc7e25af9f` | `plugins/examples/review-queue/plugin.toml` | https://raw.githubusercontent.com/stencil-hq/tern-sdk/38a4c06224a32ae81d1c7af67b1b386422f3fc7b/plugins/examples/review-queue/plugin.toml |
+| `examples/plugins/examples/terraform/plugin.toml` | 436 | `8916fd4496a2fbcb13172f6feb9a4a0a6ef1931db8cd8c68f56c65700296cdb3` | `plugins/examples/terraform/plugin.toml` | https://raw.githubusercontent.com/stencil-hq/tern-sdk/38a4c06224a32ae81d1c7af67b1b386422f3fc7b/plugins/examples/terraform/plugin.toml |
+| `examples/plugins/examples/workspaces/plugin.toml` | 217 | `9e150b26f94ce89fde68d37b7e857551bf8045a90ff47acd495d16b448576754` | `plugins/examples/workspaces/plugin.toml` | https://raw.githubusercontent.com/stencil-hq/tern-sdk/38a4c06224a32ae81d1c7af67b1b386422f3fc7b/plugins/examples/workspaces/plugin.toml |
+| `pages/README.md` | 1021 | `a8a9b56915c4c3fcd7ace3bb02305ac2f890aa4008bcee8f39196643d1972a97` | `README.md` | https://raw.githubusercontent.com/stencil-hq/tern-sdk/38a4c06224a32ae81d1c7af67b1b386422f3fc7b/README.md |
+| `pages/go/tern/README.md` | 9478 | `f7430cfd7b378c35c0341b6e2a176a853128dd372b52b60a2ffb542e06e76a18` | `go/tern/README.md` | https://raw.githubusercontent.com/stencil-hq/tern-sdk/38a4c06224a32ae81d1c7af67b1b386422f3fc7b/go/tern/README.md |
+| `pages/plugins/examples/canvas/README.md` | 1058 | `eaca6469b305b8639d08ee333fd5a594aee7323476093893cddd288cca87e173` | `plugins/examples/canvas/README.md` | https://raw.githubusercontent.com/stencil-hq/tern-sdk/38a4c06224a32ae81d1c7af67b1b386422f3fc7b/plugins/examples/canvas/README.md |
+| `pages/plugins/examples/dirvars/README.md` | 2813 | `360f876124b12fe022bde44fd7ad0cef73a32a2f7957eb3bdb7c1b6b121274aa` | `plugins/examples/dirvars/README.md` | https://raw.githubusercontent.com/stencil-hq/tern-sdk/38a4c06224a32ae81d1c7af67b1b386422f3fc7b/plugins/examples/dirvars/README.md |
+| `pages/plugins/examples/jsonx/README.md` | 1538 | `b61def8b1f335f9f89792e6cd98a25230dee644722b3cc7329d76ab1b8248cec` | `plugins/examples/jsonx/README.md` | https://raw.githubusercontent.com/stencil-hq/tern-sdk/38a4c06224a32ae81d1c7af67b1b386422f3fc7b/plugins/examples/jsonx/README.md |
+| `pages/plugins/examples/longrun/README.md` | 1944 | `6beb0f3e9ea079e265c90edee4799400336b091b3d085984b807f4ad7a361de1` | `plugins/examples/longrun/README.md` | https://raw.githubusercontent.com/stencil-hq/tern-sdk/38a4c06224a32ae81d1c7af67b1b386422f3fc7b/plugins/examples/longrun/README.md |
+| `pages/plugins/examples/review-queue/README.md` | 1735 | `36ec5f9dedc91de5ec805bd15912395c06b972d812dfeaa19bfac83fa5191170` | `plugins/examples/review-queue/README.md` | https://raw.githubusercontent.com/stencil-hq/tern-sdk/38a4c06224a32ae81d1c7af67b1b386422f3fc7b/plugins/examples/review-queue/README.md |
+| `pages/plugins/examples/terraform/README.md` | 1341 | `2e0b21f35308541250cb4cfd41feeca352f4406fdd7e339321f0ff70d6815551` | `plugins/examples/terraform/README.md` | https://raw.githubusercontent.com/stencil-hq/tern-sdk/38a4c06224a32ae81d1c7af67b1b386422f3fc7b/plugins/examples/terraform/README.md |
+| `pages/plugins/examples/workspaces/README.md` | 1767 | `eb091c6cfc57434a448891a07c59a12ca6bef2581e9a695ec30c305f8267902f` | `plugins/examples/workspaces/README.md` | https://raw.githubusercontent.com/stencil-hq/tern-sdk/38a4c06224a32ae81d1c7af67b1b386422f3fc7b/plugins/examples/workspaces/README.md |
+| `pages/python/README.md` | 9988 | `ae023a6024d7f23637b385e9bbe3464e05df7b5e3fcbffd18f6aaf93c1e4f0da` | `python/README.md` | https://raw.githubusercontent.com/stencil-hq/tern-sdk/38a4c06224a32ae81d1c7af67b1b386422f3fc7b/python/README.md |
+| `pages/rust/README.md` | 10683 | `b15fc79852f76d8ba12dfaf8a10d09a401725f83c86327cb85a292ebfdc227d9` | `rust/README.md` | https://raw.githubusercontent.com/stencil-hq/tern-sdk/38a4c06224a32ae81d1c7af67b1b386422f3fc7b/rust/README.md |
+| `pages/typescript/README.md` | 8125 | `dd95ec9bb934de84c0c37827dd0f269e0fda2bf40ab984ad52c71c6561a38f85` | `typescript/README.md` | https://raw.githubusercontent.com/stencil-hq/tern-sdk/38a4c06224a32ae81d1c7af67b1b386422f3fc7b/typescript/README.md |
+
+Excluded on purpose: example plugin `host.luau`/`window.luau` bodies, Go/Python/Rust/TypeScript example programs and tests (source, not docs). Upstream paths are listed in the tree above for anyone who wants them.
