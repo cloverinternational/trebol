@@ -53,6 +53,22 @@ describe("system-prompt ownership", () => {
     expect(resolveActiveSystemPrompt(cwd)).toMatchObject({ kind: "forge" });
   });
 
+  it("preserves Pi's appended system prompt when Forge replaces the base", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "pi-prompt-addendum-"));
+    const runtime = fakePi(); promptExtension(runtime.pi as any);
+    const handler = runtime.handlers.get("before_agent_start")![0];
+    const appended = "The secret codeword is ZETA-8801.";
+    const options = { cwd, appendSystemPrompt: appended };
+    const result: any = await handler({ systemPrompt: `Pi base\n\n<addendum>\n${appended}\n</addendum>`, systemPromptOptions: options }, { cwd, hasUI: false });
+    expect(result.systemPrompt).toContain("# Delegation (the Task tool)");
+    expect(result.systemPrompt).not.toContain("Pi base");
+    expect(result.systemPrompt.match(/<addendum>\nThe secret codeword is ZETA-8801\.\n<\/addendum>/g)).toHaveLength(1);
+    const noAppend: any = await handler({ systemPrompt: "Pi base", systemPromptOptions: { cwd } }, { cwd, hasUI: false });
+    expect(noAppend.systemPrompt).not.toContain("<addendum>");
+    const empty: any = await handler({ systemPrompt: "Pi base", systemPromptOptions: { cwd, appendSystemPrompt: "" } }, { cwd, hasUI: false });
+    expect(empty.systemPrompt).not.toContain("<addendum>");
+  });
+
   it("delivers footer guidance with natural requests but not unrelated or Pi-base requests", async () => {
     const cwd = mkdtempSync(join(tmpdir(), "pi-footer-guidance-"));
     const runtime = fakePi(); promptExtension(runtime.pi as any);
