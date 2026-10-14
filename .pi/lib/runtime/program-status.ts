@@ -206,6 +206,7 @@ export class ProgramStatusReporter {
   private readonly title?: string;
   private readonly id?: string;
   private readonly enabled: boolean;
+  private readonly env: Record<string, string | undefined>;
   private readonly write: (data: string) => void;
 
   constructor(options: ProgramStatusReporterOptions = {}) {
@@ -220,6 +221,7 @@ export class ProgramStatusReporter {
     this.title = options.title;
     this.id = options.id;
     const env = options.env ?? process.env;
+    this.env = env;
     this.enabled =
       options.enabled ??
       resolveEnabled(
@@ -247,7 +249,7 @@ export class ProgramStatusReporter {
       // A rejected report is always a caller bug (invalid state/id/kind/
       // progress). Say so loudly in dev so the misuse surfaces; stay quiet
       // in production where this path must remain invisible.
-      if (process.env.NODE_ENV !== "production") {
+      if (this.env.NODE_ENV !== "production") {
         console.warn(
           `[program-status] rejected invalid report: ${JSON.stringify(report)}`,
         );

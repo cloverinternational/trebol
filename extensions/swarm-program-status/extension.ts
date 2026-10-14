@@ -23,7 +23,10 @@ const ASK_TOOL = "ask_user_question";
 
 function firstLine(text: unknown, maxLength = 160): string {
   const line = String(text ?? "").split(/\r?\n/)[0].trim();
-  return line.length > maxLength ? `${line.slice(0, maxLength - 1)}…` : line;
+  // Count code points, not UTF-16 units, so truncation never splits a
+  // surrogate pair (emoji) at the boundary.
+  const chars = Array.from(line);
+  return chars.length > maxLength ? `${chars.slice(0, maxLength - 1).join("")}…` : line;
 }
 
 function askQuestionText(event: any): string {

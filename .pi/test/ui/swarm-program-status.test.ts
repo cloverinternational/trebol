@@ -98,6 +98,15 @@ describe("swarm-program-status extension", () => {
     expect(h.written).toHaveLength(1);
   });
 
+  it("never splits a surrogate pair when truncating the prompt", async () => {
+    await h.emit("session_start");
+    await h.emit("before_agent_start", { prompt: `${"x".repeat(158)}🔥${"y".repeat(20)}` });
+    const msg = h.written[1].split(":").find((p) => p.startsWith("msg="))!;
+    const decoded = Buffer.from(msg.slice(4), "base64").toString("utf8");
+    expect(decoded).toContain("🔥");
+    expect(decoded).not.toContain("�");
+  });
+
   it("registers handlers only once per pi instance", async () => {
     extension(h.pi);
     await h.emit("session_start");
