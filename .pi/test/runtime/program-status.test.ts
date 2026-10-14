@@ -51,17 +51,15 @@ describe("buildProgramStatusSequence", () => {
     expect(encoded).not.toContain("=");
   });
 
-  it("drops kind when the state is not blocked", () => {
-    const seq = buildProgramStatusSequence("trebol", {
-      state: "working",
-      kind: "permission",
-    })!;
-    expect(seq).not.toContain("kind=");
+  it("rejects kind when the state is not blocked", () => {
+    expect(
+      buildProgramStatusSequence("trebol", { state: "working", kind: "permission" }),
+    ).toBeNull();
   });
 
-  it("drops progress when the state is not working or blocked", () => {
-    const seq = buildProgramStatusSequence("trebol", { state: "done", progress: 100 })!;
-    expect(seq).not.toContain("progress=");
+  it("rejects progress when the state is not working or blocked", () => {
+    expect(buildProgramStatusSequence("trebol", { state: "done", progress: 100 })).toBeNull();
+    expect(buildProgramStatusSequence("trebol", { state: "idle", progress: 50 })).toBeNull();
   });
 
   it("rejects out-of-range progress", () => {
@@ -174,5 +172,19 @@ describe("ProgramStatusReporter", () => {
     const r = new ProgramStatusReporter({ enabled: true, write });
     expect(r.idle("ok")).toBe(true);
     expect(write).toHaveBeenCalledTimes(1);
+  });
+
+  it("survives a throwing write (e.g. EPIPE on a closed stderr)", () => {
+    const r = new ProgramStatusReporter({
+      enabled: true,
+      write: () => {
+        const error = new Error("write EPIPE") as NodeJS.ErrnoException;
+        error.code = "EPIPE";
+        throw error;
+      },
+    });
+    expect(() => r.working("hello")).not.toThrow();
+    expect(r.working("hello")).toBe(false);
+    expect(r.isEnabled).toBe(true);
   });
 });

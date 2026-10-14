@@ -42,19 +42,29 @@ export default function swarmProgramStatus(pi: any): void {
   const status = (): ProgramStatusReporter =>
     (reporter ??= new ProgramStatusReporter({ app: "trebol", title: "Trebol" }));
 
+  // Status reporting is best-effort and cosmetic: a failure here must never
+  // disturb the agent loop or the TUI event handlers.
+  const emit = (fn: () => void): void => {
+    try {
+      fn();
+    } catch {
+      /* unreachable in practice — ProgramStatusReporter.report never throws */
+    }
+  };
+
   const markWorking = (msg: string) => {
     lastWorkingMsg = msg;
-    status().working(msg);
+    emit(() => status().working(msg));
   };
 
   pi.on("session_start", () => {
     reporter = null;
     lastWorkingMsg = "Working";
-    status().idle("Ready");
+    emit(() => status().idle("Ready"));
   });
 
   pi.on("session_switch", () => {
-    status().idle("Ready");
+    emit(() => status().idle("Ready"));
   });
 
   pi.on("before_agent_start", (event: any) => {
@@ -63,33 +73,33 @@ export default function swarmProgramStatus(pi: any): void {
   });
 
   pi.on("turn_start", () => {
-    status().working(lastWorkingMsg);
+    emit(() => status().working(lastWorkingMsg));
   });
 
   pi.on("tool_call", (event: any) => {
     if (event?.toolName === ASK_TOOL) {
-      status().blocked("question", askQuestionText(event));
+      emit(() => status().blocked("question", askQuestionText(event)));
     }
   });
 
   pi.on("tool_result", (event: any) => {
     if (event?.toolName === ASK_TOOL && !event?.isError) {
       // Answer received; the agent resumes work.
-      status().working(lastWorkingMsg);
+      emit(() => status().working(lastWorkingMsg));
     }
   });
 
   pi.on("agent_before_settle", (event: any) => {
     if (event?.continue) {
       // Auto mode / goal loop continues: keep the working record fresh.
-      status().working(lastWorkingMsg);
+      emit(() => status().working(lastWorkingMsg));
       return;
     }
     if (event?.outcome === "completed") {
-      status().done("Finished");
+      emit(() => status().done("Finished"));
     } else {
       const outcome = firstLine(event?.outcome) || "unknown";
-      status().error(`Stopped: ${outcome}`);
+      emit(() => status().error(`Stopped: ${outcome}`));
     }
   });
 

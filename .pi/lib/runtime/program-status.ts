@@ -140,16 +140,18 @@ export function buildProgramStatusSequence(
     pairs.push(`id=${report.id}`);
   }
   pairs.push(`app=${app}`);
-  if (report.state === "blocked" && report.kind !== undefined) {
+  if (report.kind !== undefined) {
+    // A kind with any other state is a caller bug: refuse instead of
+    // silently dropping it, so misuse surfaces instead of vanishing.
+    if (report.state !== "blocked") return null;
     if (report.kind !== "permission" && report.kind !== "question" && report.kind !== "auth") {
       return null;
     }
     pairs.push(`kind=${report.kind}`);
   }
-  if (
-    (report.state === "working" || report.state === "blocked") &&
-    report.progress !== undefined
-  ) {
+  if (report.progress !== undefined) {
+    // Same strictness for progress outside working/blocked.
+    if (report.state !== "working" && report.state !== "blocked") return null;
     if (!Number.isInteger(report.progress) || report.progress < 0 || report.progress > 100) {
       return null;
     }
@@ -171,11 +173,9 @@ export function buildProgramStatusSequence(
 }
 
 function resolveEnabled(
-  explicit: boolean | undefined,
   env: Record<string, string | undefined>,
   isStderrTTY: () => boolean,
 ): boolean {
-  if (explicit !== undefined) return explicit;
   const override = env.TREBOL_PROGRAM_STATUS?.toLowerCase();
   if (override === "1" || override === "true") return true;
   if (override === "0" || override === "false") return false;
@@ -210,7 +210,6 @@ export class ProgramStatusReporter {
     this.enabled =
       options.enabled ??
       resolveEnabled(
-        undefined,
         env,
         options.isStderrTTY ?? (() => Boolean(process.stderr?.isTTY)),
       );
@@ -221,7 +220,9 @@ export class ProgramStatusReporter {
     return this.enabled;
   }
 
-  /** Emit one report. Returns true when a sequence was written. */
+  /** Emit one report. Returns true when a sequence was written. Never throws:
+   * status reporting is best-effort and cosmetic — a broken pipe or closed
+   * stderr must not take down the host process. */
   report(report: ProgramStatusReport): boolean {
     if (!this.enabled) return false;
     const sequence = buildProgramStatusSequence(this.app, {
@@ -230,7 +231,11 @@ export class ProgramStatusReporter {
       title: report.title ?? this.title,
     });
     if (!sequence) return false;
-    this.write(sequence);
+    try {
+      this.write(sequence);
+    } catch {
+      return false;
+    }
     return true;
   }
 
