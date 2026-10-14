@@ -105,7 +105,7 @@ export default function swarmProgramStatus(pi: any): void {
 
   pi.on("session_shutdown", () => {
     try {
-      status().clear();
+      emit(() => status().clear());
     } finally {
       reporter = null;
     }

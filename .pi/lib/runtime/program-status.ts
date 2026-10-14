@@ -243,7 +243,17 @@ export class ProgramStatusReporter {
       id: report.id ?? this.id,
       title: report.title ?? this.title,
     });
-    if (!sequence) return false;
+    if (!sequence) {
+      // A rejected report is always a caller bug (invalid state/id/kind/
+      // progress). Say so loudly in dev so the misuse surfaces; stay quiet
+      // in production where this path must remain invisible.
+      if (process.env.NODE_ENV !== "production") {
+        console.warn(
+          `[program-status] rejected invalid report: ${JSON.stringify(report)}`,
+        );
+      }
+      return false;
+    }
     try {
       this.write(sequence);
     } catch {
