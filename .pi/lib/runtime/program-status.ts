@@ -122,6 +122,18 @@ function encodeText(text: string): string {
   return Buffer.from(text, "utf8").toString("base64").replace(/=+$/, "");
 }
 
+/** All states the protocol defines. Checked at runtime because the builder
+ * is public API: a plain-JS caller could pass an arbitrary string, and an
+ * unvalidated state would be interpolated raw into the terminal stream. */
+const VALID_STATES: ReadonlySet<string> = new Set([
+  "idle",
+  "working",
+  "done",
+  "blocked",
+  "error",
+  "clear",
+]);
+
 /**
  * Build the raw OSC 7501 escape sequence for one report.
  * Returns null when the report violates the specification, so callers never
@@ -131,6 +143,7 @@ export function buildProgramStatusSequence(
   app: string,
   report: ProgramStatusReport,
 ): string | null {
+  if (!VALID_STATES.has(report.state)) return null;
   if (Buffer.byteLength(app, "utf8") > MAX_APP_BYTES || !isName(app)) {
     return null;
   }

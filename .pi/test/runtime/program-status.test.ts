@@ -51,6 +51,13 @@ describe("buildProgramStatusSequence", () => {
     expect(encoded).not.toContain("=");
   });
 
+  it("rejects an invalid state instead of interpolating it raw", () => {
+    expect(
+      buildProgramStatusSequence("trebol", { state: "working\u001b]0;evil" as never }),
+    ).toBeNull();
+    expect(buildProgramStatusSequence("trebol", { state: "bogus" as never })).toBeNull();
+  });
+
   it("rejects kind when the state is not blocked", () => {
     expect(
       buildProgramStatusSequence("trebol", { state: "working", kind: "permission" }),
