@@ -4,6 +4,10 @@ Release metadata is kept in `package.json`, `update-manifest.json`, and this fil
 
 ## [Unreleased]
 
+### Added
+
+- OSC 7501 program-status reporting: Trebol now tells the terminal what it is doing (`idle`/`working`/`blocked`/`done`/`error`/`clear`) via terminal-native escape sequences, so terminals, multiplexers, and agentic inboxes can show session state without screen scraping. New `swarm-program-status` extension with a TTY gate and `TREBOL_PROGRAM_STATUS=0|1` override.
+
 ### Fixed
 
 - Preserve `--append-system-prompt` when the Forge prompt extension replaces Pi's default system prompt.
