@@ -1,35 +1,12 @@
 import { readFileSync } from "node:fs";
 import { matchesKey } from "@earendil-works/pi-tui";
 import { openRunningWorkView } from "./running-work-view.ts";
+import { state, runningWorkSnapshot, setRunningWork, removeRunningWork, onRunningWorkChange, type RunningWorkItem, type RunningWorkKind, type RunningWorkStatus } from "./running-work-store.ts";
+export { runningWorkSnapshot, setRunningWork, removeRunningWork, onRunningWorkChange };
+export type { RunningWorkItem, RunningWorkKind, RunningWorkStatus };
 
-export type RunningWorkKind = "subagent" | "bash";
-export type RunningWorkStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
-
-export interface RunningWorkItem {
-  id: string;
-  kind: RunningWorkKind;
-  label: string;
-  status: RunningWorkStatus;
-  startedAt: number;
-  endedAt?: number;
-  tokens?: number;
-  detail: string;
-  output?: string;
-  /** Live snapshot of the process output; used while the work is still running. */
-  readOutput?: () => string;
-  transcriptPath?: string;
-}
-
-const KEY = Symbol.for("pi-swarm-running-work");
 export const MAX_VISIBLE_RUNNING_WORK = 6;
 export const RECENT_WORK_MS = 15 * 60 * 1000;
-type State = { items: Map<string, RunningWorkItem>; listeners: Set<() => void>; expanded: boolean; selected: number; sessionId?: string };
-const state = (): State => {
-  const root = globalThis as typeof globalThis & { [KEY]?: State };
-  return root[KEY] ?? (root[KEY] = { items: new Map(), listeners: new Set(), expanded: false, selected: 0 });
-};
-
-export function runningWorkSnapshot(): RunningWorkItem[] { return [...state().items.values()].sort((a, b) => a.startedAt - b.startedAt); }
 export function browsableRunningWork(now = Date.now()): RunningWorkItem[] {
   // Live work is never evicted by recent completions: cap the live set first, then add recent history.
   const live = runningWorkSnapshot().filter(item => item.status === "queued" || item.status === "running");
@@ -52,9 +29,6 @@ export function scopeRunningWorkToSession(sessionId: string | undefined): void {
 export function visibleRunningWork(items = runningWorkSnapshot()): RunningWorkItem[] {
   return items.length <= MAX_VISIBLE_RUNNING_WORK ? items : items.slice(-MAX_VISIBLE_RUNNING_WORK);
 }
-export function setRunningWork(item: RunningWorkItem): void { state().items.set(item.id, { ...item }); state().listeners.forEach(listener => listener()); }
-export function removeRunningWork(id: string): void { state().items.delete(id); state().listeners.forEach(listener => listener()); }
-export function onRunningWorkChange(listener: () => void): () => void { state().listeners.add(listener); return () => state().listeners.delete(listener); }
 export function runningWorkExpanded(): boolean { return state().expanded; }
 export function setRunningWorkExpanded(expanded: boolean): void { state().expanded = expanded; state().listeners.forEach(listener => listener()); }
 export function toggleRunningWorkExpanded(): boolean { setRunningWorkExpanded(!runningWorkExpanded()); return runningWorkExpanded(); }

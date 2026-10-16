@@ -14,6 +14,7 @@
  */
 import { randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
+import { StringDecoder } from "node:string_decoder";
 import { existsSync, lstatSync, mkdirSync, openSync, closeSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { constants as osConstants, homedir, tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve, isAbsolute } from "node:path";
@@ -437,7 +438,13 @@ export function resolveWorkdir(cwd: string | undefined, defaultCwd: string): { d
   return { dir: abs };
 }
 
-export interface RunOptions { defaultCwd: string; shell?: string; signal?: AbortSignal }
+export interface RunOptions {
+  defaultCwd: string;
+  shell?: string;
+  signal?: AbortSignal;
+  /** Cumulative decoded streams and the combined text in observed pipe-event order. */
+  onOutput?: (stdout: string, stderr: string, display: string) => void;
+}
 
 /**
  * bash.go prepareCmd: `cmd.WaitDelay = 2 * time.Second`. Go issue #21922 — a
@@ -474,6 +481,7 @@ export function runSwarmBash(params: BashParams, options: RunOptions): Promise<B
   const effectiveSecs = requestedSecs > 0 ? Math.max(requestedSecs, 60) : 60;
   const wd = resolveWorkdir(params.cwd, options.defaultCwd);
   if ("error" in wd) return Promise.resolve({ error: invalidCwdMessage(wd.error) });
+  if (options.signal?.aborted) return Promise.resolve({ error: "Error executing bash: command cancelled" });
   const env: NodeJS.ProcessEnv = { ...process.env, TERM: "dumb", DEBIAN_FRONTEND: "noninteractive", CI: "true", PS1: "", PROMPT_COMMAND: "", ...(params.env ?? {}) };
   return new Promise((resolveP) => {
     const started = Date.now();
@@ -482,8 +490,25 @@ export function runSwarmBash(params: BashParams, options: RunOptions): Promise<B
     // pipe (and any bound port) alive. bgprocess spawns the same way.
     const child = spawn(options.shell ?? "/bin/bash", ["-c", params.command], { cwd: wd.dir || undefined, env, stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32" });
     const out: Buffer[] = [], err: Buffer[] = [];
-    child.stdout.on("data", (d: Buffer) => out.push(d));
-    child.stderr.on("data", (d: Buffer) => err.push(d));
+    let settled = false;
+    const outDecoder = new StringDecoder("utf8"), errDecoder = new StringDecoder("utf8");
+    let liveOut = "", liveErr = "", display = "";
+    child.stdout.on("data", (d: Buffer) => {
+      if (settled) return;
+      out.push(d);
+      const decoded = outDecoder.write(d);
+      liveOut += decoded;
+      display += decoded;
+      if (decoded) options.onOutput?.(liveOut, liveErr, display);
+    });
+    child.stderr.on("data", (d: Buffer) => {
+      if (settled) return;
+      err.push(d);
+      const decoded = errDecoder.write(d);
+      liveErr += decoded;
+      display += decoded;
+      if (decoded) options.onOutput?.(liveOut, liveErr, display);
+    });
     let timedOut = false;
     const timer = setTimeout(() => { timedOut = true; killProcessTree(child); }, effectiveSecs * 1000);
     const onAbort = () => killProcessTree(child);
@@ -491,13 +516,17 @@ export function runSwarmBash(params: BashParams, options: RunOptions): Promise<B
     // "close" fires only once every pipe holder is gone, which an inherited
     // background child defers indefinitely; "exit" fires on process exit. Wait
     // for whichever comes first, then allow WAIT_DELAY_MS for in-flight output.
-    let settled = false;
     const settle = (code: number | null, signal: NodeJS.Signals | null) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       clearTimeout(waitDelay);
       options.signal?.removeEventListener("abort", onAbort);
+      const outTail = outDecoder.end(), errTail = errDecoder.end();
+      liveOut += outTail;
+      liveErr += errTail;
+      display += outTail + errTail;
+      if (options.onOutput && (outTail || errTail)) options.onOutput(liveOut, liveErr, display);
       // Go ProcessState.ExitCode() is -1 when killed by a signal.
       const exitCode = code ?? (signal ? -1 : 0);
       resolveP({ exitCode, durationMs: Date.now() - started, stdout: Buffer.concat(out).toString("utf8"), stderr: Buffer.concat(err).toString("utf8"), timedOut, requestedSecs, effectiveSecs, description: params.description, signal });
@@ -508,6 +537,6 @@ export function runSwarmBash(params: BashParams, options: RunOptions): Promise<B
       waitDelay = setTimeout(() => settle(code, signal), WAIT_DELAY_MS);
       waitDelay.unref?.();
     });
-    child.on("error", (e) => { clearTimeout(timer); settled = true; resolveP({ error: invalidCwdMessage(String(e)) }); });
+    child.on("error", (e) => { clearTimeout(timer); options.signal?.removeEventListener("abort", onAbort); settled = true; resolveP({ error: invalidCwdMessage(String(e)) }); });
   });
 }

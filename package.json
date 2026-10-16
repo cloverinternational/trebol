@@ -43,6 +43,7 @@
       "extensions/swarm-fs-tools/index.ts",
       "extensions/swarm-history-vault-tools/index.ts",
       "extensions/taskmanage/index.ts",
+      "extensions/tern-resume/index.ts",
       "extensions/vault/index.ts",
       "extensions/memory-history/index.ts",
       "extensions/task-candidate-capture/index.ts",

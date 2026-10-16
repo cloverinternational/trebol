@@ -7,6 +7,16 @@ import {
 } from "../../lib/runtime/swarm-tool-gating.ts";
 
 describe("explicit Pi extension tool gating", () => {
+  it("surfaces ask_user_question under Tern's TUI without bound UI, but not headless", () => {
+    // Regression: Tern runs mode "tui" with hasUI false, so the interactive-only gate hid the ask tool.
+    const tern = { interactive: false, remoteAsk: true, home: "/nonexistent", env: {} };
+    expect(swarmSurfaceFor(tern).has("ask_user_question")).toBe(true);
+    expect(gateActiveTools(["ask_user_question"], tern, {})).toBeUndefined();
+    const headless = { interactive: false, home: "/nonexistent", env: {} };
+    expect(swarmSurfaceFor(headless).has("ask_user_question")).toBe(false);
+    expect(gateActiveTools(["ask_user_question"], headless, {})).toEqual([]);
+  });
+
   it("keeps project_init on the model surface so /init can drive it", () => {
     // Regression: project_init registered but was filtered out of the active
     // set, so the agent reported the tool as missing in a real session.

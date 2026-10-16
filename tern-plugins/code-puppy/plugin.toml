@@ -1,0 +1,13 @@
+schema = 1
+id = "code-puppy"
+name = "Code Puppy"
+version = "0.1.0"
+description = "Launch and control Code Puppy agent panes through documented Tern APIs."
+icon = "sparkle"
+host = "host.luau"
+window = "window.luau"
+
+[[blocks]]
+id = "status"
+title = "Code Puppy"
+icon = "sparkle"

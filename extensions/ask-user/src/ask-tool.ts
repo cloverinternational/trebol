@@ -14,11 +14,19 @@ import {
 	validateParams,
 } from "./ask-tool-helpers.ts";
 import { getAskConfigStore } from "./config/store.ts";
-import type { RemoteAskRuntime } from "./remote-ask.ts";
+import {
+	applyRemoteAskResponse,
+	type RemoteAskFlowHandle,
+	type RemoteAskRuntime,
+} from "./remote-ask.ts";
 import { AskParamsSchema } from "./schema.ts";
 import { prepareAskParams } from "./state/normalize.ts";
-import type { AskParams } from "./types.ts";
+import { toAskResult } from "./state/result.ts";
+import type { AskParams, AskResult, AskState } from "./types.ts";
 import { runAskFlow } from "./ui/controller.ts";
+
+// A headless remote answer that never arrives fails closed as cancelled after this long.
+export const REMOTE_ASK_TIMEOUT_MS = 30 * 60 * 1000;
 
 export function registerAskTool(
 	pi: ExtensionAPI,
@@ -53,7 +61,7 @@ async function executeAskTool(
 	pi: Pick<ExtensionAPI, "appendEntry">,
 	toolCallId: string,
 	params: AskParams,
-	_signal: AbortSignal | undefined,
+	signal: AbortSignal | undefined,
 	_onUpdate: unknown,
 	ctx: ExtensionContext,
 	remoteAsk?: RemoteAskRuntime
@@ -73,6 +81,19 @@ async function executeAskTool(
 	if (ctx.mode !== "tui") {
 		return nonInteractiveResponse(validation.state);
 	}
+	// A TUI without bound UI (headless Tern) answers only through the remote-ask events.
+	if (!ctx.hasUI) {
+		if (!remoteAsk) {
+			return nonInteractiveResponse(validation.state);
+		}
+		const result = await runRemoteAskFlow(
+			remoteAsk,
+			validation.state,
+			toolCallId,
+			signal
+		);
+		return successfulResponse(result);
+	}
 	ctx.ui.setWorkingVisible(false);
 	try {
 		const result = await runAskFlow(ctx, params, {
@@ -84,4 +105,59 @@ async function executeAskTool(
 	} finally {
 		ctx.ui.setWorkingVisible(true);
 	}
+}
+
+// Resolves only from an accepted explicit response (answer or cancel), abort, or timeout.
+// Nothing here answers or approves on the user's behalf.
+export function runRemoteAskFlow(
+	runtime: RemoteAskRuntime,
+	initial: AskState,
+	toolCallId: string,
+	signal: AbortSignal | undefined,
+	timeoutMs: number = REMOTE_ASK_TIMEOUT_MS
+): Promise<AskResult> {
+	return new Promise((resolve) => {
+		let state = initial;
+		let handle: RemoteAskFlowHandle | undefined;
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		let settled = false;
+
+		const cancelledResult = (): AskResult =>
+			toAskResult(applyRemoteAskResponse(state, { kind: "cancel" }).state);
+		const finish = (result: AskResult): void => {
+			if (settled) {
+				return;
+			}
+			settled = true;
+			clearTimeout(timer);
+			signal?.removeEventListener("abort", onAbort);
+			handle?.complete(result);
+			resolve(result);
+		};
+		const onAbort = (): void => finish(cancelledResult());
+
+		if (signal?.aborted) {
+			resolve(cancelledResult());
+			return;
+		}
+		signal?.addEventListener("abort", onAbort, { once: true });
+		handle = runtime.startFlow({
+			source: "tool",
+			toolCallId,
+			title: initial.title,
+			questions: initial.questions,
+			onSubmit(response) {
+				const resolution = applyRemoteAskResponse(state, response);
+				if (!resolution.ok) {
+					return resolution;
+				}
+				state = resolution.state;
+				if (state.completed) {
+					finish(toAskResult(state));
+				}
+				return { ok: true };
+			},
+		});
+		timer = setTimeout(() => finish(cancelledResult()), timeoutMs);
+	});
 }
