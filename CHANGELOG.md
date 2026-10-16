@@ -4,11 +4,17 @@ Release metadata is kept in `package.json`, `update-manifest.json`, and this fil
 
 ## [Unreleased]
 
+### Added
+
+- OSC 7501 program-status reporting: Trebol now tells the terminal what it is doing (`idle`/`working`/`blocked`/`done`/`error`/`clear`) via terminal-native escape sequences, so terminals, multiplexers, and agentic inboxes can show session state without screen scraping. New `swarm-program-status` extension with a TTY gate and `TREBOL_PROGRAM_STATUS=0|1` override.
+
 ### Fixed
 
 - Preserve `--append-system-prompt` when the Forge prompt extension replaces Pi's default system prompt.
 
 - TaskManage reuses saved answers with evidence revalidation, supports trusted evidence roots and explicit aliases, reports actionable citation errors, rebinds on session switches, and rolls back atomic cancellation. Add regression coverage and isolate hook-test environment state.
+
+- `autogenskills` hook group starts disabled by default; enable it explicitly with `/hooks autogenskills on`.
 
 - `apply_patch` and Bash `cwd` no longer reject paths outside the workspace. The workspace-only `checkAllowedPath` check is removed from both.
 - Headless sub-agents no longer send `temperature`; `claude-haiku-5-5` rejects it with a 400. Model-default temperature is removed in headless mode too.

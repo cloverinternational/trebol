@@ -59,7 +59,8 @@
       "extensions/swarm-tools-status/index.ts",
       "extensions/swarm-btw/index.ts",
       "extensions/swarm-image-paste/index.ts",
-      "extensions/green-chat-input/index.ts"
+      "extensions/green-chat-input/index.ts",
+      "extensions/swarm-program-status/index.ts"
     ],
     "themes": [
       ".pi/themes"
