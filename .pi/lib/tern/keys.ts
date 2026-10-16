@@ -15,6 +15,10 @@ export type KeyEffect =
 	| { kind: "down" }
 	| { kind: "tab" }
 	| { kind: "tabMove"; delta: number }
+	| { kind: "cursor"; direction: -1 | 1; word: boolean; extend: boolean }
+	| { kind: "selectAll" }
+	| { kind: "undo" }
+	| { kind: "deleteWord" }
 	| { kind: "text"; text: string };
 
 export function keyEffect(sequence: string): KeyEffect | null {
@@ -27,6 +31,13 @@ export function keyEffect(sequence: string): KeyEffect | null {
 	if (name === "alt+up") return { kind: "dequeue" };
 	if (name === "shift+enter") return { kind: "newline" };
 	if (name === "backspace") return { kind: "backspace" };
+	if (name === "alt+backspace") return { kind: "deleteWord" };
+	if (name === "ctrl+a" || name === "super+a") return { kind: "selectAll" };
+	if (name === "ctrl+z" || name === "super+z") return { kind: "undo" };
+	if (name === "alt+left") return { kind: "cursor", direction: -1, word: true, extend: false };
+	if (name === "alt+right") return { kind: "cursor", direction: 1, word: true, extend: false };
+	if (name === "shift+left") return { kind: "cursor", direction: -1, word: false, extend: true };
+	if (name === "shift+right") return { kind: "cursor", direction: 1, word: false, extend: true };
 	if (name === "up") return { kind: "up" };
 	if (name === "down") return { kind: "down" };
 	if (name === "left" || name === "shift+tab") return { kind: "tabMove", delta: -1 };

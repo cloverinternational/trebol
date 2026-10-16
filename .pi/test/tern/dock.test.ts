@@ -211,7 +211,8 @@ describe("Tern regions and dock structure", () => {
 			}],
 		} };
 		const { writes } = make(fakeSession({ entries: [entry] }));
-		expect(childrenOf(writes, "dock")).toEqual(["task-top", "composer-col"]);
+		expect(childrenOf(writes, "dock")).toEqual(["composer-col"]);
+		expect(childrenOf(writes, "composer-col")[0]).toBe("task-top");
 		expect(replay(writes).get("task-top")?.k).toBe("col");
 		expect(replay(writes).get("task-top")?.p?.role).toBe("pi.tasks");
 		expect(replay(writes).get("task-question-0")?.p?.role).toBe("pi.tasks.question");

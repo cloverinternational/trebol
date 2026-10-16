@@ -20,6 +20,8 @@ export interface GitFacts {
 
 export interface ComposerFacts {
 	draft: string;
+	cursor?: number;
+	selection?: { start: number; end: number };
 	ghost?: string;
 	busy: boolean;
 	queuedFollowUp?: number;
@@ -100,7 +102,7 @@ function gitSeg(g: GitFacts): TspNode | undefined {
 	return { id: "git", k: "seg", p: { role: "omp.composer.fact", priority: 1004, actions: { click: "status.git" }, spans, icon: g.branch ? "branch" : "git", ...(dirty ? { tone: "warning" } : {}) } };
 }
 
-export function composerNodes(f: ComposerFacts, loading?: TspNode): TspNode[] {
+export function composerNodes(f: ComposerFacts, loading?: TspNode, above: TspNode[] = []): TspNode[] {
 	const level = f.thinking;
 	const effortInModel = level !== undefined && f.effortKind;
 	const model: TspNode | undefined = f.model
@@ -149,7 +151,7 @@ export function composerNodes(f: ComposerFacts, loading?: TspNode): TspNode[] {
 		id: "composer-line",
 		k: "row",
 		p: { role: "omp.composer.line", align: "start", gap: "sm" },
-		c: [{ id: "composer", k: "editor", p: { text: f.draft, cursor: f.draft.length, ...(f.ghost ? { ghost: f.ghost } : {}), sendable: false, placeholder: PLACEHOLDER } }],
+		c: [{ id: "composer", k: "editor", p: { text: f.draft, cursor: f.cursor ?? f.draft.length, ...(f.selection ? { selection: f.selection } : {}), ...(f.ghost ? { ghost: f.ghost } : {}), sendable: false, placeholder: PLACEHOLDER } }],
 	};
 	return [
 		...(loading ? [loading] : []),
@@ -157,7 +159,7 @@ export function composerNodes(f: ComposerFacts, loading?: TspNode): TspNode[] {
 			id: "composer-col",
 			k: "col",
 			p: { role: "omp.editor", ...(f.busy ? { tone: "pending" } : {}) },
-			c: [...(f.context ? [contextMeter(f.context)] : []), line, bar],
+			c: [...above, ...(f.context ? [contextMeter(f.context)] : []), line, bar],
 		},
 	];
 }

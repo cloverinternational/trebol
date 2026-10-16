@@ -51,5 +51,5 @@ export function loadingNode(state: LoadingState): TspNode | null {
 	if (state.phase === "pending") {
 		return { id: LOADING_NODE_ID, k: "spinner", p: { label: "Waiting for agent", style: "dots" } };
 	}
-	return null;
+	return { id: LOADING_NODE_ID, k: "shimmer", p: { text: "Working" } };
 }

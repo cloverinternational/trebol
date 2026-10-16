@@ -46,7 +46,7 @@ export function registerSwarmBash(pi: Pi): void {
     // so they opt out of Pi's default padded Box shell entirely.
     renderShell: "self",
     renderCall(args: BashParams, theme: any) {
-      return bashCallCardComponent(args, theme, (text, width) => truncateToWidth(text, width, "…"));
+      return bashCallCardComponent({ command: args.command, timeout_seconds: args.timeout_seconds }, theme, (text, width) => truncateToWidth(text, width, "…"));
     },
     renderResult(result: any, options: any, theme: any) {
       return bashResultCardComponent(result, options, theme, wrapTextWithAnsi);
@@ -55,9 +55,33 @@ export function registerSwarmBash(pi: Pi): void {
     // this tool is listed in VALIDATES_OWN_ARGUMENTS and Pi must not
     // pre-validate; the real schema still reaches the model via the overlay.
     parameters: { ...PERMISSIVE_PARAMETERS },
-    async execute(_toolCallId: string, params: BashParams, signal: AbortSignal | undefined, _onUpdate: unknown, ctx: any) {
+    async execute(_toolCallId: string, params: BashParams, signal: AbortSignal | undefined, onUpdate: ((result: any) => void) | undefined, ctx: any) {
       params = normalizeBashParams(params);
-      const outcome = await runSwarmBash(params, { defaultCwd: ctx?.cwd ?? pi.getCwd?.() ?? process.cwd(), signal });
+      let pending: string | undefined;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let lastUpdate = 0;
+      const flush = () => {
+        if (!pending || !onUpdate) return;
+        const display = pending;
+        pending = undefined;
+        lastUpdate = Date.now();
+        onUpdate(text(display, { command: params.command }));
+      };
+      const outcome = await runSwarmBash(params, {
+        defaultCwd: ctx?.cwd ?? pi.getCwd?.() ?? process.cwd(), signal,
+        // Pi forwards these snapshots as tool_execution_update while the shell is alive.
+        // The final XML envelope is still built only once after completion.
+        onOutput: onUpdate ? (_stdout, _stderr, display) => {
+          pending = display;
+          if (Date.now() - lastUpdate >= 100) {
+            if (timer) clearTimeout(timer);
+            timer = undefined;
+            flush();
+          } else if (!timer) timer = setTimeout(() => { timer = undefined; flush(); }, 100 - (Date.now() - lastUpdate));
+        } : undefined,
+      });
+      if (timer) clearTimeout(timer);
+      flush();
       if ("error" in outcome) return fail(outcome.error);
       const details = { exit_code: outcome.exitCode, duration_ms: outcome.durationMs, timed_out: outcome.timedOut, timeout_seconds: outcome.effectiveSecs, command: params.command, ...(params.description ? { description: params.description } : {}) };
       if (outcome.timedOut) return fail(timedOutMessage(outcome.effectiveSecs, outcome.exitCode));

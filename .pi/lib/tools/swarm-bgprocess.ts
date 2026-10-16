@@ -191,6 +191,19 @@ function regexpError(pattern: string, error: unknown): string {
   return `error parsing regexp: ${reason}`;
 }
 
+export const SNAPSHOT_TAIL_LINES = 20;
+/** Read-only status view of one background command. Unknown id → undefined; finished items keep their terminal state. */
+export interface BackgroundSnapshot {
+  task_id: string;
+  status: ProcessState;
+  command: string;
+  started_at: number;
+  ended_at?: number;
+  exit_code?: number;
+  /** Last SNAPSHOT_TAIL_LINES complete lines seen by the last poll; empty when no output yet. */
+  output_tail: string[];
+}
+
 export class SwarmBackgroundProcessManager {
   private readonly processes = new Map<string, ProcessRecord>();
   private doneListeners: Array<(done: BackgroundDone) => void> = [];
@@ -503,6 +516,21 @@ export class SwarmBackgroundProcessManager {
     }
     const rec = this.get(id);
     return { text: jsonIndent(this.formatted(rec, params, action === "status")) };
+  }
+
+  /** Read-only: never calls poll(), so pending child chunks and the running process are untouched. */
+  snapshot(id: string): BackgroundSnapshot | undefined {
+    const rec = this.processes.get(id);
+    if (!rec) return undefined;
+    return {
+      task_id: rec.id,
+      status: rec.state,
+      command: rec.command,
+      started_at: rec.startedMs,
+      ...(rec.endedMs !== undefined ? { ended_at: rec.endedMs } : {}),
+      ...(rec.exitCode !== undefined ? { exit_code: rec.exitCode } : {}),
+      output_tail: rec.lines.slice(-SNAPSHOT_TAIL_LINES).map(line => line.content),
+    };
   }
 
   private async cancelRecord(rec: ProcessRecord): Promise<void> {

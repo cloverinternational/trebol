@@ -3,6 +3,7 @@
 // native autocomplete (overlay `omp.autocomplete` anchored to the editor caret > col `omp.select` > list).
 import { CombinedAutocompleteProvider, type AutocompleteItem } from "@earendil-works/pi-tui";
 import type { SlashCommandItem } from "./commands.ts";
+import { mentionToken, suggestMentions } from "./mentions.ts";
 import type { TspNode } from "./tsp.ts";
 
 export const AUTOCOMPLETE_ID = "complete";
@@ -87,6 +88,10 @@ export class SlashAutocomplete {
 		if (this.#open) return this.#refresh(this.#open.force, false);
 		const text = this.#host.draft();
 		const slash = text.trimStart().startsWith("/");
+		// A typed `@` token (or any edit within one) opens the workspace file list.
+		if (mentionToken(text) !== null && !slash) {
+			return this.#refresh(false, false);
+		}
 		if (edit.kind === "backspace" ? slash : edit.text === "/" ? text.trim() === "/" : slash && [...edit.text].every((c) => TRIGGER_CHAR.test(c))) {
 			return this.#refresh(false, false);
 		}
@@ -145,6 +150,17 @@ export class SlashAutocomplete {
 	async #refresh(force: boolean, explicitTab: boolean, completed?: string): Promise<void> {
 		const request = ++this.#request;
 		const text = this.#host.draft();
+		const mention = mentionToken(text);
+		if (mention !== null && !text.trimStart().startsWith("/")) {
+			const items = suggestMentions(mention, this.#host.cwd());
+			if (!items.length) {
+				this.close();
+				return;
+			}
+			this.#open = { items, prefix: mention, index: 0, force: false, gen: ++this.#gen };
+			this.#host.render();
+			return;
+		}
 		const provider = this.#provider();
 		const suggestions = await provider.getSuggestions([text], 0, text.length, { signal: new AbortController().signal, force });
 		if (request !== this.#request || text !== this.#host.draft()) return;
@@ -176,6 +192,8 @@ export class SlashAutocomplete {
 		this.#request += 1;
 		if (!item) return this.#host.render();
 		const text = this.#host.draft();
+		// A mention replaces the typed token and leaves a space, so Enter then sends the prompt.
+		if (open.prefix.startsWith("@")) return this.#host.setDraft(`${text.slice(0, text.length - open.prefix.length)}${item.value} `);
 		this.#host.setDraft(this.#provider().applyCompletion([text], 0, text.length, item, open.prefix).lines[0]);
 	}
 

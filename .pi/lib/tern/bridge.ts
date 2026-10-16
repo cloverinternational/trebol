@@ -4,6 +4,7 @@
 // Pi remains the authority for prompts and tools; this module adds no grants. Extension UI prompts
 // (select, confirm, input, editor, notify, text widgets) are answered by native Tern dialogs (ext-ui.ts),
 // so every extension command works without per-command code. They resolve only from user action.
+import { onRunningWorkChange, runningWorkSnapshot, type RunningWorkItem } from "../ui/running-work-store.ts";
 import {
 	autocompleteCommands,
 	EMPTY_COMMAND_SOURCE,
@@ -18,14 +19,18 @@ import { readGitFacts } from "./git-facts.ts";
 import { PI_COMPOSER_CSS } from "./composer-style.ts";
 import { IDLE_LOADING, loadingNode, reduceLoading, type LoadingState } from "./loading.ts";
 import { projectTaskView, type TaskView, type TaskViewRow, type TaskViewSessionManager } from "./task-view.ts";
+import { buildBoard } from "./task-board.ts";
 import { TernAskDialog, type AskEventBus } from "./ask-dialog.ts";
 import { TernExtensionUI, UI_PROMPT_LIST_ID } from "./ext-ui.ts";
 import { AUTOCOMPLETE_ID, SlashAutocomplete, type Edit } from "./autocomplete.ts";
+import { expandMentions } from "./mentions.ts";
+import { DraftEditor } from "./draft-edit.ts";
 import { getNativeClipboard } from "@earendil-works/pi-tui";
 import { randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { extractBashDisplayText } from "../tools/swarm-bash.ts";
 
 export interface PiEventLike {
 	type: string;
@@ -79,6 +84,14 @@ interface Item {
 	name?: string;
 	args?: unknown;
 	output?: string;
+	startedAt?: number;
+	took?: number;
+	exit?: number;
+	timedOut?: boolean;
+	cancelled?: boolean;
+	// TaskManage's structured batch from the final result, rendered as task rows (never as JSON).
+	batch?: TaskManageBatch;
+	// Repeated terminal callbacks must not erase the last foreground snapshot.
 }
 
 const OUTPUT_LIMIT = 4000;
@@ -181,9 +194,9 @@ function toolTarget(args: unknown): { target?: string; targetKind?: "command" | 
 	return {};
 }
 
-function resultText(result: unknown): string {
+function resultText(result: unknown, limit = OUTPUT_LIMIT): string {
 	const text = typeof result === "string" ? result : messageText(result);
-	return text.length > OUTPUT_LIMIT ? `${text.slice(0, OUTPUT_LIMIT)}\n… (truncated)` : text;
+	return text.length > limit ? `${text.slice(0, limit)}\n… (truncated)` : text;
 }
 
 // Pure projection of Pi events into an ordered transcript. Keeps stable ids per message and tool call.
@@ -244,6 +257,8 @@ export class TranscriptProjector {
 				return true;
 			}
 			case "tool_execution_start": {
+				const prior = this.#items.find((i) => i.id === `t-${String(event.toolCallId)}`);
+				if (prior) return false;
 				this.#items.push({
 					id: `t-${String(event.toolCallId)}`,
 					role: "tool",
@@ -251,13 +266,14 @@ export class TranscriptProjector {
 					status: "running",
 					name: String(event.toolName),
 					args: event.args,
+					startedAt: Date.now(),
 				});
 				return true;
 			}
 			case "tool_execution_update": {
 				const item = this.#items.find((i) => i.id === `t-${String(event.toolCallId)}`);
-				if (!item) return false;
-				const output = resultText(event.partialResult);
+				if (!item || item.status !== "running") return false;
+				const output = item.name?.toLowerCase() === "bash" ? messageText(event.partialResult) : resultText(event.partialResult);
 				if (output === item.output) return false;
 				item.output = output;
 				return true;
@@ -265,11 +281,38 @@ export class TranscriptProjector {
 			case "tool_execution_end": {
 				const item = this.#items.find((i) => i.id === `t-${String(event.toolCallId)}`);
 				if (item) {
-					item.status = event.isError ? "error" : "ok";
+					if (item.cancelled || item.status !== "running") return false;
+					const details = (event.result as { details?: { exit_code?: unknown; duration_ms?: unknown; timed_out?: unknown } } | null)?.details;
+					const resultBody = messageText(event.result);
+					item.took = typeof details?.duration_ms === "number" ? details.duration_ms : item.startedAt ? Date.now() - item.startedAt : undefined;
+					// Pi turns thrown Bash errors into prose without retaining tool details.
+					const bashFailure = item.name?.toLowerCase() === "bash" && event.isError === true && resultBody.startsWith("Error executing bash:");
+					const failureExit = bashFailure ? /^Error executing bash: Command exited with code (-?\d+):/.exec(resultBody)?.[1] : undefined;
+					item.exit = typeof details?.exit_code === "number" && details.exit_code !== 0 ? details.exit_code : failureExit ? Number(failureExit) : undefined;
+					item.timedOut = details?.timed_out === true || (bashFailure && /^Error executing bash: command timed out after \d+s/.test(resultBody));
+					item.status = event.isError || item.exit !== undefined ? "error" : "ok";
+					if (item.name === "TaskManage") item.batch = taskManageBatch(event.result);
 					item.text = `tool ${String(event.toolName)} ${item.status}`;
-					item.output = resultText(event.result);
+					// A cancelled tool may have no final payload. Retain the last live snapshot.
+					const final = item.name?.toLowerCase() === "bash" ? messageText(event.result) : resultText(event.result);
+					// The final model envelope merges streams by channel, strips ANSI, and may
+					// truncate. The last live snapshot is the full ordered terminal output;
+					// only fall back to the envelope when no update ever arrived.
+					if (!item.output && final) item.output = item.name?.toLowerCase() === "bash" && !event.isError ? extractBashDisplayText(final) : final;
 				}
 				return true;
+			}
+			case "agent_end": {
+				let changed = false;
+				for (const item of this.#items) {
+				if (item.role !== "tool" || item.name?.toLowerCase() !== "bash" || item.status !== "running") continue;
+					// Pi's aborted turn can omit tool_execution_end; never leave a live spinner.
+					item.cancelled = true;
+					item.took = item.startedAt ? Date.now() - item.startedAt : undefined;
+					item.status = "error";
+					changed = true;
+				}
+				return changed;
 			}
 			default:
 				return false;
@@ -292,8 +335,11 @@ export class TranscriptProjector {
 }
 
 function toolNode(item: Item): TspNode {
-	const status = item.status === "ok" ? "done" : item.status === "error" ? "error" : "running";
+	const status = item.cancelled ? "cancelled" : item.status === "ok" ? "done" : item.status === "error" ? "error" : "running";
 	const { target, targetKind } = toolTarget(item.args);
+	const bash = item.name === "bash" || item.name === "Bash";
+	if (bash) return bashToolNode(item, status);
+	if (item.name === "TaskManage") return taskManageToolNode(item, status);
 	const node: TspNode = {
 		id: item.id,
 		k: "tool",
@@ -307,6 +353,114 @@ function toolNode(item: Item): TspNode {
 	};
 	if (item.output) node.c = [{ id: `${item.id}-out`, k: "text", p: { text: item.output } }];
 	return node;
+}
+
+interface TaskManageBatch {
+	status?: string;
+	results: Array<{ key?: string; op?: string; status?: string; error?: unknown; data?: { task?: { id?: string; subject?: string; status?: string } } }>;
+}
+
+const isBatch = (value: unknown): value is TaskManageBatch =>
+	typeof value === "object" && value !== null && Array.isArray((value as { results?: unknown }).results);
+
+// The structured batch is canonical; the model-facing JSON text is only a fallback.
+function taskManageBatch(result: unknown): TaskManageBatch | undefined {
+	const details = (result as { details?: { batch?: unknown } } | null)?.details;
+	if (isBatch(details?.batch)) return details.batch;
+	if (isBatch(details)) return details;
+	try {
+		const parsed: unknown = JSON.parse(messageText(result));
+		return isBatch(parsed) ? parsed : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+function taskErrorText(error: unknown): string {
+	const message = typeof error === "object" && error !== null ? (error as { message?: unknown }).message : error;
+	return typeof message === "string" && message ? message : "failed";
+}
+
+const TASK_MARKS: Record<string, string> = { pending: "○", in_progress: "◐", completed: "●", deleted: "✕" };
+
+// Hoja-style task cards: one row per operation, status mark and subject. The raw JSON is never rendered.
+function taskManageToolNode(item: Item, status: "running" | "done" | "error" | "cancelled"): TspNode {
+	const args = item.args as { operations?: unknown } | undefined;
+	const ops = Array.isArray(args?.operations) ? (args.operations as Array<Record<string, unknown>>) : [];
+	const results = item.batch?.results ?? [];
+	const byKey = new Map(results.filter((r) => typeof r.key === "string").map((r) => [r.key as string, r]));
+	const rows: TspNode[] = ops.map((op, i) => {
+		const key = typeof op.key === "string" ? op.key : `op${i}`;
+		const result = byKey.get(key);
+		const task = result?.data?.task;
+		const failed = result?.status === "failed" || result?.status === "error" || result?.error !== undefined;
+		const taskStatus = task?.status ?? (typeof op.status === "string" ? op.status : undefined);
+		const id = task?.id ?? (typeof op.taskId === "string" ? op.taskId : undefined);
+		const subject = task?.subject ?? (typeof op.subject === "string" ? op.subject : "");
+		const mark = failed ? "✕" : TASK_MARKS[taskStatus ?? ""] ?? "○";
+		const tone = failed ? "error" : taskStatus === "completed" ? "success" : taskStatus === "in_progress" ? "accent" : "muted";
+		return { id: `${item.id}-op-${i}`, k: "col", p: { role: "tasks.row", gap: "none", tone }, c: [
+			{ id: `${item.id}-op-${i}-head`, k: "row", p: { role: "tasks.row.head", gap: "sm", align: "center" }, c: [
+				{ id: `${item.id}-op-${i}-mark`, k: "text", p: { role: "tasks.mark", text: mark } },
+				{ id: `${item.id}-op-${i}-op`, k: "text", p: { role: "tasks.op", text: `${typeof op.op === "string" ? op.op : "op"}${id ? ` #${id}` : ""}` } },
+			] },
+			...(subject ? [{ id: `${item.id}-op-${i}-subject`, k: "text", p: { role: "tasks.subject", text: subject } }] : []),
+			...(failed ? [{ id: `${item.id}-op-${i}-error`, k: "text", p: { role: "tasks.error", text: taskErrorText(result?.error) } }] : []),
+		] };
+	});
+	const state = status === "running" ? "Running" : status === "cancelled" ? "Cancelled" : status === "error" ? "Failed" : "Done";
+	const tone = status === "running" ? "pending" : status === "done" ? "success" : status === "cancelled" ? "muted" : "error";
+	const elapsed = status === "running" ? Date.now() - (item.startedAt ?? Date.now()) : item.took ?? 0;
+	return {
+		id: item.id, k: "tool",
+		p: {
+			role: "tasks.call", name: "TaskManage", title: "Tasks", status, frame: "inline", collapsible: true, collapsed: false,
+			...(status === "running" ? { age: elapsed } : { took: elapsed }),
+		},
+		c: [{ id: `${item.id}-body`, k: "col", p: { role: "tasks.body", gap: "none" }, c: [
+			...rows,
+			{ id: `${item.id}-state`, k: "text", p: { role: "tasks.state", tone, spans: [{ t: `${ops.length} op${ops.length === 1 ? "" : "s"} · ${state}` }] } },
+		] }],
+	};
+}
+
+// Mirror OMP's native bash describeCall/describeResult: the head names the intent,
+// while a single borderless run contains the command, live output and state foot.
+function bashToolNode(item: Item, status: "running" | "done" | "error" | "cancelled"): TspNode {
+	const args = item.args as { command?: unknown; description?: unknown; name?: unknown } | undefined;
+	const command = typeof args?.command === "string" && args.command ? args.command : "…";
+	// OMP's optional name annotates the verb; our description is the intent.
+	const label = typeof args?.name === "string" && args.name ? `Bash · ${args.name}` : "Bash";
+	const elapsed = status === "running" ? Date.now() - (item.startedAt ?? Date.now()) : item.took ?? 0;
+	const state = status === "running" ? "Running" : status === "cancelled" ? "Cancelled" : item.timedOut ? "Timed out" : status === "error" ? item.exit !== undefined ? `exit ${item.exit}` : "Failed" : "Done";
+	const tone = status === "running" ? "pending" : status === "done" ? "success" : status === "cancelled" ? "muted" : item.timedOut ? "warning" : "error";
+	const foot: TspNode = {
+		id: `${item.id}-foot`, k: "row", p: { role: "omp.run.foot", gap: "sm", align: "center" },
+		c: [
+			{ id: `${item.id}-state`, k: "text", p: { role: "omp.run.state", tone, spans: [{ t: state }] } },
+			{ id: `${item.id}-elapsed`, k: "elapsed", p: { role: "omp.run.time", age: elapsed, ...(status === "running" ? {} : { stopped: elapsed }), format: "short" } },
+		],
+	};
+	const run: TspNode = {
+		id: `${item.id}-run`, k: "col", p: { role: "omp.run", gap: "none", ...(status === "error" ? { tone: item.timedOut ? "warning" : "error" } : {}) },
+		c: [
+			{ id: `${item.id}-input`, k: "code", p: { role: "omp.tool.bash.command", lang: "bash", wrap: true, preview: { lines: 6 }, text: command.trimEnd() } },
+			...(item.output?.trim() ? [{ id: `${item.id}-out`, k: "ansi", p: { role: "omp.tool.bash.output", text: item.output, follow: true, preview: { lines: 10 } } }] : []),
+			foot,
+		],
+	};
+	return {
+		id: item.id, k: "tool",
+		p: {
+			role: "omp.tool.bash", key: item.id.slice(2), name: "bash", title: label,
+			...(typeof args?.description === "string" && args.description ? { target: args.description, targetKind: "text" } : {}),
+			command, status, frame: "inline", collapsible: true, collapsed: true, preview: "children",
+			...(status === "running" ? { age: elapsed } : { took: elapsed }),
+			...(item.exit !== undefined ? { exit: item.exit } : {}),
+			...(item.timedOut ? { note: "timed out", tone: "warning" } : status === "cancelled" ? { note: "cancelled" } : {}),
+		},
+		c: [run],
+	};
 }
 
 export interface BridgeOptions {
@@ -330,8 +484,20 @@ export interface BridgeOptions {
 }
 
 
+const BACKGROUND_WORK_MAX_ROWS = 5;
+const BACKGROUND_WORK_LABEL_CHARS = 80;
+const boundedChars = (value: string, limit: number) => { const chars = Array.from(value.replace(/\s+/g, " ").trim()); return chars.length > limit ? `${chars.slice(0, limit - 1).join("")}…` : chars.join(""); };
+/** Bash shows its command; a subagent shows its task. Full text stays in the row title. */
+const backgroundWorkLabel = (item: RunningWorkItem) => boundedChars(item.kind === "bash" ? item.detail : `${item.label} · ${item.detail}`, BACKGROUND_WORK_LABEL_CHARS);
+/** Latest non-empty output line for bash, read without changing the process (readOutput only drains buffers). */
+function backgroundWorkTitle(item: RunningWorkItem): string {
+	let latest = "";
+	try { latest = (item.readOutput?.() ?? item.output ?? "").split("\n").filter((line) => line.trim()).at(-1) ?? ""; } catch { latest = ""; }
+	return [item.label, item.detail, latest ? `last output: ${boundedChars(latest, 120)}` : ""].filter(Boolean).join("\n");
+}
+
 export class PiTernBridge {
-	readonly #session: PiSessionLike;
+	#session: PiSessionLike;
 	readonly #surface: TernInlineSurface;
 	readonly #projector = new TranscriptProjector();
 	readonly #onClose?: () => void;
@@ -344,9 +510,10 @@ export class PiTernBridge {
 	#reloading = false;
 	#loading: LoadingState = IDLE_LOADING;
 	#unsubscribe: (() => void) | null = null;
+	#workUnsubscribe: (() => void) | null = null;
 	#busy = false;
 	#closed = false;
-	#draft = "";
+	readonly #editor = new DraftEditor();
 	#queuedSteering: string[] = [];
 	#queuedFollowUp: string[] = [];
 	#model: string | undefined;
@@ -362,6 +529,7 @@ export class PiTernBridge {
 	#modelCatalogError: string | undefined;
 	#modelCatalogRequest = 0;
 	#taskQuestionsCollapsed = false;
+	#taskBoardMode = false;
 	readonly #kinds: readonly string[];
 	#git: GitFacts | undefined;
 	#columns = 100;
@@ -425,14 +593,34 @@ export class PiTernBridge {
 		return this.#draft;
 	}
 
+	get #draft(): string {
+		return this.#editor.text;
+	}
+
+	set #draft(text: string) {
+		this.#editor.setText(text);
+	}
+
 	get items(): readonly Item[] {
 		return this.#projector.items;
+	}
+
+	// Pi replaces the session on resume and similar switches; the bridge follows the replacement.
+	rebind(session: PiSessionLike): void {
+		this.#unsubscribe?.();
+		this.#session = session;
+		this.#unsubscribe = session.subscribe((event) => this.#onEvent(event));
+		this.#syncSession();
+		this.#refreshGit();
+		this.#render();
 	}
 
 	start(title = "pi"): void {
 		this.#surface.open(title);
 		this.#surface.stylesheet("composer", PI_COMPOSER_CSS);
 		this.#unsubscribe = this.#session.subscribe((event) => this.#onEvent(event));
+		this.#workUnsubscribe?.();
+		this.#workUnsubscribe = onRunningWorkChange(() => this.#render());
 		if (this.#events) {
 			this.#dialog = new TernAskDialog(this.#events, () => this.#render());
 			this.#dialog.start();
@@ -481,12 +669,15 @@ export class PiTernBridge {
 	#dock(): TspNode[] {
 		// An open ask flow takes over the input slot: its inline card replaces the composer.
 		if (this.#dialog?.active) return [...this.#taskTop(), ...this.#dialog.nodes()];
+		const work = this.#backgroundWork();
 		const usage = contextUsageOf(this.#session) as { tokens?: unknown; contextWindow?: unknown } | undefined;
 		const window = typeof usage?.contextWindow === "number" && usage.contextWindow > 0 ? usage.contextWindow : undefined;
 		const tokens = typeof usage?.tokens === "number" && Number.isFinite(usage.tokens) ? usage.tokens : null;
 		const compactAt = window !== undefined ? compactionPercent(this.#session, window) : undefined;
-		return [...this.#taskTop(), ...this.#ui.widgetNodes("aboveEditor"), ...composerNodes({
+		return [...work, ...this.#ui.widgetNodes("aboveEditor"), ...composerNodes({
 			draft: this.#draft,
+			cursor: this.#editor.cursor,
+			selection: this.#editor.selection,
 			ghost: this.#complete.ghost,
 			busy: this.#busy,
 			queuedFollowUp: this.#queuedFollowUp.length,
@@ -496,7 +687,7 @@ export class PiTernBridge {
 			effortKind: this.#kinds.includes("effort"),
 			git: this.#git,
 			cost: costOf(this.#session),
-		}, loadingNode(this.#loading) ?? undefined), ...this.#ui.widgetNodes("belowEditor")];
+		}, loadingNode(this.#loading) ?? undefined, this.#taskTop()), ...this.#ui.widgetNodes("belowEditor")];
 	}
 
 	// The bar's facts are clickable in OMP (it opens panels). Pi has no such panels; a click states the
@@ -648,6 +839,25 @@ export class PiTernBridge {
 		};
 	}
 
+	// Hoja-style kanban inside the task popover: status columns, one card per task, click to reference.
+	// Same grouping as the TUI overlay (task-board.ts); rendering only, no task state here.
+	#taskBoardNodes(tasks: TaskViewRow[]): TspNode[] {
+		const marks: Record<string, string> = { todo: "○", in_progress: "◐", done: "●" };
+		const model = buildBoard(tasks);
+		return [{ id: "task-board", k: "row", p: { role: "pi.board" }, c: model.columns.map((col) => ({
+			id: `task-board-${col.id}`, k: "col", p: { role: "pi.board.column", "data-status": col.id }, c: [
+				{ id: `task-board-${col.id}-head`, k: "text", p: { role: "pi.board.head", text: `${marks[col.id] ?? "○"} ${col.title}  ${col.tasks.length}` } },
+				...(col.tasks.length ? col.tasks.flatMap((t) => {
+					const meta = [t.active ? "active" : "", t.blocked ? "blocked" : ""].filter(Boolean).join(" · ");
+					return [{ id: `task-board-card-${t.id}`, k: "text", p: {
+						role: "pi.board.card", tone: taskTone(t), text: `#${t.id} ${t.subject}`,
+						title: `#${t.id} ${t.subject} · ${taskStatusLabel(t)}`, actions: { click: `tasks.reference=${t.id}` },
+					} }, ...(meta ? [{ id: `task-board-meta-${t.id}`, k: "text", p: { role: "pi.board.meta", text: `  ${meta}` } }] : [])];
+				}) : [{ id: `task-board-${col.id}-empty`, k: "text", p: { role: "pi.board.empty", text: "No tasks" } }]),
+			],
+		})) }];
+	}
+
 	#taskView(): TaskView | undefined {
 		const manager = this.#session.sessionManager;
 		if (!manager || typeof manager.getEntries !== "function") return undefined;
@@ -659,6 +869,22 @@ export class PiTernBridge {
 	// view state and never reaches the program, so the popover is always in the tree and shown purely
 	// by the stylesheet's :hover rule (composer-style.ts). Clicking a task puts "task #N" in the draft;
 	// right-click folds the questions. Read-only: nothing here answers, approves or mutates a task.
+	// Live background bash and subagent work as a card above the composer. Read-only projection of the
+	// shared running-work store; hidden when nothing is queued or running.
+	#backgroundWork(now = Date.now()): TspNode[] {
+		const live = runningWorkSnapshot().filter((item) => item.status === "queued" || item.status === "running");
+		if (!live.length) return [];
+		const rows: TspNode[] = live.slice(0, BACKGROUND_WORK_MAX_ROWS).map((item) => ({
+			id: `bg-work-${item.id}`, k: "row", p: { role: "pi.background.row", gap: "sm", align: "center", title: backgroundWorkTitle(item) }, c: [
+				{ id: `bg-work-${item.id}-mark`, k: "text", p: { role: "pi.background.mark", text: item.kind === "bash" ? "$" : "◆", tone: "accent", wrap: "none" } },
+				{ id: `bg-work-${item.id}-label`, k: "text", p: { text: backgroundWorkLabel(item), wrap: "none" } },
+				{ id: `bg-work-${item.id}-time`, k: "elapsed", p: { age: Math.max(0, now - item.startedAt) } },
+			],
+		}));
+		if (live.length > BACKGROUND_WORK_MAX_ROWS) rows.push({ id: "bg-work-more", k: "text", p: { role: "pi.background.more", text: `+${live.length - BACKGROUND_WORK_MAX_ROWS} more · /work`, wrap: "none", tone: "muted" } });
+		return [{ id: "background-work", k: "card", p: { head: `Background work · ${live.length} running`, status: "running", tone: "accent", role: "pi.background" }, c: rows }];
+	}
+
 	#taskTop(): TspNode[] {
 		const view = this.#taskView();
 		if (!view || view.status !== "ready" || !view.focus) return [];
@@ -688,8 +914,8 @@ export class PiTernBridge {
 		const open = tasks.filter((t) => t.status !== "completed").length;
 		return [{ id: "task-top", k: "col", p: { role: "pi.tasks", actions: { menu: [fold] } }, c: [
 			{ id: "task-pop", k: "col", p: { role: "pi.tasks.pop" }, c: [
-				{ id: "task-pop-head", k: "text", p: { role: "pi.tasks.head", text: `All tasks · ${open} open · ${tasks.length - open} done` } },
-				...popRows,
+				{ id: "task-pop-head", k: "text", p: { role: "pi.tasks.head", text: `All tasks · ${open} open · ${tasks.length - open} done · ${this.#taskBoardMode ? "board" : "list"} (click to switch)`, actions: { click: "tasks.view" } } },
+				...(this.#taskBoardMode ? this.#taskBoardNodes(tasks) : popRows),
 			] },
 			{ id: "task-head", k: "text", p: { role: "pi.tasks.head", text: `Tasks  ${view.summary.completed}/${view.summary.completed + view.summary.open} done${view.summary.blocked ? ` · ${view.summary.blocked} blocked` : ""}  ·  hover for all` } },
 			{ id: "task-focus", k: "text", p: {
@@ -722,6 +948,14 @@ export class PiTernBridge {
 	// pi-tui's Editor.setText does.
 	setDraft(text: string): void {
 		this.#writeDraft(text, { kind: "set" });
+	}
+
+	// Applies one editor operation, then renders and refreshes the autocomplete for the new state.
+	#editDraft(apply: () => void, edit: Edit): void {
+		if (this.#closed) return;
+		apply();
+		this.#render();
+		void this.#complete.edited(edit);
 	}
 
 	#writeDraft(text: string, edit: Edit | null): void {
@@ -780,7 +1014,35 @@ export class PiTernBridge {
 			this.#dialog.input(text);
 			return;
 		}
-		this.#writeDraft(this.#draft + text, { kind: "type", text });
+		this.#editDraft(() => this.#editor.insert(text), { kind: "type", text });
+	}
+
+	// Left/right (and Shift+Tab) move the ask-dialog tab when a dialog is open; otherwise they move the caret.
+	moveTabOrCursor(delta: number): void {
+		if (this.#dialog?.active) return this.moveDialogTab(delta);
+		this.moveCursor(delta < 0 ? -1 : 1, false, false);
+	}
+
+	moveCursor(direction: -1 | 1, word: boolean, extend: boolean): void {
+		if (this.#closed) return;
+		if (this.#ui.active || this.#dialog?.active || this.#modelPickerOpen || this.#treePickerOpen) return;
+		this.#editDraft(() => this.#editor.move(direction, { word, extend }), { kind: "set" });
+	}
+
+	selectAllDraft(): void {
+		if (this.#ui.active || this.#dialog?.active || this.#modelPickerOpen || this.#treePickerOpen) return;
+		this.#editDraft(() => this.#editor.selectAll(), { kind: "set" });
+	}
+
+	// Ctrl/Cmd+Z on the composer. Undo can restore text a submit cleared.
+	undoDraft(): void {
+		if (this.#ui.active || this.#dialog?.active || this.#modelPickerOpen || this.#treePickerOpen) return;
+		this.#editDraft(() => this.#editor.undo(), { kind: "set" });
+	}
+
+	deleteWordDraft(): void {
+		if (this.#ui.active || this.#dialog?.active || this.#modelPickerOpen || this.#treePickerOpen) return;
+		this.#editDraft(() => this.#editor.deleteWordBackward(), { kind: "backspace" });
 	}
 
 	// Read clipboard text through Pi's cross-platform clipboard helper.
@@ -818,8 +1080,7 @@ export class PiTernBridge {
 		}
 		if (this.#ui.active) return this.#ui.backspace();
 		if (this.#dialog?.active) return this.#dialog.backspace();
-		if (!this.#draft) return;
-		this.#writeDraft([...this.#draft].slice(0, -1).join(""), { kind: "backspace" });
+		this.#editDraft(() => this.#editor.backspace(), { kind: "backspace" });
 	}
 
 	// Pi's app.clear (Ctrl+C) clears only the editor; it does not cancel a turn.
@@ -958,6 +1219,10 @@ export class PiTernBridge {
 		if (act === "close") this.close();
 		if (act === "interrupt") void this.cancel();
 		if (act === "tasks.reference" && typeof msg.body.value === "string") this.#referenceTask(msg.body.value);
+		if (act === "tasks.view") {
+			this.#taskBoardMode = !this.#taskBoardMode;
+			this.#render();
+		}
 		if (act === "tasks.collapse" || act === "tasks.expand") {
 			this.#taskQuestionsCollapsed = act === "tasks.collapse";
 			this.#render();
@@ -1143,7 +1408,7 @@ export class PiTernBridge {
 		this.#busy = true;
 		this.#loading = reduceLoading(this.#loading, { type: "prompt_start" });
 		this.#render();
-		return this.#session.prompt(prompt).catch((error: unknown) => {
+		return this.#session.prompt(this.#withMentions(prompt)).catch((error: unknown) => {
 			this.#busy = false;
 			this.#loading = reduceLoading(this.#loading, { type: "failure" });
 			this.#projector.add("system", `error: ${error instanceof Error ? error.message : String(error)}`);
@@ -1160,7 +1425,7 @@ export class PiTernBridge {
 		this.#queuedFollowUp = [...this.#queuedFollowUp, prompt];
 		this.#projector.add("system", `Follow-up queued (${this.#queuedFollowUp.length})`);
 		this.#render();
-		return this.#session.prompt(prompt, { streamingBehavior: "followUp" }).catch((error: unknown) => {
+		return this.#session.prompt(this.#withMentions(prompt), { streamingBehavior: "followUp" }).catch((error: unknown) => {
 			const queuedIndex = this.#queuedFollowUp.lastIndexOf(prompt);
 			if (queuedIndex >= 0) this.#queuedFollowUp.splice(queuedIndex, 1);
 			this.#projector.add("system", `error queueing follow-up: ${error instanceof Error ? error.message : String(error)}`);
@@ -1176,6 +1441,24 @@ export class PiTernBridge {
 		this.#queuedFollowUp = [];
 		if (queued.length) this.setDraft([queued.join("\n\n"), this.#draft].filter(Boolean).join("\n\n"));
 		else { this.#projector.add("system", "No queued messages to restore"); this.#render(); }
+	}
+
+	// Enter with the autocomplete open applies the selection (pi-tui Editor); a command-name completion then
+	// Plain prompts reach Pi with their resolved @mentions attached; the transcript keeps the typed text.
+	#withMentions(prompt: string): string {
+		try {
+			const cwd = this.#session.sessionManager?.getCwd?.() ?? process.cwd();
+			const { prompt: expanded, notices } = expandMentions(prompt, cwd);
+			if (notices.length) {
+				this.#projector.add("system", notices.join("\n"));
+				this.#render();
+			}
+			return expanded;
+		} catch (error) {
+			this.#projector.add("system", `mention expansion failed, sent as typed: ${error instanceof Error ? error.message : String(error)}`);
+			this.#render();
+			return prompt;
+		}
 	}
 
 	// Enter with the autocomplete open applies the selection (pi-tui Editor); a command-name completion then
@@ -1202,6 +1485,11 @@ export class PiTernBridge {
 			if (name === "model") return await this.#modelCommand(args);
 			if (name === "quit") return void this.close();
 			if (this.#busy && name !== "name") return say(`busy: /${name} runs when the current turn finishes or is cancelled`);
+			// /resume is Pi's picker name; Tern runs the extension command that owns the picker (extensions/tern-resume).
+			if (name === "resume") {
+				say("Loading sessions…");
+				return await s.prompt("/tern-resume");
+			}
 			if (name === "thinking") {
 				const levels = s.getAvailableThinkingLevels?.() ?? [];
 				let level: string | undefined = levels.find((l) => l.toLowerCase() === args.toLowerCase());
@@ -1248,12 +1536,15 @@ export class PiTernBridge {
 		if (this.#closed || !this.#busy) return;
 		await this.#session.abort();
 		this.#busy = false;
-	this.#loading = reduceLoading(this.#loading, { type: "abort" });
+		this.#loading = reduceLoading(this.#loading, { type: "abort" });
+		this.#projector.apply({ type: "agent_end" });
 		this.#projector.add("system", "cancelled");
 		this.#render();
 	}
 
 	close(): void {
+		this.#workUnsubscribe?.();
+		this.#workUnsubscribe = null;
 		if (this.#closed) return;
 		this.#closed = true;
 	this.#loading = reduceLoading(this.#loading, { type: "close" });
