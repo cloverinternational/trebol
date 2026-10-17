@@ -264,13 +264,13 @@ describe("TernAskDialog", () => {
 			{ id: "scope", label: "Scope", prompt: "Which?", type: "single", required: true, options: [{ value: "s", label: "S", freeform: false }] },
 		] as any));
 		dialog.selectNumber(1);
-		expect(JSON.stringify(dialog.nodes())).toContain("Type your answer: ▏");
+		expect(JSON.stringify(dialog.nodes())).toContain("\"detail\":\"▏\"");
 		dialog.input("I");
 		dialog.input(" ");
 		dialog.input("want");
 		dialog.backspace();
 		dialog.input("t");
-		expect(JSON.stringify(dialog.nodes())).toContain("Type your answer: I want▏");
+		expect(JSON.stringify(dialog.nodes())).toContain("\"detail\":\"I want▏\"");
 		expect(dialog.confirmCurrent()).toBe(true);
 		expect(JSON.stringify(dialog.nodes())).toContain("Which?");
 		dialog.selectNumber(1);
@@ -296,10 +296,10 @@ describe("TernAskDialog", () => {
 		dialog.input("draft");
 		expect(dialog.cancel()).toBe(true);
 		expect(events.sent.filter((e) => e.channel === PI_ASK_SUBMIT_EVENT)).toHaveLength(0);
-		expect(JSON.stringify(dialog.nodes())).toContain("Type your answer: draft");
+		expect(JSON.stringify(dialog.nodes())).toContain("\"detail\":\"draft\"");
 		dialog.selectNumber(1);
 		dialog.input(" ");
-		expect(JSON.stringify(dialog.nodes())).toContain("Type your answer: draft ▏");
+		expect(JSON.stringify(dialog.nodes())).toContain("\"detail\":\"draft ▏\"");
 	});
 
 	it("required freeform answer counts as answered on the review tab", () => {
@@ -321,7 +321,7 @@ describe("TernAskDialog", () => {
 		const { events, dialog } = setup();
 		events.emit(PI_ASK_STARTED_EVENT, started("tool:custom"));
 		expect(dialog.selectNumber(3)).toBe(true);
-		expect(JSON.stringify(dialog.nodes())).toContain("Type something: ▏");
+		expect(JSON.stringify(dialog.nodes())).toContain("\"detail\":\"▏\"");
 		dialog.input("mine");
 		dialog.confirmCurrent();
 		// Scope now holds only the typed text; the choice it replaced is gone.

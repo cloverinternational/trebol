@@ -1,5 +1,5 @@
 import { applyPatch, undoFile } from "../../.pi/lib/tools/swarm-apply-patch.ts";
-import { readImage } from "../../.pi/lib/tools/swarm-read-image.ts";
+import { readArtifact } from "../../.pi/lib/tools/swarm-read-image.ts";
 import { readToolRenderer } from "../../.pi/lib/tools/swarm-read-renderer.ts";
 import { newErrorID } from "../../.pi/lib/tools/swarm-bash.ts";
 import { applySwarmSurface } from "../../.pi/lib/runtime/swarm-tool-surface.ts";
@@ -22,10 +22,6 @@ export function registerSwarmFSTools(pi: Pi): void {
     conversationId: (globalThis as any)[Symbol.for("pi-swarm-conversation-id")] as string | undefined,
     userMessage: (globalThis as any)[Symbol.for("pi-swarm-last-user-message")] as string | undefined,
   });
-  // Headless sessions auto-approve file reads; the interactive TUI would
-  // prompt the user, so only headless sessions skip Read's workspace boundary.
-  let headless = false;
-  pi.on?.("session_start", (_event: unknown, ctx: any) => { headless = ctx?.hasUI === false; });
   // Validation failures carry the tool's own prose, wrapped once more.
   const validation = (name: string, message: string): never =>
     error(name, `validation failed for ${name}: ${message} (error_id=${newErrorID()})`);
@@ -50,12 +46,12 @@ export function registerSwarmFSTools(pi: Pi): void {
   pi.registerTool?.(applySwarmSurface({
     name: "Read", label: "Read", ...READ_CONTRACT,
     ...readToolRenderer,
-    async execute(_id: string, params: any, _signal: AbortSignal | undefined, _update: unknown, ctx: any) {
+    async execute(_id: string, params: any, signal: AbortSignal | undefined, _update: unknown, ctx: any) {
       const filePath = params?.file_path ?? params?.file ?? params?.path ?? params?.filename;
       if (filePath === undefined || filePath === null) return validation("Read", "file_path is required");
       if (typeof filePath !== "string") return validation("Read", "file_path must be a string");
       try {
-        const content = readImage(filePath, ctx?.cwd ?? pi.getCwd?.() ?? process.cwd(), headless);
+        const content = await readArtifact(filePath, ctx?.cwd ?? pi.getCwd?.() ?? process.cwd(), signal);
         return { content, details: {} };
       } catch (e) { return error("Read", (e as Error).message); }
     },

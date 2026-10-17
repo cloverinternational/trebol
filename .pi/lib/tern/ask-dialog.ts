@@ -19,7 +19,17 @@ export const ASK_NODE_PREFIX = "ask-";
 const OPTION_PREFIX = "ask-opt:";
 export const ASK_SUBMIT_ID = "ask-submit";
 export const ASK_CANCEL_ID = "ask-cancel";
-const HINT = "↑/↓ move · space toggle · enter confirm · ←/→ tab · 1-9 pick · esc cancel";
+// Native list of the current question's options. Its item ids are `ask-opt:<question>:<option>`.
+export const ASK_OPTIONS_ID = "ask-options";
+// Below this width the tab strip becomes a progress line and the flow is one question per screen.
+export const NARROW_COLUMNS = 60;
+const HINT_KEYS: Array<{ keys: string[]; label: string }> = [
+	{ keys: ["up", "down"], label: "move" },
+	{ keys: ["space"], label: "toggle" },
+	{ keys: ["enter"], label: "confirm" },
+	{ keys: ["left", "right"], label: "tab" },
+	{ keys: ["esc"], label: "cancel" },
+];
 const CUSTOM_OPTION_VALUE = "__custom__";
 const CUSTOM_OPTION_LABEL = "Type something";
 const FREEFORM_ONLY_LABEL = "Type your answer";
@@ -175,16 +185,16 @@ export class TernAskDialog {
 	}
 
 	// Inline nodes that replace the composer in the dock while a flow is waiting. Empty when none is.
-	nodes(): TspNode[] {
+	nodes(columns = 100): TspNode[] {
 		const flow = this.#queue[0];
 		if (!flow) return [];
 		const sending = flow.requestId !== undefined;
 		const pending = this.#queue.length > 1 ? ` (+${this.#queue.length - 1} queued)` : "";
-		const children: TspNode[] = [this.#tabBar(flow)];
+		const narrow = columns < NARROW_COLUMNS;
+		const children: TspNode[] = [narrow ? this.#progressNode(flow) : this.#tabBar(flow)];
 		children.push(...(flow.tab === flow.questions.length ? this.#reviewNodes(flow, sending) : this.#questionNodes(flow, sending)));
 		if (flow.error) children.push({ id: "ask-error", k: "text", p: { text: flow.error, tone: "error", wrap: "soft" } });
-		const hint = sending ? "Sending…" : flow.editing ? EDITOR_HINT : HINT;
-		children.push({ id: "ask-hint", k: "text", p: { text: hint, tone: "muted", wrap: "soft" } });
+		children.push(this.#hintNode(flow, sending, narrow));
 		return [{
 			id: "ask-dialog",
 			k: "card",
@@ -203,6 +213,18 @@ export class TernAskDialog {
 			this.toggle(qi, oi);
 		}
 		return true;
+	}
+
+	// Native list selection: a click toggles the option; a double-click (activate) confirms it and advances.
+	handleSelect(item: string, activate: boolean): boolean {
+		if (!item.startsWith(OPTION_PREFIX)) return false;
+		const [qi = NaN, oi = NaN] = item.slice(OPTION_PREFIX.length).split(":").map(Number);
+		if (!Number.isInteger(qi) || !Number.isInteger(oi)) return false;
+		const flow = this.#editable();
+		if (!flow || !flow.questions[qi] || !flow.questions[qi]!.options[oi]) return false;
+		flow.tab = qi;
+		flow.option[qi] = oi;
+		return this.#act(flow, activate ? "confirm" : "click");
 	}
 
 	// Click on an option: moves the tab and cursor there, then toggles it (no auto-advance).
@@ -411,39 +433,65 @@ export class TernAskDialog {
 		const selected = flow.selected.get(question.id);
 		return [
 			{ id: `ask-q-${qi}-prompt`, k: "text", p: { role: "pi.ask.prompt", text: `${question.prompt}${question.required ? "" : " (optional)"}`, wrap: "soft" } },
-			...question.options.map((option, oi) => {
-				const prefix = `${oi === cursor ? "›" : " "} ${oi + 1}.`;
-				if (option.freeform) {
-					const saved = flow.custom.get(question.id);
-					const draft = flow.drafts.get(question.id);
-					const body = flow.editing && oi === cursor ? `${draft ?? ""}▏` : (saved ?? draft);
-					return {
-						id: `${OPTION_PREFIX}${qi}:${oi}`,
-						k: "text",
-						p: {
-							role: "pi.ask.option",
-							text: `${prefix} ${option.label}${body ? `: ${body}` : ""}`,
-							wrap: "soft",
-							tone: saved ? "accent" : "muted",
-						},
-					};
-				}
-				const on = selected?.has(option.value) ?? false;
-				const mark = question.type === "multi" ? (on ? "[x]" : "[ ]") : on ? "(•)" : "( )";
-				const detail = option.description ? ` — ${option.description}` : "";
-				return {
-					id: `${OPTION_PREFIX}${qi}:${oi}`,
-					k: "text",
-					p: {
-						role: "pi.ask.option",
-						text: `${prefix} ${mark} ${option.label}${detail}`,
-						wrap: "soft",
-						...(on ? { tone: "accent" } : {}),
-						...(sending ? {} : { actions: { click: "ask-toggle" } }),
-					},
-				};
-			}),
+			{
+				id: ASK_OPTIONS_ID,
+				k: "list",
+				p: { role: "pi.ask.options", selected: `${OPTION_PREFIX}${qi}:${cursor}` },
+				c: question.options.map((option, oi) => this.#optionItem(flow, question, qi, oi, cursor, selected, sending)),
+			},
 		];
+	}
+
+	// One list row. Text is never wrapped by Tern, so the free-form draft and description go in `detail`.
+	#optionItem(flow: PendingFlow, question: DialogQuestion, qi: number, oi: number, cursor: number, selected: Set<string> | undefined, sending: boolean): TspNode {
+		const option = question.options[oi]!;
+		const cursorMark = oi === cursor ? "›" : " ";
+		const hint = oi < 9 ? [String(oi + 1)] : undefined;
+		if (option.freeform) {
+			const saved = flow.custom.get(question.id);
+			const draft = flow.drafts.get(question.id);
+			const body = flow.editing && oi === cursor ? `${draft ?? ""}▏` : (saved ?? draft);
+			return {
+				id: `${OPTION_PREFIX}${qi}:${oi}`,
+				k: "item",
+				p: { role: "pi.ask.option", label: `${cursorMark} ${option.label}`, detail: body ?? "", tone: saved ? "accent" : "muted", hint, disabled: sending },
+			};
+		}
+		const on = selected?.has(option.value) ?? false;
+		const mark = question.type === "multi" ? (on ? "[x]" : "[ ]") : on ? "(•)" : "( )";
+		return {
+			id: `${OPTION_PREFIX}${qi}:${oi}`,
+			k: "item",
+			p: {
+				role: "pi.ask.option",
+				label: `${cursorMark} ${mark} ${option.label}`,
+				detail: option.description ?? "",
+				tone: on ? "accent" : "muted",
+				hint,
+				disabled: sending,
+			},
+		};
+	}
+
+	// Narrow layout: no tab strip. Shows position and per-question state in one line.
+	#progressNode(flow: PendingFlow): TspNode {
+		const total = flow.questions.length;
+		const dots = flow.questions.map((question, qi) => (qi === flow.tab ? "●" : isAnswered(flow, question) ? "✓" : "○")).join(" ");
+		const text = flow.tab === total ? `Review · ${total} questions` : `Question ${flow.tab + 1} of ${total} · ${flow.questions[flow.tab]!.label}`;
+		return { id: "ask-progress", k: "row", p: { role: "pi.ask.progress" }, c: [
+			{ id: "ask-progress-text", k: "text", p: { text, tone: "accent", wrap: "soft" } },
+			{ id: "ask-progress-dots", k: "text", p: { text: dots, tone: "muted" } },
+		] };
+	}
+
+	// Keycap hints on the wide layout; narrow keeps only confirm and cancel so a line never wraps.
+	#hintNode(flow: PendingFlow, sending: boolean, narrow: boolean): TspNode {
+		if (sending || flow.editing) return { id: "ask-hint", k: "text", p: { text: sending ? "Sending…" : EDITOR_HINT, tone: "muted", wrap: "soft" } };
+		const pairs = narrow ? HINT_KEYS.filter((pair) => pair.label === "confirm" || pair.label === "cancel") : HINT_KEYS;
+		return { id: "ask-hint", k: "row", p: { role: "pi.ask.hint" }, c: pairs.flatMap((pair) => [
+			{ id: `ask-hint-${pair.label}-keys`, k: "kbd", p: { keys: pair.keys } },
+			{ id: `ask-hint-${pair.label}`, k: "text", p: { text: pair.label, tone: "muted" } },
+		]) };
 	}
 
 	#reviewNodes(flow: PendingFlow, sending: boolean): TspNode[] {

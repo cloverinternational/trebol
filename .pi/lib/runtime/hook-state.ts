@@ -107,11 +107,31 @@ export function recordHook(group: HookGroup, event: string, payload?: any, outco
 
 (globalThis as any).__piSwarmRegisterHook = registerHook;
 
+// Hooks stay dormant for the first HOOK_WARMUP_TURNS turns of each session.
+// Turns are counted from Pi's turn_start lifecycle event, so a turn is one
+// assistant run (not a tool call or user message). Counts live on globalThis
+// so /reload keeps them, and are keyed by session id so a new session restarts.
+const HOOK_WARMUP_TURNS = 5;
+const TURN_COUNTS = Symbol.for("pi-swarm-hook-turn-counts");
+const TURN_LISTENER = Symbol.for("pi-swarm-hook-turn-listener");
+const turnCounts: Map<string, number> = ((globalThis as any)[TURN_COUNTS] ??= new Map<string, number>());
+const turnSessionKey = (ctx: any) => { const id = ctx?.sessionManager?.getSessionId?.(); return typeof id === "string" && id ? id : "session"; };
+// Installed once per process: every registerHook caller passes its own pi
+// object, and a per-object listener would count each turn several times.
+function installTurnCounter(pi: any) {
+  if ((globalThis as any)[TURN_LISTENER]) return;
+  (globalThis as any)[TURN_LISTENER] = true;
+  pi.on("turn_start", (_event: any, ctx: any) => { const key = turnSessionKey(ctx); turnCounts.set(key, (turnCounts.get(key) ?? 0) + 1); });
+}
+export function hookTurnGateOpen(ctx: any): boolean { return (turnCounts.get(turnSessionKey(ctx)) ?? 0) > HOOK_WARMUP_TURNS; }
+
 export function registerHook(pi: any, group: HookGroup, event: string, handler: any) {
+  installTurnCounter(pi);
   installHookCorrection(pi);
   normalizeState();
   shared.state.counts.registered++;
   const callback = async (payload: any, ctx: any) => {
+    if (!hookTurnGateOpen(ctx)) return;
     if (!isHookEnabled(group)) { recordHook(group, event, payload, "skipped", "hook group disabled"); persistHookState(pi); return; }
     try {
       const result = await handler(payload, ctx);

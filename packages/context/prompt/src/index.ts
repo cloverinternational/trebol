@@ -1,58 +1,36 @@
-import { applyWorkflowGuidance } from "./workflow-guidance.js";
-export { applyWorkflowGuidance } from "./workflow-guidance.js";
 import { readFileSync } from "node:fs";
 
-/**
- * Vendored 1:1 copy of the Swarm TUI SwarmForge system prompt.
- *
- * The prompt text is owned by this package as plain-text assets. Nothing here
- * parses Go source or markdown at runtime: `scripts/sync.mjs` regenerates the
- * assets from upstream, and `test/index.test.ts` fails if they drift.
- *
- * Upstream: vendor/swarm-sdk/swarm-tui/internal/chat/settings/system_prompt.go
- */
-const asset = (name: string): string =>
-  readFileSync(new URL(`../assets/${name}`, import.meta.url), "utf8");
+/** When a section is included. `forge` and `plain` are exclusive; see prompts/swarm-system-prompt.md. */
+export type PromptCondition = "forge" | "plain" | "always" | "swarm-flow";
 
-/** Verbatim body of `forgeSwarmSystemPrompt` (system_prompt.go:408). */
-export const forgeSwarmSystemPrompt: string = asset("forge-swarm.txt");
-
-/** Verbatim body of `swarmForgeDelegationAddendum` (system_prompt.go:561). */
-export const swarmForgeDelegationAddendum: string = asset("delegation-addendum.txt");
-
-/** `swarmForgeSystemPrompt = forgeSwarmSystemPrompt + swarmForgeDelegationAddendum` (system_prompt.go:628). */
-export const swarmForgeSystemPrompt: string =
-  forgeSwarmSystemPrompt + swarmForgeDelegationAddendum;
-
-/** Provenance reference recorded by prompt-assembling extensions. */
-export const UPSTREAM_SOURCE =
-  "vendor/swarm-sdk/swarm-tui/internal/chat/settings/system_prompt.go";
-
-export interface SwarmPromptPreset {
-  /** Display name, matching the TUI's builtin prompt entry. */
-  name: string;
-  content: string;
-  /** Whether the TUI prepends the runtime <system_information> block. */
-  workspaceContext: boolean;
-  /** `name` of the originating Go constant. */
-  constant: string;
+export interface PromptSection {
+  id: string;
+  when: PromptCondition;
+  body: string;
 }
 
-/**
- * The two workspace-context builtins registered by the TUI
- * (system_prompt.go:72-84), in upstream declaration order.
- */
-export const swarmPromptPresets: readonly SwarmPromptPreset[] = Object.freeze([
-  Object.freeze({
-    name: "Accumulated Context Engineering",
-    content: applyWorkflowGuidance(forgeSwarmSystemPrompt),
-    workspaceContext: true,
-    constant: "forgeSwarmSystemPrompt",
-  }),
-  Object.freeze({
-    name: "SwarmForge",
-    content: applyWorkflowGuidance(swarmForgeSystemPrompt),
-    workspaceContext: true,
-    constant: "swarmForgeSystemPrompt",
-  }),
-]);
+const PROMPT_FILE = new URL("../../../../prompts/swarm-system-prompt.md", import.meta.url);
+const SECTION_PATTERN = /<!-- section: ([a-z-]+) when: ([a-z-]+) -->\n([\s\S]*?)\n<!-- end -->/g;
+
+/** Every section in file order. The markdown file is the only prompt source. */
+export const swarmPromptSections: readonly PromptSection[] = Object.freeze(
+  [...readFileSync(PROMPT_FILE, "utf8").matchAll(SECTION_PATTERN)].map((match) => ({
+    id: match[1],
+    when: match[2] as PromptCondition,
+    body: match[3],
+  })),
+);
+
+/** Body of the first section with this id. Throws if the file lacks it. */
+export function promptSection(id: string): string {
+  const section = swarmPromptSections.find((candidate) => candidate.id === id);
+  if (!section) throw new Error(`prompts/swarm-system-prompt.md has no section "${id}"`);
+  return section.body;
+}
+
+export const forgeSwarmSystemPrompt: string = promptSection("forge");
+export const swarmForgeDelegationAddendum: string = promptSection("delegation");
+export const swarmForgeSystemPrompt: string = forgeSwarmSystemPrompt + swarmForgeDelegationAddendum;
+
+/** Provenance reference recorded by prompt-assembling extensions. */
+export const PROMPT_SOURCE = "prompts/swarm-system-prompt.md";

@@ -106,6 +106,8 @@ function startTsp(): void {
 			bridge.undoDraft();
 		} else if (effect.kind === "deleteWord") {
 			bridge.deleteWordDraft();
+		} else if (effect.kind === "toggleOutput") {
+			bridge.toggleToolOutput();
 		} else bridge.appendDraft(effect.text);
 	});
 	// Pasted text stays in the draft; embedded newlines do not submit.

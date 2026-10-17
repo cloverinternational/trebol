@@ -46,8 +46,10 @@ async function loadMermaidParse(): Promise<MermaidParse | undefined> {
     install();
     const mermaid = (await import("mermaid")).default;
     return (diagram, opts) => mermaid.parse(diagram, opts);
-  } catch {
-    return undefined; // unavailable parser is not an invalid diagram
+  } catch (error) {
+    // Unavailable parser is not an invalid diagram, but the silent no-op must be diagnosable.
+    console.error(`[mermaid-response] parser unavailable, diagram repair disabled: ${(error as Error)?.message ?? error}. Run npm install in the trebol checkout.`);
+    return undefined;
   } finally {
     restore();
   }

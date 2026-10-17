@@ -1,5 +1,4 @@
-import { executionLog } from "../context/execution-log.ts";
-import { isHookEnabled, registerHook } from "./hook-state.ts";
+import { isHookEnabled, recordHook, registerHook } from "./hook-state.ts";
 import { AnnoyanceNudgeState, formatHookContext, resultText } from "../policy/swarm-annoyance-nudge.ts";
 import {
   SwarmHookPipeline, createSwarmBuiltinPipeline,
@@ -97,7 +96,9 @@ export function registerSwarmBuiltinHooks(pi: Pi, options: SwarmBuiltinHookOptio
     run: (event) => {
       if (!isHookEnabled("annoyance")) return {};
       const reminder = annoyance.onToolResult(session || "session", { toolName: event.toolName, isError: event.failed, content: event.output, details: (event as any).details });
-      return reminder ? { message: reminder } : {};
+      if (!reminder) return {};
+      recordHook("annoyance", "tool_result", { toolName: event.toolName, toolCallId: event.toolCallId }, "executed", `friction reported for ${event.toolName}; reminder sent to the model`);
+      return { message: reminder };
     },
   }];
   const pipeline = createSwarmBuiltinPipeline({
@@ -113,17 +114,8 @@ export function registerSwarmBuiltinHooks(pi: Pi, options: SwarmBuiltinHookOptio
   const hooks = (pipeline as any).hooks;
   const postActing = hooks.postActing;
   const preContext = new Map<string, string>();
-  // One cleanup opportunity per external request, not per automatic wake.
-  let spent = false, deferred = false, sawWork = false, stopped = false;
-  const pendingWorkers = new Set<string>();
-  const resetCleanup = () => { spent = false; deferred = false; sawWork = false; };
-  pi.on("session_start", (_event: any, ctx: any) => { sessionOf(ctx); stopped = false; resetCleanup(); pendingWorkers.clear(); preContext.clear(); });
-  pi.on("session_shutdown", () => { stopped = true; resetCleanup(); pendingWorkers.clear(); preContext.clear(); });
-  pi.on("input", (event: any) => {
-    const completion = /\[agent completed\] id=(\S+) status=(completed|failed|cancelled)/.exec(String(event?.text ?? ""));
-    if (completion) pendingWorkers.delete(completion[1]);
-    else if (event?.source === "interactive" || event?.source === "rpc") resetCleanup();
-  });
+  pi.on("session_start", (_event: any, ctx: any) => { sessionOf(ctx); preContext.clear(); });
+  pi.on("session_shutdown", () => { preContext.clear(); });
 
   registerHook(pi, "taskmanage", "before_agent_start", (event: any, ctx: any) => {
     sessionOf(ctx);
@@ -155,20 +147,6 @@ export function registerSwarmBuiltinHooks(pi: Pi, options: SwarmBuiltinHookOptio
   registerHook(pi, "taskmanage", "tool_result", (event: any, ctx: any) => {
     sessionOf(ctx);
     const failed = event?.isError === true;
-    const name = String(event?.toolName ?? "").toLowerCase();
-    if (name === "ask_user_question" || name === "requestapproval") deferred = true;
-    if (name) sawWork = true;
-    // Conservatively defer after async dispatch; never read UI state as authority.
-    if (["agent", "subagent", "backgroundtask", "delegate", "bash", "taskoutput", "subagentoutput", "delegateoutput", "wait_for_agent", "readbackgroundcommand"].includes(name)) {
-      try {
-        const body = JSON.parse(resultText(event?.content));
-        const id = String(body.agent_id ?? body.task_id ?? body.handle ?? event?.input?.agent_id ?? event?.input?.task_id ?? "unknown-background");
-        const status = body.status ?? body.agent?.status;
-        if (["completed", "failed", "cancelled", "done"].includes(status)) pendingWorkers.delete(id);
-        else if (body.backgrounded || ["running","async_launched"].includes(status) || body.agent_id || body.handle) pendingWorkers.add(id);
-      } catch { /* Ordinary non-JSON result. */ }
-      if (!failed && (event?.input?.background || event?.input?.run_in_background) && !pendingWorkers.size) pendingWorkers.add("unknown-background");
-    }
     let { text, index } = firstText(event?.content);
     // agent_tools.go: oversized results (100k bytes / 1000 lines) are
     // middle-elided BEFORE after-hooks see them, unless they carry an image.
@@ -188,7 +166,7 @@ export function registerSwarmBuiltinHooks(pi: Pi, options: SwarmBuiltinHookOptio
     if (content && index >= 0) { const next = [...content]; next[index] = { ...next[index], text: merged }; return { content: next }; }
     return { content: [{ type: "text", text: merged }, ...(Array.isArray(event.content) ? event.content : [])] };
   });
-  registerHook(pi, "taskmanage", "turn_end", (event: any, ctx: any) => {
+  registerHook(pi, "taskmanage", "turn_end", (event: any) => {
     const content = pipeline.flushTurn();
     // agent_tools.go appends the standalone RoleUser hook message right after
     // the turn's tool results, and the TUI's RichMessageInjector flushes its
@@ -199,28 +177,8 @@ export function registerSwarmBuiltinHooks(pi: Pi, options: SwarmBuiltinHookOptio
     const runContinues = Array.isArray(event?.message?.content) && event.message.content.some((b: any) => b?.type === "toolCall");
     const parts: HookSlotPart[] = content ? [{ role: "user", text: content }] : [];
     for (const listener of afterTurnFlushListeners()) { try { parts.push(...(listener({ runContinues }) ?? [])); } catch { /* best effort */ } }
-    const message = event?.message;
-    // Cancellation/failure is sticky for this request. A later duplicate or
-    // automatic normal stop must not restart work the user interrupted.
-    if (["aborted", "error", "length"].includes(message?.stopReason)) deferred = true;
-    const text = Array.isArray(message?.content) ? message.content.filter((b: any) => b?.type === "text").map((b: any) => String(b.text ?? "")).join(" ") : "";
-    const tasks = hookTasks();
-    const open = tasks.filter(t => !t.owner && ["pending", "in_progress"].includes(t.status));
-    // Positive normal stops only. Questions conservatively defer; prose never
-    // establishes completion. One wake even if the model ignores the reminder.
-    const cleanup = !stopped && !runContinues && message?.role === "assistant" && message.stopReason === "stop" &&
-      sawWork && !spent && !deferred && !pendingWorkers.size && !ctx?.hasPendingMessages?.() && open.length > 0 &&
-      process.env.PI_SWARM_SUBAGENT !== "1" && !(globalThis as any)[PLAN_CONTROLLER_SYMBOL]?.isActive?.();
-    if (!runContinues && message?.role === "assistant" && ctx?.cwd) executionLog(ctx.cwd,"execution","task-stop-reconciliation",{stopReason:message.stopReason,openTaskIds:open.map(t=>t.id),sawWork,spent,deferred,pendingWorkers:pendingWorkers.size,triggered:cleanup});
-    if (cleanup) {
-      spent = true;
-      parts.push({ role: "user", text: "[Task reconciliation: ask the user before leaving unfinished work] Open work remains: " +
-        open.slice(0, 3).map(t => "#" + t.id + " " + t.subject.slice(0, 160)).join("; ") +
-        ". Acknowledge any rejected TaskManage completion before doing anything else: read the exact error and current task record, then submit evidence-backed answers using the required schema; never retry the same invalid call, fabricate answers/evidence, or claim the ledger is complete. First use TaskManage to reconcile actual progress and blockers; complete only evidence-verified finished work. If any tasks remain unfinished, use ask_user_question to ask what to do next, summarizing the current goal, remaining tasks, unaddressed requests and blockers. Offer relevant choices such as continue a named task, reprioritize, or pause with recorded next steps. A prose question alone is not the interaction tool. Do not start unrelated work, delete tasks, or manufacture completion. If interactive questioning is unavailable, report that limitation and retain pending tasks. This hook runs at most once per external request and never auto-answers the user." });
-    }
     if (!parts.length) return undefined;
-    if (cleanup) pi.sendMessage?.({ customType: HOOK_SLOT_TYPE, content: parts[0].text, display: false, details: { parts } }, { deliverAs: "followUp", triggerTurn: true });
-    else if (runContinues) pi.sendMessage?.({ customType: HOOK_SLOT_TYPE, content: parts[0].text, display: false, details: { parts } }, { deliverAs: "steer", triggerTurn: true });
+    if (runContinues) pi.sendMessage?.({ customType: HOOK_SLOT_TYPE, content: parts[0].text, display: false, details: { parts } }, { deliverAs: "steer", triggerTurn: true });
     // Final turn: nothing Swarm would send before the next prompt; appended
     // (not steered) so no extra model call is triggered.
     else pi.sendMessage?.({ customType: HOOK_SLOT_TYPE, content: parts[0].text, display: false, details: { parts } }, { triggerTurn: false });

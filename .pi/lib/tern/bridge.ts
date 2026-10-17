@@ -13,14 +13,17 @@ import {
 	type CommandSource,
 } from "./commands.ts";
 import type { Model } from "@earendil-works/pi-ai";
-import { projectTranscript, type TspMessage, type TspNode, type TspWriter, TernInlineSurface } from "./tsp.ts";
+import { encodeTspBlob, projectTranscript, type TspMessage, type TspNode, type TspWriter, TernInlineSurface } from "./tsp.ts";
 import { composerNodes, modelDisplayName, type GitFacts } from "./composer-view.ts";
+import { artifactNodes, previewFile, type ArtifactPreview } from "./artifact-previews.ts";
+import { patchArtifactPaths } from "../tools/swarm-artifacts.ts";
+import { isAbsolute, resolve } from "node:path";
 import { readGitFacts } from "./git-facts.ts";
 import { PI_COMPOSER_CSS } from "./composer-style.ts";
 import { IDLE_LOADING, loadingNode, reduceLoading, type LoadingState } from "./loading.ts";
 import { projectTaskView, type TaskView, type TaskViewRow, type TaskViewSessionManager } from "./task-view.ts";
 import { buildBoard } from "./task-board.ts";
-import { TernAskDialog, type AskEventBus } from "./ask-dialog.ts";
+import { ASK_OPTIONS_ID, TernAskDialog, type AskEventBus } from "./ask-dialog.ts";
 import { TernExtensionUI, UI_PROMPT_LIST_ID } from "./ext-ui.ts";
 import { AUTOCOMPLETE_ID, SlashAutocomplete, type Edit } from "./autocomplete.ts";
 import { expandMentions } from "./mentions.ts";
@@ -91,6 +94,8 @@ interface Item {
 	cancelled?: boolean;
 	// TaskManage's structured batch from the final result, rendered as task rows (never as JSON).
 	batch?: TaskManageBatch;
+	// Picture previews for Read and apply_patch results; set after the result is known.
+	artifacts?: ArtifactPreview[];
 	// Repeated terminal callbacks must not erase the last foreground snapshot.
 }
 
@@ -324,21 +329,27 @@ export class TranscriptProjector {
 		this.#items.push({ id: `n${++this.#seq}`, role, text });
 	}
 
-	nodes(): TspNode[] {
+	nodes(outputExpanded = false): TspNode[] {
 		const out: TspNode[] = [];
 		for (const item of this.#items) {
-			if (item.role === "tool") out.push(toolNode(item));
+			if (item.role === "tool") out.push(toolRow(item, outputExpanded));
 			else out.push(...projectTranscript([{ id: item.id, role: item.role, text: item.text }]));
 		}
 		return out;
 	}
 }
 
-function toolNode(item: Item): TspNode {
+function toolRow(item: Item, outputExpanded: boolean): TspNode {
+	const tool = toolNode(item, outputExpanded);
+	const previews = artifactNodes(item.id, item.artifacts ?? []);
+	return previews.length === 0 ? tool : { id: `${item.id}-group`, k: "col", p: { role: "tern.tool-group", gap: "none" }, c: [tool, ...previews] };
+}
+
+function toolNode(item: Item, outputExpanded: boolean): TspNode {
 	const status = item.cancelled ? "cancelled" : item.status === "ok" ? "done" : item.status === "error" ? "error" : "running";
 	const { target, targetKind } = toolTarget(item.args);
 	const bash = item.name === "bash" || item.name === "Bash";
-	if (bash) return bashToolNode(item, status);
+	if (bash) return bashToolNode(item, status, outputExpanded);
 	if (item.name === "TaskManage") return taskManageToolNode(item, status);
 	const node: TspNode = {
 		id: item.id,
@@ -347,7 +358,8 @@ function toolNode(item: Item): TspNode {
 			name: item.name ?? "tool",
 			title: item.name ?? "tool",
 			status,
-			collapsed: status !== "running",
+			collapsible: true,
+			collapsed: status !== "running" && !outputExpanded,
 			...(target !== undefined ? { target, targetKind } : {}),
 		},
 	};
@@ -426,7 +438,7 @@ function taskManageToolNode(item: Item, status: "running" | "done" | "error" | "
 
 // Mirror OMP's native bash describeCall/describeResult: the head names the intent,
 // while a single borderless run contains the command, live output and state foot.
-function bashToolNode(item: Item, status: "running" | "done" | "error" | "cancelled"): TspNode {
+function bashToolNode(item: Item, status: "running" | "done" | "error" | "cancelled", outputExpanded: boolean): TspNode {
 	const args = item.args as { command?: unknown; description?: unknown; name?: unknown } | undefined;
 	const command = typeof args?.command === "string" && args.command ? args.command : "…";
 	// OMP's optional name annotates the verb; our description is the intent.
@@ -454,7 +466,7 @@ function bashToolNode(item: Item, status: "running" | "done" | "error" | "cancel
 		p: {
 			role: "omp.tool.bash", key: item.id.slice(2), name: "bash", title: label,
 			...(typeof args?.description === "string" && args.description ? { target: args.description, targetKind: "text" } : {}),
-			command, status, frame: "inline", collapsible: true, collapsed: true, preview: "children",
+			command, status, frame: "inline", collapsible: true, collapsed: !outputExpanded, preview: "children",
 			...(status === "running" ? { age: elapsed } : { took: elapsed }),
 			...(item.exit !== undefined ? { exit: item.exit } : {}),
 			...(item.timedOut ? { note: "timed out", tone: "warning" } : status === "cancelled" ? { note: "cancelled" } : {}),
@@ -499,6 +511,7 @@ function backgroundWorkTitle(item: RunningWorkItem): string {
 export class PiTernBridge {
 	#session: PiSessionLike;
 	readonly #surface: TernInlineSurface;
+	readonly #write: TspWriter;
 	readonly #projector = new TranscriptProjector();
 	readonly #onClose?: () => void;
 	readonly #commands: CommandSource;
@@ -530,6 +543,7 @@ export class PiTernBridge {
 	#modelCatalogRequest = 0;
 	#taskQuestionsCollapsed = false;
 	#taskBoardMode = false;
+	#toolOutputExpanded = false;
 	readonly #kinds: readonly string[];
 	#git: GitFacts | undefined;
 	#columns = 100;
@@ -538,6 +552,7 @@ export class PiTernBridge {
 
 	constructor(session: PiSessionLike, options: BridgeOptions) {
 		this.#session = session;
+		this.#write = options.write;
 		this.#clipboard = options.clipboard ?? {
 			filePaths: async () => getNativeClipboard()?.getFilePaths?.(),
 			image: async () => getNativeClipboard()?.getImage(),
@@ -638,6 +653,31 @@ export class PiTernBridge {
 		this.#loading = reduceLoading(this.#loading, { type: "session_switch", sessionId: id ?? null });
 	}
 
+	// Sends picture blobs before re-rendering, so no frame references a blob Tern has not received.
+	async #previewArtifacts(event: PiEventLike): Promise<void> {
+		const name = String(event.toolName);
+		const args = (this.#projector.items.find((i) => i.id === `t-${String(event.toolCallId)}`)?.args ?? {}) as Record<string, unknown>;
+		const cwd = this.#session.sessionManager?.getCwd?.() ?? process.cwd();
+		const paths = name === "Read"
+			? [typeof args.file_path === "string" ? args.file_path : undefined]
+			: name === "apply_patch" ? patchArtifactPaths(args.input) : [];
+		const previews: ArtifactPreview[] = [];
+		for (const raw of paths) {
+			if (!raw) continue;
+			const preview = await previewFile(isAbsolute(raw) ? raw : resolve(cwd, raw), cwd);
+			if (preview) previews.push(preview);
+		}
+		if (previews.length === 0 || this.#closed) return;
+		const item = this.#projector.items.find((i) => i.id === `t-${String(event.toolCallId)}`);
+		if (!item) return;
+		for (const preview of previews) {
+			if (!preview.blob) continue;
+			for (const chunk of encodeTspBlob(preview.blob.id, preview.blob.mime, preview.blob.base64)) this.#write(chunk);
+		}
+		item.artifacts = previews;
+		this.#render();
+	}
+
 	#onEvent(event: PiEventLike): void {
 		if (this.#closed) return;
 		if (event.type === "session_tree") {
@@ -661,6 +701,7 @@ export class PiTernBridge {
 			this.#model = modelDisplayName(event.model) ?? this.#model;
 			this.#modelCatalog = this.#session.modelRuntime?.getAvailableSnapshot() ?? this.#modelCatalog;
 		}
+		if (event.type === "tool_execution_end" && event.isError !== true) void this.#previewArtifacts(event);
 		if (this.#projector.apply(event) || event.type.startsWith("agent_") || event.type === "model_select" || event.type === "thinking_level_changed" || event.type === "queue_update" || event.type === "session_tree") this.#render();
 	}
 
@@ -668,7 +709,7 @@ export class PiTernBridge {
 	// level, git status of Pi's cwd, session cost. OMP's tok/s, focus crumbs and shell mode have no Pi source.
 	#dock(): TspNode[] {
 		// An open ask flow takes over the input slot: its inline card replaces the composer.
-		if (this.#dialog?.active) return [...this.#taskTop(), ...this.#dialog.nodes()];
+		if (this.#dialog?.active) return [...this.#taskTop(), ...this.#dialog.nodes(this.#columns)];
 		const work = this.#backgroundWork();
 		const usage = contextUsageOf(this.#session) as { tokens?: unknown; contextWindow?: unknown } | undefined;
 		const window = typeof usage?.contextWindow === "number" && usage.contextWindow > 0 ? usage.contextWindow : undefined;
@@ -941,7 +982,14 @@ export class PiTernBridge {
 		if (this.#closed) return;
 		this.#syncSession();
 		const focus = this.#ui.focusId ?? (this.#treePickerOpen ? "session-tree-picker" : this.#modelPickerOpen ? "model-picker-sheet" : "composer");
-		this.#surface.render(this.#projector.nodes(), this.#dock(), focus, this.#layer(), this.#complete.selectedId);
+		this.#surface.render(this.#projector.nodes(this.#toolOutputExpanded), this.#dock(), focus, this.#layer(), this.#complete.selectedId);
+	}
+
+	// ctrl+o folds or unfolds all tool output; each tool's head click still toggles just that tool.
+	toggleToolOutput(): void {
+		if (this.#closed) return;
+		this.#toolOutputExpanded = !this.#toolOutputExpanded;
+		this.#render();
 	}
 
 	// A programmatic draft change (extension setEditorText, pasteToEditor) closes the autocomplete, as
@@ -1152,7 +1200,7 @@ export class PiTernBridge {
 	// Routes one parsed TSP message. Returns the promise of any submitted prompt, for tests.
 	handle(msg: TspMessage): Promise<void> | undefined {
 		if (this.#closed) return undefined;
-		if (msg.verb === "e" && msg.body.ev === "resize" && typeof msg.body.cols === "number" && msg.body.cols > 0) this.#columns = msg.body.cols;
+		if (msg.verb === "e" && msg.body.ev === "resize" && typeof msg.body.cols === "number" && msg.body.cols > 0) { this.#columns = msg.body.cols; if (this.#dialog?.active) this.#render(); }
 		if (msg.verb === "e" && (msg.body.ev === "select" || msg.body.ev === "activate") && msg.body.id === UI_PROMPT_LIST_ID) {
 			this.#ui.pick(msg.body.item, msg.body.ev === "activate");
 			return undefined;
@@ -1179,6 +1227,7 @@ export class PiTernBridge {
 			return undefined;
 		}
 		if (msg.verb === "e" && msg.body.ev === "action" && typeof msg.body.id === "string" && this.#dialog?.handleAction(msg.body.id)) return undefined;
+		if (msg.verb === "e" && (msg.body.ev === "select" || msg.body.ev === "activate") && msg.body.id === ASK_OPTIONS_ID && typeof msg.body.item === "string" && this.#dialog?.handleSelect(msg.body.item, msg.body.ev === "activate")) return undefined;
 		if (msg.verb === "e" && (msg.body.ev === "select" || msg.body.ev === "activate") && typeof msg.body.id === "string" && msg.body.id.startsWith(`${AUTOCOMPLETE_ID}.`)) {
 			if (typeof msg.body.item === "string") this.#complete.select(msg.body.item, msg.body.ev === "activate");
 			return undefined;

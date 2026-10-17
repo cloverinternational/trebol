@@ -81,7 +81,7 @@ path, and preserve native tools and unrelated extensions while disabled.
 | `.pi/themes/` | Local Pi theme definitions. |
 | `packages/<layer>/<name>/` | npm workspaces (`packages/*/*`). Directory name equals the npm name suffix: `packages/runtime/core` is `@pi-swarm/core`. |
 | `packages/runtime/` | `core` (session identity, event journal), `contract` (immutable profile/capability contracts), `runtime-contracts` (control-plane, daemon, goal-loop, task interfaces), `bootstrap` (bounded combined/parallel selector orchestration and settings persistence). |
-| `packages/context/` | `prompt` (canonical prompt assets and provenance), `skills` (loader, registry, builtins), `autogenskills` (generated-skill lifecycle). |
+| `packages/context/` | `prompt` (canonical prompt markdown and provenance), `skills` (loader, registry, builtins), `autogenskills` (generated-skill lifecycle). |
 | `packages/policy/` | `policy` (capability, workspace, mutation, network, approval). |
 | `packages/tools/` | `agents`, `taskmanage`, `mcp`, `schedule`. |
 | `tools/experiments/bootstrap-agent/` | Opt-in bootstrap experiments; `planning-contract.mjs` provides experimental prompt variants and strict plan validation. Private history replays stay in ignored artifacts; planning scores do not prove execution or memory retrieval. |
@@ -248,10 +248,9 @@ belongs in `packages/policy/policy`, and rendering belongs in the extension/rend
 | `mcp__<server>__<tool>` | `extensions/mcp-fallback/extension.ts`, `extensions/swarm-websearch/extension.ts` / `packages/tools/mcp/src/index.ts` | Provider-neutral declared MCP bridge; manifests, allowlists, transport, and auth are the seam. |
 | `annoyed` | `extensions/annoyed/extension.ts` | `extensions/annoyed/store.ts`, `.pi/lib/tools/swarm-annoyed-routing.ts`, and `swarm-annoyed-publish.ts`; a tool-less ownership judge routes project reports only to a verified active-workspace GitHub remote and Trebol triages upstream/non-actionable/uncertain/judge-failure/missing-remote cases. Publication receipts are SQLite metadata with a stable remote marker; ambiguous results are never blindly retried and SQLite/GitHub is not exactly-once. Transcript stays local; nudge behavior remains separate. |
 
-Model-facing workflow wording is adapted by
-`packages/context/prompt/src/workflow-guidance.ts` in prompt presets, Forge
-assembly, and tool-description loading. Upstream prompt assets and tool captures
-remain reference snapshots; local wording intentionally differs where blanket
+Model-facing Swarm prompt text lives in `prompts/swarm-system-prompt.md`, the
+single editable source for the Forge text, runtime directives, and section
+order. Tool captures remain reference snapshots; local wording intentionally differs where blanket
 workflow restrictions would prevent useful work. Preserve tool limits, approval
 requirements, and data-integrity rules when changing this adapter.
 
@@ -417,14 +416,6 @@ the Pi adapter only for registration/presentation concerns.
 | Metrics/cache telemetry | `extensions/conversation-metrics/extension.ts`, `cache-telemetry.ts` | Agent/message/provider lifecycle; persisted telemetry is non-secret. |
 | Theme/thinking/UI lifecycle | `extensions/swarm-themes/extension.ts`, `swarm-thinking.ts` | Presentation/config only. |
 
-Task stop-time reconciliation lives in `.pi/lib/runtime/swarm-builtin-hooks-runtime.ts`.
-After observed work and a normal stop, it may request one follow-up per external
-input for an unowned, focused, dependency-ready task. Errors, questions, interaction
-tools, observed background dispatch, queued messages, plan mode, subagents, and
-shutdown suppress the wake. It never completes or deletes tasks automatically;
-pending/backlog work is not a reason to restart. The allowance resets on session
-start or interactive/RPC input, not on automatic continuations.
-
 For a hook bug, first identify the Pi event (`before_agent_start`, `tool_call`,
 `tool_result`, `turn_start/end`, `session_start/shutdown`, or compaction), then
 the hook group, then the domain owner. Hook execution, policy, and rendering
@@ -443,7 +434,7 @@ are separate seams and should remain decoupled.
 | `packages/context/skills` | `packages/context/skills/src/index.ts`, `packages/context/skills/builtins/**` | Skill loading, precedence, builtins, metadata, or disclosure changes. |
 | `packages/runtime/contract` | `packages/runtime/contract/src/index.ts` | Immutable profile, capability IDs, digest, or provenance contracts change. |
 | `packages/runtime/core` | `packages/runtime/core/src/index.ts` | Session identity, event journal, or runtime replacement semantics change. |
-| `packages/context/prompt` | `packages/context/prompt/src/index.ts`, `assets/*.txt`, `scripts/sync.mjs` | Canonical prompt assets or prompt provenance changes. |
+| `packages/context/prompt` | `packages/context/prompt/src/index.ts`, `prompts/swarm-system-prompt.md` | Canonical prompt text, section order, or prompt provenance changes. |
 | `packages/tools/taskmanage` | `packages/tools/taskmanage/src/*.ts` | Task persistence, hooks, workflows, interaction, or authoritative task lifecycle changes. |
 
 Tests live beside each package in its `test/` directory and under
