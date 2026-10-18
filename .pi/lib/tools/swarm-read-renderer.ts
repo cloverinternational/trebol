@@ -39,6 +39,9 @@ export interface ReadToolResult {
   isError?: boolean;
 }
 
+/** Source lines shown inline under a Read caption before the rest is summarized. */
+const SOURCE_PREVIEW_LINES = 12;
+
 function textComponent(value: string) {
   return {
     render(width: number): string[] {
@@ -89,7 +92,9 @@ function resultText(result: ReadToolResult | undefined, options: ReadRenderOptio
   const images = parts.filter((p) => p?.type === "image");
   const message = textParts.map((p) => p.text as string).join("\n").trim();
   const failed = Boolean(result?.isError || options?.isError || /^ERROR:/m.test(message));
-  const caption = /^Image file: (.+?) \(([^,]+), (.+)\)$/.exec(message);
+  // Only the headline is the caption; a `Cite as:` line and an SVG source body may follow it.
+  const [headline = "", ...detail] = message.split("\n");
+  const caption = /^(?:Image|Document) file: (.+?) \(([^,]+), ([^)]+)\)(.*)$/.exec(headline);
   const rows: string[] = [];
   const title = failed ? "✗ Read failed" : "✓ Read image";
   rows.push(theme?.fg?.(failed ? "error" : "success", title) ?? title);
@@ -101,7 +106,19 @@ function resultText(result: ReadToolResult | undefined, options: ReadRenderOptio
   }
   if (caption && !failed) {
     rows.push(theme?.fg?.("accent", caption[1]!) ?? caption[1]!);
-    rows.push(theme?.fg?.("muted", `${caption[2]} · ${caption[3]}`) ?? `${caption[2]} · ${caption[3]}`);
+    const meta = `${caption[2]} · ${caption[3]}${caption[4] ?? ""}`;
+    rows.push(theme?.fg?.("muted", meta) ?? meta);
+    for (const line of detail) {
+      if (!line.startsWith("Cite as: ")) continue;
+      const cite = `⌁ ${line.slice("Cite as: ".length)}`;
+      rows.push(theme?.fg?.("accent", cite) ?? cite);
+    }
+    const body = detail.filter((line) => !line.startsWith("Cite as: ")).join("\n").trim().split("\n").filter(Boolean);
+    for (const line of body.slice(0, SOURCE_PREVIEW_LINES)) rows.push(theme?.fg?.("toolOutput", line) ?? line);
+    if (body.length > SOURCE_PREVIEW_LINES) {
+      const more = `… ${body.length - SOURCE_PREVIEW_LINES} more lines`;
+      rows.push(theme?.fg?.("muted", more) ?? more);
+    }
   } else if (message) rows.push(theme?.fg?.(failed ? "error" : "toolOutput", message) ?? message);
   else if (!images.length && !failed) rows.push(theme?.fg?.("muted", "No image content returned") ?? "No image content returned");
   // Read's successful payload is an image, not line-oriented text. Do not

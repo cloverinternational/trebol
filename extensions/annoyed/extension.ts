@@ -1,6 +1,7 @@
 import { AnnoyedStore, boundTranscript, type AnnoyedStatus, type AnnoyedSeverity } from "./store.ts";
 import { registerAnnoyanceNudgeHook } from "./nudge.ts";
 import { withSwarmToolSurface } from "../../.pi/lib/runtime/swarm-tool-surface.ts";
+import { wrapToolForHookRows } from "../../.pi/lib/runtime/hook-render-bridge.ts";
 import { randomBytes } from "node:crypto";
 import { annoyedMarker, annoyedPublicTitle, annoyedRepository, annoyedResultXML, normalizeAnnoyedSeverity, publishAnnoyedIssue, reconcileAnnoyedIssue } from "../../.pi/lib/tools/swarm-annoyed-publish.ts";
 import { annoyedProjectFingerprint, runAnnoyedJudge, verifiedProjectRepository, redactAnnoyedReport } from "../../.pi/lib/tools/swarm-annoyed-routing.ts";
@@ -22,7 +23,7 @@ export default function annoyedExtension(rawPi: any) {
   const pi = withSwarmToolSurface(rawPi);
   registerAnnoyanceNudgeHook(pi);
   const store = new AnnoyedStore();
-  pi.registerTool({
+  pi.registerTool(wrapToolForHookRows({
     name: "annoyed", label: "Annoyed", description: "Record a user-approved product friction report. Non-actionable or uncertain submissions are routed to explicit Trebol triage. Do not change failure nudges into reports of every failure.", parameters: schema,
     async execute(toolCallId: string, params: any, signal: AbortSignal, _onUpdate: unknown, ctx: any) {
       if (signal.aborted) throw new Error("annoyed: cancelled");
@@ -84,7 +85,7 @@ export default function annoyedExtension(rawPi: any) {
       await store.setMetadata(result.issue.id, { publicationStatus: "confirmed", publicationUrl: publicationURL });
       return { content: [{ type: "text", text: annoyedResultXML(fields.issue, publicationURL, repository, severity, { scope: verdict.scope, reason, triage }) }], details: { duplicate: !result.reserved, publication_url: publicationURL, repository, scope: verdict.scope, reason, triage, publication_status: "confirmed" } };
     },
-  });
+  }));
   pi.on?.("session_shutdown", () => store.close());
   return store;
 }

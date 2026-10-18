@@ -18,7 +18,7 @@ export function collectJevEvidence(entries:any[], after?:string) {
   const call=calls.get(m?.toolCallId), args=call?.arguments;
   if(tool && /^vault(?:_|$)/i.test(tool)){const metadata=vaultMemoryEvidence(tool,raw,args);if(metadata===undefined){skipped++;cursor=e.id;continue;}raw=metadata;}
   const isSkill=tool==="Skill" || (tool==="SkillManage" && args?.action==="view");
-  if(!["user","assistant","toolResult"].includes(role)||!raw.trim()||runtime.test(raw)||(/^context_|^memory_history$|^bootstrap$/.test(tool??""))||(tool==="SkillManage"&&!isSkill)) {skipped++;cursor=e.id;continue;}
+  if(!["user","assistant","toolResult"].includes(role)||!raw.trim()||runtime.test(raw)||(/^context_|^memory_history$/.test(tool??""))||(tool==="SkillManage"&&!isSkill)) {skipped++;cursor=e.id;continue;}
   if(tool==="ask_user_question") {
    if(!raw.startsWith("User answered:") || !call){skipped++;cursor=e.id;continue;}
    raw=`Interaction question (not a user assertion): ${JSON.stringify(args?.question??args?.questions??"")}\nHuman response: ${raw.slice(14).trim()}`;

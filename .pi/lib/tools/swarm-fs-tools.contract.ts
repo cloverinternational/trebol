@@ -12,7 +12,7 @@ export const UNDO_CONTRACT: ToolContract = {
 };
 
 export const READ_CONTRACT: ToolContract = {
-  description: "Views an image file so you can actually see it.\n\nThis tool handles IMAGES ONLY (.jpg, .jpeg, .png, .gif, .webp). It returns the\nvisual content directly, which the shell cannot do.\n\nFor every other kind of file, use the shell instead:\n  - whole file:   cat FILE\n  - a slice:      sed -n 'START,ENDp' FILE\n  - with numbers: nl -ba FILE | sed -n 'START,ENDp'\n  - first/last:   head -n N FILE  /  tail -n N FILE\n  - search:       rg PATTERN        (add -n for line numbers, -t go to filter)\n  - find files:   rg --files -g 'PATTERN'",
+  description: "Views an image, SVG or PDF file so you can actually see it.\n\nSupported: .jpg, .jpeg, .png, .gif, .webp (returned as pictures); .svg (returned as\nits source text); .pdf (page 1 returned as a picture). Every result ends with a\n`Cite as:` line: cite that path, plus `#page=1` for a PDF.\n\nFor every other kind of file, use the shell instead:\n  - whole file:   cat FILE\n  - a slice:      sed -n 'START,ENDp' FILE\n  - with numbers: nl -ba FILE | sed -n 'START,ENDp'\n  - first/last:   head -n N FILE  /  tail -n N FILE\n  - search:       rg PATTERN        (add -n for line numbers, -t go to filter)\n  - find files:   rg --files -g 'PATTERN'",
   parameters: {"properties":{"file_path":{"description":"Absolute path to the image file (.jpg, .jpeg, .png, .gif, .webp).","type":"string"}},"required":["file_path"],"type":"object"},
 };
 

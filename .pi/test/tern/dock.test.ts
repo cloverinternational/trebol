@@ -267,6 +267,8 @@ describe("Tern regions and dock structure", () => {
 		expect(nodes.get("task-pop-3")?.p?.tone).toBe("success");
 		expect(PI_COMPOSER_CSS).toMatch(/\[data-role='pi\.tasks\.pop'\] \{[^}]*display: none;/);
 		expect(PI_COMPOSER_CSS).toContain("[data-role='pi.tasks']:hover [data-role='pi.tasks.pop'] { display: flex; }");
+		expect(PI_COMPOSER_CSS).toContain("[data-role='pi.assistant']:not(:has(~ .sf-col[data-role='pi.assistant'])) .sf-md .md { font-family: var(--sans); }");
+		expect(PI_COMPOSER_CSS).toContain("[data-role='pi.user'] .sf-md .md { font-family: var(--sans); }");
 		expect(PI_COMPOSER_CSS).toMatch(/\[data-role='pi\.tasks\.pop'\] \{[^}]*background: var\(--card\);/);
 	});
 
@@ -299,7 +301,7 @@ describe("Tern regions and dock structure", () => {
 		bridge.start();
 		await bridge.submit("/reload");
 		expect(called).toBe(1);
-		expect(writes.filter(w => w.startsWith(`${ESC}_tsp;s;`))).toHaveLength(2);
+		expect(writes.filter(w => w.startsWith(`${ESC}_tsp;s;`))).toHaveLength(3); // composer, startup, reloaded named sheet
 		expect(textsUnder(writes, "main").join(" ")).toContain("Reloaded Pi resources");
 		bridge.close();
 	});
@@ -318,22 +320,11 @@ describe("Tern regions and dock structure", () => {
 		fake.emit({ type: "agent_end" });
 		await bridge.submit("/reload");
 		expect(called).toBe(1);
-		expect(writes.filter(w => w.startsWith(`${ESC}_tsp;s;`))).toHaveLength(1);
+		expect(writes.filter(w => w.startsWith(`${ESC}_tsp;s;`))).toHaveLength(2); // composer, startup
 		expect(textsUnder(writes, "main").join(" ")).toContain("reload failed: invalid resource");
 		bridge.close();
 	});
 
-	it("shows and clears a real loading node through the Pi turn lifecycle", async () => {
-		const fake = fakeSession();
-		const { bridge, writes } = make(fake);
-		void bridge.submit("harmless prompt");
-		expect(replay(writes).get("tern.loading")?.k).toBe("spinner");
-		fake.emit({ type: "agent_start" });
-		expect(replay(writes).get("tern.loading")?.k).toBe("shimmer");
-		fake.emit({ type: "agent_end" });
-		expect(replay(writes).has("tern.loading")).toBe(false);
-		bridge.close();
-	});
 	beforeEach(() => vi.useFakeTimers({ now: 1_000_000 }));
 	afterEach(() => vi.useRealTimers());
 

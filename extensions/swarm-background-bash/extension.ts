@@ -109,6 +109,19 @@ export function registerSwarmBackgroundBash(inputPi: Pi): void {
       }
     },
   }));
+  // Ctrl+B moves the foreground Bash call into the background. The editor
+  // consumes any matched extension shortcut, so this key no longer reaches
+  // cursor-left while Pi is focused.
+  pi.registerShortcut?.("ctrl+b", {
+    description: "Move the running Bash command to the background",
+    handler: (ctx: any) => {
+      const moved = (globalThis as any)[BACKGROUND_BASH_DETACH]?.() === true;
+      ctx.ui?.notify?.(
+        moved ? "Bash command moved to background" : "No foreground Bash command to background",
+        moved ? "info" : "warning",
+      );
+    },
+  });
 }
 
 export default function swarmBackgroundBashExtension(pi: Pi): void {

@@ -30,6 +30,9 @@ export const isReadOnlyRecallTool = (name: string) => [
   "subagentoutput", "taskoutput", "delegateoutput", "vaultlist",
 ].includes(normalizeToolName(name));
 export const isReadOnlyResearchTool = (name: string) => isReadOnlyExplorationTool(name) || isReadOnlyRecallTool(name);
+/** memory_history mixes reads and writes in one tool, so only its lookup operations are read-only. */
+export const isReadOnlyMemoryCall = (name: string, params: any) =>
+  normalizeToolName(name) === "memoryhistory" && (params?.operation === "search" || params?.operation === "get");
 export const isBashTool = (name: string) => ["bash", "shell", "execute"].includes(normalizeToolName(name));
 
 interface ShellHeredoc { word: string; stripTabs: boolean }

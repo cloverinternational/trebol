@@ -56,6 +56,21 @@ export function encodeTspChunks(verb: string, body: unknown, limit: number = APC
 	});
 }
 
+// `b` carries a base64 blob (transport.md#blobs). Base64 contains no `;`, so any split is chunk-safe.
+export function encodeTspBlob(id: string, mime: string, base64: string, limit: number = APC_LIMIT): string[] {
+  const meta = `id=${id};mime=${mime};`;
+  const room = Math.max(1, limit - 256);
+  if (base64.length <= room) return [`${ESC}_tsp;b;${meta}${base64}${ST}`];
+  const cid = `k${++chunkCounter}`;
+  const pieces: string[] = [];
+  for (let at = 0; at < base64.length; at += room) pieces.push(base64.slice(at, at + room));
+  return pieces.map((piece, i) => {
+    const more = i < pieces.length - 1 ? "m=1;" : "";
+    const head = i === 0 ? meta : "";
+    return `${ESC}_tsp;b;c=${cid};${more}${head}${piece}${ST}`;
+  });
+}
+
 function utf8Length(s: string): number {
 	return new TextEncoder().encode(s).length;
 }

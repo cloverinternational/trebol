@@ -1,0 +1,477 @@
+event: message_start
+data: {"type":"message_start","message":{"model":"claude-haiku-5-5","id":"msg_011Cg9zwFcMMDi84Rq8vSfit","type":"message","role":"assistant","content":[],"container":null,"stop_reason":null,"stop_sequence":null,"stop_details":null,"usage":{"input_tokens":4,"cache_creation_input_tokens":1700,"cache_read_input_tokens":68962,"cache_creation":{"ephemeral_5m_input_tokens":1700,"ephemeral_1h_input_tokens":0},"output_tokens":4,"service_tier":"standard","inference_geo":"global","speed":"standard"},"diagnostics":null,"context_management":null}  }
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}
+
+event: ping
+data: {"type": "ping"}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":""}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"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"}    }
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0       }
+
+event: content_block_start
+data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"The"} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" previous expl"}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"anation is unchanged."}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" This"}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" di"} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"agram adds the dec"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ision path"}          }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" for the"}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" rejected"}           }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" re"}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ference. It"}         }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" foll"}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ows `resolveToolE"}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"vidence` in `packages"}           }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"/tools/taskman"}       }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"age/src/task-manage"}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":".ts:1076"}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"-1088`, which is called"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" from the"}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" complet"}       }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ion path at `task-manage"}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":".ts:700`."}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"\n\n```mermaid\nflow"}          }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"chart TD\n    A[\""}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Completion c"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ites tool:N"}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"AME or"}         }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" tool:NAME#n"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"\"] --> B{\""}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Matches t"}          }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ool p"}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"attern and session"} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" manager exists?\"}"}           }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"\n    B -- no --> X"}       }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"[\""}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Reject: tool_result_"}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"unavailable\"]\n    "}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"B -- yes --> C"}         }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"[\"names"} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" = toolName"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" of every toolResult on current"}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" branch\"]\n    C --"}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"> D{\"NAME ex"}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"actly in"}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" names?\"}\n    D -"} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"- yes --> G"}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"\n    D -- no --> E"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"{\"Al"} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ias map has exactly one target"}           }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"?\"}\n    E --"}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" no --> X\n    E -"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"- yes --> F[\""}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"R"}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ename N"}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"AME to al"}          }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ias target\""}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"]\n    F --> G{"}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"\""}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Is"}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" #n given?\"}\n    "}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"G -- no --> H"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"{\""}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Count of NAME > 0"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"?\"}\n    H --"}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" y"}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"es --> OK[\""}         }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Accept\"]\n    H"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" -- no --> X\n    "}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"G -- yes --> I"}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"{\"1 <= n "}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"<= count of NAME?\""}           }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"}\n    I -- y"}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"es --> OK\n    I"}           }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" -- no --> X\n```"}           }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"\n\n**Walkthrough"}          }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" of the rejected"}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" re"}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ference `"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"tool:mcp__"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Bash#3`:**"}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"\n\n1"}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":". The pattern acc"}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"epts `mcp__"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Bash`"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" as"} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" a name because under"}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"scores are allowed,"}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" and `#3` as"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" the index.\n2. `"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"names` cont"}          }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ains only ex"}          }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"act `toolName` str"}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ings from current"}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"-branch t"}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ool results."}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Comparison is case-sens"} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"itive, so `m"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"cp__Bash` must"}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" match ex"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"actly.\n3. If `"}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"mcp__Bash`"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" is not in `"}       }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"names` and the"}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" alias map has no single"}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" target for"}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" it, the path"}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" go"}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"es stra"}       }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ight to r"}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ejection.\n4. If"}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" the"}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" name is present, `"}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"#3` must be no"} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" greater than the number"}          }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" of results with that ex"}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"act name. Failed results count"}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":".\n5."}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Any failure in ste"}           }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ps 2–4 y"}         }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ields `"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"tool_result_unavail"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"able`. The session-"}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"h"}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"int text"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" appended at"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" `"}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"task-manage.ts:"}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"700` lists the names"}       }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" and counts that do exist,"}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" so use one"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" of those.\n\nI could not in"}           }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"spect the live"}           }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" session transcript, so the"}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" diagram sh"} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ows which branch the"}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" rejection took"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":", not which check fail"} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ed in your"}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" session"}         }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"."}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Branch-spec"}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ific coun"}         }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ts would"}         }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" need the r"}       }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ejection"}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"'s `available:` list or"}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" the session"}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" file"}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"."}    }
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":1           }
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null,"stop_details":null,"container":null},"usage":{"input_tokens":4,"cache_creation_input_tokens":1700,"cache_read_input_tokens":68962,"output_tokens":1500,"output_tokens_details":{"thinking_tokens":755}},"context_management":{"applied_edits":[]}      }
+
+event: message_stop
+data: {"type":"message_stop" }
+

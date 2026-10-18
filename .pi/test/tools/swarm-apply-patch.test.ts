@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "no
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { applyPatch, parsePatch, undoFile } from "../../lib/tools/swarm-apply-patch.ts";
-import { readImage } from "../../lib/tools/swarm-read-image.ts";
+import { readArtifact } from "../../lib/tools/swarm-read-image.ts";
 import extension from "../../../extensions/swarm-fs-tools/extension.ts";
 import { PERMISSIVE_PARAMETERS, loadSwarmToolSurface, overlaySwarmToolSchemas } from "../../lib/runtime/swarm-tool-surface.ts";
 
@@ -92,9 +92,9 @@ describe("Swarm apply_patch parity", () => {
     await expect(undoFile(file, ws)).rejects.toThrow(`no snapshot found for ${file}`);
   });
 
-  it("Read rejects text with Swarm's exact result message", () => {
+  it("Read rejects text with Swarm's exact result message", async () => {
     const ws = root(), file = join(ws, "a.txt"); writeFileSync(file, "text");
-    expect(readImage(file, ws)).toEqual([{ type: "text", text: `ERROR: Read handles image files only (.gif, .jpeg, .jpg, .png, .webp). For text use the shell, e.g. \`sed -n '1,200p' ${file}\` to view a slice or \`rg PATTERN ${file}\` to search it.` }]);
+    expect(await readArtifact(file, ws)).toEqual([{ type: "text", text: `ERROR: Read handles images, SVG and PDF files only (.gif, .jpeg, .jpg, .png, .webp, .svg, .pdf). For other files use the shell, e.g. \`sed -n '1,200p' ${file}\` to view a slice or \`rg PATTERN ${file}\` to search it.` }]);
   });
 
   it("lets apply_patch write outside the workspace", async () => {

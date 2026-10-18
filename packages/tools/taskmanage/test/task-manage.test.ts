@@ -43,10 +43,10 @@ describe("TaskManage", () => {
     expect(m.execute({mode:"atomic",operations:[create("leaked"),{key:"x",op:"get",taskId:"404"}]}).status).toBe("failed");
     expect(m.execute({operations:[{key:"q",op:"list"}]}).results[0].data).toMatchObject({pagination:{total:1}});
   });
-  it("replays an already committed mutation key without duplicating work", () => {
+  it("replays an identical committed create key without duplicating work", () => {
     const m = new TaskManager();
     const first = m.execute({ operations: [create("stable", "Stable")] });
-    const second = m.execute({ operations: [create("stable", "Changed")] });
+    const second = m.execute({ operations: [create("stable", "Stable")] });
     expect(first.results[0].data).toEqual(second.results[0].data);
     expect(m.snapshot().tasks).toHaveLength(1);
     expect(m.snapshot().nextId).toBe(2);

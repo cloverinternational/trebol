@@ -19,6 +19,7 @@ export type KeyEffect =
 	| { kind: "selectAll" }
 	| { kind: "undo" }
 	| { kind: "deleteWord" }
+	| { kind: "toggleOutput" }
 	| { kind: "text"; text: string };
 
 export function keyEffect(sequence: string): KeyEffect | null {
@@ -34,6 +35,7 @@ export function keyEffect(sequence: string): KeyEffect | null {
 	if (name === "alt+backspace") return { kind: "deleteWord" };
 	if (name === "ctrl+a" || name === "super+a") return { kind: "selectAll" };
 	if (name === "ctrl+z" || name === "super+z") return { kind: "undo" };
+	if (name === "ctrl+o") return { kind: "toggleOutput" };
 	if (name === "alt+left") return { kind: "cursor", direction: -1, word: true, extend: false };
 	if (name === "alt+right") return { kind: "cursor", direction: 1, word: true, extend: false };
 	if (name === "shift+left") return { kind: "cursor", direction: -1, word: false, extend: true };

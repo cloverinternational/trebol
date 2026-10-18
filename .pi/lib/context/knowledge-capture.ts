@@ -34,7 +34,7 @@ export function captureEvidence(entries: readonly any[], after?: string, maxChar
     const role = message?.role;
     if (role !== "user" && role !== "toolResult") { cursor = entry.id; continue; }
     const tool = typeof message.toolName === "string" ? message.toolName : "";
-    if (/^(context_|memory_history$|bootstrap$|SkillManage$|Skill$)/.test(tool)) { cursor = entry.id; continue; }
+    if (/^(context_|memory_history$|SkillManage$|Skill$)/.test(tool)) { cursor = entry.id; continue; }
     const content = message.content;
     const raw = typeof content === "string" ? content : Array.isArray(content)
       ? content.filter((part: any) => part?.type === "text" && typeof part.text === "string").map((part: any) => part.text).join("\n") : "";

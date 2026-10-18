@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { openKnowledgeStore, redactKnowledge, type EvidenceRef, type KnowledgeRecord } from "./knowledge-store.ts";
+import { ANSWER_SOURCE, anchorAnswer, answerId } from "./answer-evidence.ts";
 
 export interface TaskCandidateInput {
   id: string; subject: string; description?: string; status: string;
@@ -19,6 +20,8 @@ const stable = (value: unknown) => JSON.stringify(value);
  */
 export function captureTaskCandidates(input: {
   cwd: string; session: string; tasks: readonly TaskCandidateInput[]; root?: string;
+  /** Current-branch session entries, used to anchor `tool:` evidence refs. */
+  entries?: readonly unknown[];
 }): { saved: KnowledgeRecord[]; unchanged: string[]; failed: string[] } {
   const saved: KnowledgeRecord[] = [], unchanged: string[] = [], failed: string[] = [];
   if (!input.cwd || !input.session || !Array.isArray(input.tasks)) throw new Error("Task candidate capture requires a complete task snapshot and session identity");
@@ -61,6 +64,34 @@ export function captureTaskCandidates(input: {
         tags: ["taskmanage", safe(task.subject).slice(0, 200)] });
       current.set(id, record); saved.push(record);
     } catch { failed.push(id); }
+  }
+  // One retrievable record per answer of a completed task. Status follows the
+  // deterministic anchoring rule in answer-evidence.ts: verified only means the
+  // cited evidence resolved and is unchanged, not that the answer is correct.
+  for (const task of input.tasks) {
+    if (task?.status !== "completed" || typeof task.id !== "string" || !Array.isArray(task.answers)) continue;
+    for (const answer of task.answers) {
+      const question = task.questions?.find(q => q.id === answer?.question);
+      if (!question || typeof answer.answer !== "string" || !answer.answer.trim() || typeof answer.evidence !== "string") continue;
+      const id = answerId(input.session, task.id, question.id);
+      const base = [`Q: ${safe(question.text)}`, `A: ${safe(answer.answer)}`, `Task: ${safe(task.subject)}`].join("\n");
+      // Anchors are frozen at first capture: re-anchoring an unchanged answer
+      // against edited files would silently re-verify stale evidence.
+      const prior = current.get(id);
+      if (prior && (prior.text === base || prior.text.startsWith(`${base}\n`))) { unchanged.push(id); continue; }
+      try {
+        const anchored = anchorAnswer(input.cwd, answer.evidence, { file: input.session.endsWith(".jsonl") ? input.session : undefined, entries: input.entries as any[] });
+        const evidence = anchored.refs.filter(r => r.kind !== "unresolved").map(r => r.ref);
+        const unresolved = anchored.refs.filter(r => r.kind === "unresolved").map(r => `${r.ref.ref} (${r.reason})`);
+        const text = unresolved.length ? `${base}\nUnresolved evidence: ${safe(unresolved.join("; "))}` : base;
+        const status = anchored.verified ? "verified" as const : "candidate" as const;
+        const previous = prior;
+        const record = store.put({ id, ...(previous ? { expectedRevision: previous.revision } : {}), text, evidence, status, kind: "fact",
+          source: `${ANSWER_SOURCE}:${input.session}:${task.id}:${question.id}`,
+          tags: ["taskmanage-answer", anchored.verified ? "evidence-anchored" : "evidence-unanchored", safe(task.subject).slice(0, 200)] });
+        current.set(id, record); saved.push(record);
+      } catch { failed.push(id); }
+    }
   }
   return { saved, unchanged, failed };
 }

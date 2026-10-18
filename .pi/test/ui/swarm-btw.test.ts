@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 // The Pi host packages are supplied at runtime and are not installed here, so
-// stub the surface BtwView touches. Mirrors .pi/test/runtime/bootstrap-task-first.test.ts.
+// stub the surface BtwView touches.
 vi.mock("@earendil-works/pi-ai", () => ({ contentText: (c: unknown) => typeof c === "string" ? c : "" }));
 vi.mock("@earendil-works/pi-coding-agent", () => ({ getMarkdownTheme: () => ({}) }));
 vi.mock("@earendil-works/pi-tui", () => ({

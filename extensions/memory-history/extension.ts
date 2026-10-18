@@ -1,3 +1,4 @@
+import { rankKnowledge } from "../../.pi/lib/state/fact-index.ts";
 import { MEMORY_KNOWLEDGE_GUIDANCE, MEMORY_SCOPE_GUIDANCE } from "../../.pi/lib/context/memory-guidance.ts";
 import { createHash } from "node:crypto";
 import { searchShared } from "../../.pi/lib/state/shared-memory.ts";
@@ -154,7 +155,7 @@ export default function memoryHistoryExtension(pi: any): void {
   pi.on?.("session_shutdown", () => { generation++; });
   pi.on?.("before_agent_start", (event: any) => {
     if (!(pi.getActiveTools?.() ?? []).includes("memory_history")) return;
-    const guidance = "<memory_workflow>For each new substantive project task, call memory_history search with a task-relevant query and scope all before investigating or editing. This is an explicit visible tool lookup, not a substitute for bootstrap. Empty results are valid. Get relevant records and inspect their cited evidence before relying on them; candidates are leads, not established facts. After establishing a useful durable fact or decision, search for duplicates and remember or correct it with evidence in the appropriate project scope. Do not manufacture writes, save routine progress, or repeat the same lookup every turn. For greetings and simple acknowledgments no lookup is needed.</memory_workflow>";
+    const guidance = "<memory_workflow>For each new substantive project task or question about this project, call memory_history search with scope all before investigating or editing. Query with the distinctive words of the task (identifiers, error codes, file names, component names); results are ranked, so extra words are fine and no single word must match. This is an explicit visible tool lookup. Empty results are valid. Get relevant records and inspect their cited evidence before relying on them; candidates are leads, not established facts. After establishing a useful durable fact or decision, search for duplicates and remember or correct it with evidence in the appropriate project scope. Do not manufacture writes, save routine progress, or repeat the same lookup every turn. For greetings and simple acknowledgments no lookup is needed.</memory_workflow>";
     return {systemPrompt: String(event.systemPrompt ?? "").replace(/\n?<memory_workflow>[\s\S]*?<\/memory_workflow>/g, "") + "\n" + guidance};
   });
   pi.registerCommand?.("memory-promote", {
@@ -211,16 +212,13 @@ export default function memoryHistoryExtension(pi: any): void {
           return { content: [{ type: "text", text: JSON.stringify({ knowledge: record ? [record] : [], legacy: [],
             review: record?.status === "candidate" ? "Inspect cited evidence and later corrections before deciding. Confirm project knowledge rather than procedural advice. If supported, correct this exact id/revision with status verified and evidence; otherwise leave candidate or delete with revision. Do not certify from the extraction alone." : undefined }) }], details: {} };
         }
-        const storeRecords = scopes.flatMap((storeScope) => openKnowledgeStore({ cwd, scope: storeScope, root: sharedMemoryRoot(), namespace }).snapshot().filter(record => !record.deleted));
-        const query = String(params.operation === "replay" ? "" : params.query ?? "").trim().toLocaleLowerCase();
-        const terms = [...new Set(query.match(/[\p{L}\p{N}_.-]{3,}/gu) ?? [])];
-        const knowledge = storeRecords.filter(record => {
-          if (params.status && record.status !== params.status) return false;
-          if (!query) return true;
-          const haystack = `${record.text} ${record.tags.join(" ")}`.toLocaleLowerCase();
-          const recordTerms = new Set(haystack.match(/[\p{L}\p{N}_.-]+/gu) ?? []);
-          return haystack.includes(query) || (terms.length >= 2 && terms.every(term => recordTerms.has(term)));
-        });
+        const groups = scopes.map((storeScope) => { const store = openKnowledgeStore({ cwd, scope: storeScope, root: sharedMemoryRoot(), namespace });
+          return { directory: store.directory, records: store.snapshot().filter(record => !record.deleted && (!params.status || record.status === params.status)) }; });
+        const query = String(params.operation === "replay" ? "" : params.query ?? "").trim();
+        // Ranked any-term retrieval (BM25, fused with dense vectors when configured); see fact-index.ts.
+        const ranked = query ? await rankKnowledge(groups, query) : undefined;
+        const byId = new Map(groups.flatMap(g => g.records).map(r => [r.id, r]));
+        const knowledge = ranked ? ranked.ids.map(id => byId.get(id)!) : groups.flatMap(g => g.records);
         if (["remember", "correct"].includes(params.operation)) {
           const store = openKnowledgeStore({ cwd, scope: selectedScope, root: sharedMemoryRoot(), namespace });
           if (params.operation === "correct" && !store.read(params.id)) throw new Error("Cannot correct an unknown knowledge record");
@@ -234,7 +232,7 @@ export default function memoryHistoryExtension(pi: any): void {
           return { content: [{ type: "text", text: JSON.stringify({ knowledge: [], legacy: [] }) }], details: {} };
         }
         const legacy = searchShared(cwd, params.operation === "replay" ? "" : params.query ?? "", scopes as any, limit, namespace).map(record => ({ ...record, status: "unverified", verified: false, source: "legacy-shared-memory" }));
-        return { content: [{ type: "text", text: JSON.stringify({ knowledge: knowledge.slice(0, limit), legacy, scanLimitPerScope: null }) }], details: {} };
+        return { content: [{ type: "text", text: JSON.stringify({ knowledge: knowledge.slice(0, limit), legacy, scanLimitPerScope: null, ...(ranked ? { ranking: ranked.mode, ...(ranked.embedError ? { embedError: ranked.embedError } : {}) } : {}) }) }], details: {} };
       }
       if (params.operation === "remember") {
         const text = params.text ?? params.note;

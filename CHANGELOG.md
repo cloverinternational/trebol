@@ -10,6 +10,10 @@ Release metadata is kept in `package.json`, `update-manifest.json`, and this fil
 
 ### Fixed
 
+- Tern groups consecutive tool steps into a turn summary (live view shows active steps; finished runs collapse to done/failed/interrupted) and restores persisted tool calls on reload.
+- Ctrl+B moves the running foreground Bash command to the background.
+- `/goal` verdict judging uses an answer-only prompt (MET / NOT_MET / IMPOSSIBLE).
+
 - Preserve `--append-system-prompt` when the Forge prompt extension replaces Pi's default system prompt.
 
 - TaskManage reuses saved answers with evidence revalidation, supports trusted evidence roots and explicit aliases, reports actionable citation errors, rebinds on session switches, and rolls back atomic cancellation. Add regression coverage and isolate hook-test environment state.

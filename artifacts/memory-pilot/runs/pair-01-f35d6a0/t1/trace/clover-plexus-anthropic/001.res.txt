@@ -1,0 +1,198 @@
+event: message_start
+data: {"type":"message_start","message":{"model":"claude-haiku-5-5","id":"msg_011Cg9zsU4anMscqEqo2bgd7","type":"message","role":"assistant","content":[],"container":null,"stop_reason":null,"stop_sequence":null,"stop_details":null,"usage":{"input_tokens":4,"cache_creation_input_tokens":33758,"cache_read_input_tokens":29678,"cache_creation":{"ephemeral_5m_input_tokens":33758,"ephemeral_1h_input_tokens":0},"output_tokens":6,"service_tier":"standard","inference_geo":"global","speed":"standard"},"diagnostics":null,"context_management":null}  }
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}  }
+
+event: ping
+data: {"type": "ping"}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":""}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"CAQSzwwKEAgSGAI4AUIIdGhpbmtpbmcSDGmtdI50oYxd+BJKYhoM5JCICSET8lncJ067IjDLq7Lz0fFiL8Vj/ozqGjyZTAlZ9ioe8qTUOAsQ5MHvk74gNLvolb6dYe3CsBaKfEAq7AuresHhZZ9/Qp1zdXx40G42i5+d+OLNG+StN8Umr7jNW7N0oome9bzqcL45O8ix/xSVnkVkQqy4rCerVic3yiKBP/vN3SWkYuX2IY/8YhOAFmphUgO122x4VzrLg4PuFvOpmBTWLahBvuD5ihOpsNwNk4T8hTAOgRrXV6GASS1uJU95wsGDr9MaB6wXXNqji+iR+ygWWW2PNMRQvLr4YUW2EAu22RHcso82wcbM/jbEgSTn/77594L8Hu+5UD43KN37oqYmixasLKiiA5TwQqZ8qfUMsFm3PHQDrRZv+bCgg1oWzLLZHfadieBk4P/YkQv0v2QoK6lsM/7C4QQm8PEsdAwLhCfhsBk93esSvXoV9/OPT+9XDlK1R0Hwx1j3bHeFnEQsWrOl6B6j1Fof4NBTFDvF9A9Y8sePk5gOi2gK2NAImdPokGysRcxBHZBLUw0v7OEwe0y/9s+6Tcsug8bbowZkV9LDN5tWF8j2UdGy2dB9Cqjj5SDTnAyY59lXx1C6pHRpzD3LB5i2pBS6Q0hj58TBxDyh6z/IggoZkTYFkCIk2Qb2c+EpwBOtpkLZ4dgItl2YgvjFr/Gy+jcCehnMFUkkC45nk7RC7SmiZFx824fVWBuYke0AuD0n/jZ4SMp3HZfdmoJg+ML81fqUmMifbh9zVohS3HGxw4pjWMYndGg6/VZpVP9djwXfTXyymRlw7QobWFdAZq+YzVdbx0hk7MBzyaC3sNBViY7/oW3CCo0CT8xZgKY3o/x+ogOAinRl9dp9ccwj55x6Yy+bBykk4V5zbfNkjanzJ21DDhN2WUftEveXx44vbfr2rqVaS+6WMDdndzW5VdT8wq5a4aYUZng0AnlscnwlMMwMoX0F8t51Rkb6OgpNELuAr9v2DYgYf/IYGMqHVZmqpXamFMhFe0S0quA+PYuaaGvNNxsHGsAtAn0RRdNkPfN4tFV/yUolDQazXvZTQn+5kFQxYxqYAARzNvhEvwistP+h9eXvrr8AOvqsmuQRojGly9NB2x028tb8XDJv0OmAUEeJYq0udBNu1Q7IuKtPJnZe6UvaB498hOpaZmbsQ/vnKnXFWqR5KZGDdW4omve7uP4yumxET4Qqoa9Q9Q+7x92sM17UnMuW6ZFiua1NUhUCa2G/Hftn7+hgnNZc0SBO84OXz+UMKxWbF12cm/ubC9UYiFyOQ0xlfhEPfhqH+5uigDdaITxASV9m1UvNC1gAjHkRuIySzixcazNYGXsi+JLU1W0dWauRJzg8DP0xw3A7wrP2TC3jTNwJ0R6j3d9+dg1mVnowT0wB++sm0aVL9V5Jx4p4yfFbWk4jOHexiYW7e96AFjszRdmIAkvCWq08v4uYLPP444BZ6pJCbEns4smqX89OKUcgm4dUxo2giY0j+mmb0Ta6fmyngG6NIdDV/ji7CvYUhvsIBl32XW3aoGNRFQc8rwSGBSOzAb4eN0fcBHdbU2CKv5TBI+lOCTvZJByRvcrYX0HXtmwXx3iXL8mGit6kbaCKakfT1///HEfjRIcOwCBFkbMLMiTia+ayowVtQhJKQaP1AVhfUVu9Dxhf1PFE7yeJ7mnVLFn/73LMS2bSoo2QvkLONQpVzW+5yAx6jJV45LWOntZStJjiKJDyvqBiyVYaIYQIqjQX86PwTe2q0q3YdM1vYWn1iXi73ju6MD4HDlJsPg6LUiyCX7JIA52Mwosliuik5U7wfA7+d2VOXxCitEt00tujsb++s3CdCJSxke7DmfLdr4FIBdUumLjWmjHp5zKgqOcbl+HbP02/84RBydIKFoBORrp0lDgzxGVv8x8Bh1TTeRnQAjLITqHOfe7Q5AqkgIcDCb2gj+VYanm0P4n6ubo5QLh4vJRlJToY4n7aoeW8UmXjQqKhSwZlaLwMuS7pFW6niIL72dGgANT1JkfHYT2JRZq9uI8fev/FKLOyrtcATyX9H/idLHkiw/LXxbSHCCvh+vtTCnn8Sh9HDS1qDgBTsqtIWn0LifoGnMrkBF+KsMbSlhCRGAE="}      }
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0            }
+
+event: content_block_start
+data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_01SqSD1swRRpf6XzaueDCFtq","name":"memory_history","input":{},"caller":{"type":"direct"}}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":""}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"operation\": \"search"}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"\", \"query\": \"T"}          }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"askManage t"}       }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"ool:Name#n evid"}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"ence re"}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"ference resolution completion answers"}          }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"\", \"scope\": \"all"}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"\"}"}              }
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":1 }
+
+event: content_block_start
+data: {"type":"content_block_start","index":2,"content_block":{"type":"tool_use","id":"toolu_01XLv3n13PEzYZtbyUiznQ9N","name":"TaskManage","input":{},"caller":{"type":"direct"}}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":""}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"{\"mode\": \"s"}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"equential"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"\", \"operations\": ["}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"{\""}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"key"}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"\":\"t"} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"1\",\"op\":\"create\",\"sub"}         }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"ject\":\"Document"} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":" how TaskManage resol"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"ves tool:Name#n"}           }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":" evidence\",\""}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"description"}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"\":\"Read-"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"only investigation of"}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":" TaskManage evidence"}           }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":" resolution:"}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":" which session entries count, index"}         }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":" base"}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":", and branch used.\",\"status"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"\":\"in_progress\",\"active"}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"\":true,\"category\":\"resear"}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"ching\",\"priority\":\"high\",\""}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"questions\":[{\"id\":"}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"\"q1\",\"text\":\""}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"Which session entries count as tool"}         }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":" results"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":" for tool:Name#n"}       }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":" references"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"?\"},{\"id\":\""}           }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"q2\",\"text\":\"What"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":" is n"}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":" ind"}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"exed relative to ("}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"per tool, per"}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":" session, or global)"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":" and is"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":" it 1-based?\"},"}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"{\"id\":\"q3\",\""}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"text\":\"Which session"} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":" branch is used to"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":" resolve the re"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"ference?\"}]}"}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"]"}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"}"}           }
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":2 }
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null,"stop_details":null,"container":null},"usage":{"input_tokens":4,"cache_creation_input_tokens":33758,"cache_read_input_tokens":29678,"output_tokens":720,"output_tokens_details":{"thinking_tokens":322}},"context_management":{"applied_edits":[]}      }
+
+event: message_stop
+data: {"type":"message_stop"}
+

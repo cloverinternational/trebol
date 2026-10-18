@@ -1,0 +1,239 @@
+{
+ "provenance": {
+  "fix": "fix commits whose shipped vitest files fail at parent (overlaid) and pass at fix; validated by tools/bench/validate-fix.sh; bug text paraphrases the failing assertion, not the fix",
+  "q": "artifacts/memory-audit/ab/ab-questions.jsonl (sealed A/B test split, real developer requests); graded by qrels span overlap as in ab/score_ab.py; workspace 5ad9194 (A/B era)"
+ },
+ "tasks": [
+  {
+   "id": "fix-d3f144d",
+   "kind": "fix",
+   "commit": "d3f144d^",
+   "check": {
+    "fixCommit": "d3f144d",
+    "tests": [
+     "packages/tools/taskmanage/test/task-manage.test.ts"
+    ]
+   },
+   "task": "Bug report for this repository (current directory):\n\nTaskManage: when a create operation reuses an operation key that an earlier create already used, but with a different payload (different subject or questions), the batch reports success and silently returns the old task instead of failing. A reused create key with a different payload must fail and name the existing task; an identical replay must still succeed.\n\nFind the cause and fix it in the source. Do not commit. When done, reply with one line naming the file(s) you changed."
+  },
+  {
+   "id": "fix-1f317d9",
+   "kind": "fix",
+   "commit": "1f317d9^",
+   "check": {
+    "fixCommit": "1f317d9",
+    "tests": [
+     ".pi/test/runtime/program-status.test.ts"
+    ]
+   },
+   "task": "Bug report for this repository (current directory):\n\nProgram status (OSC 7501): buildProgramStatusSequence interpolates whatever state value it is given straight into the terminal escape sequence, even values that are not a valid state (for example a string containing escape characters). It must reject an invalid state (return null) instead of interpolating it raw; valid states must keep working.\n\nFind the cause and fix it in the source. Do not commit. When done, reply with one line naming the file(s) you changed."
+  },
+  {
+   "id": "fix-2742333",
+   "kind": "fix",
+   "commit": "2742333^",
+   "check": {
+    "fixCommit": "2742333",
+    "tests": [
+     "packages/tools/taskmanage/test/review-regressions.test.ts"
+    ]
+   },
+   "task": "Bug report for this repository (current directory):\n\nTaskManage: editing an unrelated field (for example the description) of a legacy task that already has saved answers drops those answers. Saved answers must be preserved across unrelated edits, while completing a task without its questions answered must still be rejected.\n\nFind the cause and fix it in the source. Do not commit. When done, reply with one line naming the file(s) you changed."
+  },
+  {
+   "id": "fix-c0b341b",
+   "kind": "fix",
+   "commit": "c0b341b^",
+   "check": {
+    "fixCommit": "c0b341b",
+    "tests": [
+     ".pi/test/context/system-prompt-ownership.test.ts"
+    ]
+   },
+   "task": "Bug report for this repository (current directory):\n\nSystem prompt: when a prompt that the swarm-prompt before_agent_start hook previously returned for one workspace is passed back to it for a different workspace (or after the prompt settings changed), the hook returns nothing and reuses the old prompt instead of reassembling it for the new workspace and current settings.\n\nFind the cause and fix it in the source. Do not commit. When done, reply with one line naming the file(s) you changed."
+  },
+  {
+   "id": "fix-189eefd",
+   "kind": "fix",
+   "commit": "189eefd^",
+   "check": {
+    "fixCommit": "189eefd",
+    "tests": [
+     ".pi/test/ui/running-work-view.test.ts"
+    ]
+   },
+   "task": "Bug report for this repository (current directory):\n\nRunning-work browser: in the focused work browser, pressing Down to move to a completed item and open it does nothing, because Pi's normalized Down key sequence is not recognized. Down must work the same way as the other Down sequences.\n\nFind the cause and fix it in the source. Do not commit. When done, reply with one line naming the file(s) you changed."
+  },
+  {
+   "id": "fix-23f41ec",
+   "kind": "fix",
+   "commit": "23f41ec^",
+   "check": {
+    "fixCommit": "23f41ec",
+    "tests": [
+     ".pi/test/ui/swarm-program-status.test.ts"
+    ]
+   },
+   "task": "Bug report for this repository (current directory):\n\nswarm-program-status: when the user's prompt is truncated for the working-status title, emoji and other astral characters can be cut in half (a surrogate pair is split), producing broken text. Truncation must never split a character.\n\nFind the cause and fix it in the source. Do not commit. When done, reply with one line naming the file(s) you changed."
+  },
+  {
+   "id": "fix-4d384e7",
+   "kind": "fix",
+   "commit": "4d384e7^",
+   "check": {
+    "fixCommit": "4d384e7",
+    "tests": [
+     ".pi/test/tools/swarm-read-renderer.test.ts"
+    ]
+   },
+   "task": "Bug report for this repository (current directory):\n\nRead tool renderer: if the expanded result details contain a value that cannot be serialized (for example a circular structure), rendering throws and the row breaks. The renderer must keep rendering in that case.\n\nFind the cause and fix it in the source. Do not commit. When done, reply with one line naming the file(s) you changed."
+  },
+  {
+   "id": "fix-dff8e63",
+   "kind": "fix",
+   "commit": "dff8e63^",
+   "check": {
+    "fixCommit": "dff8e63",
+    "tests": [
+     ".pi/test/tools/swarm-apply-patch.test.ts"
+    ]
+   },
+   "task": "Bug report for this repository (current directory):\n\napply_patch: an explicit absolute path outside the workspace is rejected with an error like 'path ... resolves to ..., which is outside the workspace'. Explicit paths outside the workspace must be allowed.\n\nFind the cause and fix it in the source. Do not commit. When done, reply with one line naming the file(s) you changed."
+  },
+  {
+   "id": "q-T02",
+   "kind": "q",
+   "commit": "5ad9194",
+   "check": {
+    "qid": "T02"
+   },
+   "task": "You are working in this repository (current directory). A developer searched for `link.txt` while working on this request:\n\n\"\"\"we need to add the ability to @ things in our tern extension just like omp add that\"\"\"\n\nFind the code or documentation in this repository that the developer needed. Reply with up to 3 citations, most relevant first, one per line, each exactly in the form path/from/repo/root#Lstart-Lend, and nothing else."
+  },
+  {
+   "id": "q-T15",
+   "kind": "q",
+   "commit": "5ad9194",
+   "check": {
+    "qid": "T15"
+   },
+   "task": "You are working in this repository (current directory). A developer searched for `forge-swarm` while working on this request:\n\n\"\"\"we are going to improve our system prompt, please tell me where the trebol system prompt is at\"\"\"\n\nFind the code or documentation in this repository that the developer needed. Reply with up to 3 citations, most relevant first, one per line, each exactly in the form path/from/repo/root#Lstart-Lend, and nothing else."
+  },
+  {
+   "id": "q-T08",
+   "kind": "q",
+   "commit": "5ad9194",
+   "check": {
+    "qid": "T08"
+   },
+   "task": "You are working in this repository (current directory). A developer searched for `provenance` while working on this request:\n\n\"\"\"can we clean up the repo? I want the system prompt to be in a markdown file even with the constructors of the system prompt and stuff so i can see how its built and edit it myslef\"\"\"\n\nFind the code or documentation in this repository that the developer needed. Reply with up to 3 citations, most relevant first, one per line, each exactly in the form path/from/repo/root#Lstart-Lend, and nothing else."
+  },
+  {
+   "id": "q-T01",
+   "kind": "q",
+   "commit": "5ad9194",
+   "check": {
+    "qid": "T01"
+   },
+   "task": "You are working in this repository (current directory). A developer searched for `block` while working on this request:\n\n\"\"\"make the thing go to the left the trebol and make it cleaner dont render it inside of the tui and make it cliockable it looks a bit rough use customer rendering from https://docs.stencil.so/tern/index.md\"\"\"\n\nFind the code or documentation in this repository that the developer needed. Reply with up to 3 citations, most relevant first, one per line, each exactly in the form path/from/repo/root#Lstart-Lend, and nothing else."
+  },
+  {
+   "id": "q-T32",
+   "kind": "q",
+   "commit": "5ad9194",
+   "check": {
+    "qid": "T32"
+   },
+   "task": "You are working in this repository (current directory). A developer searched for `margin: 0 12px 4px` while working on this request:\n\n\"\"\"the task manage in tern spans the full width unlike the user input box\"\"\"\n\nFind the code or documentation in this repository that the developer needed. Reply with up to 3 citations, most relevant first, one per line, each exactly in the form path/from/repo/root#Lstart-Lend, and nothing else."
+  },
+  {
+   "id": "q-T34",
+   "kind": "q",
+   "commit": "5ad9194",
+   "check": {
+    "qid": "T34"
+   },
+   "task": "You are working in this repository (current directory). A developer searched for `ask:payload` while working on this request:\n\n\"\"\"look at how the regular ask user tool in pi works and make it more like that the flow please but its working looks good\"\"\"\n\nFind the code or documentation in this repository that the developer needed. Reply with up to 3 citations, most relevant first, one per line, each exactly in the form path/from/repo/root#Lstart-Lend, and nothing else."
+  },
+  {
+   "id": "q-T33",
+   "kind": "q",
+   "commit": "5ad9194",
+   "check": {
+    "qid": "T33"
+   },
+   "task": "You are working in this repository (current directory). A developer searched for `\"./tools/bash\"` while working on this request:\n\n\"\"\"we are going to improve the tern bash rendering, please make it 1:1 to with OMP's tern rendering more styled and make sure that we are streaming everything in real time not just waiting for the request to finish\"\"\"\n\nFind the code or documentation in this repository that the developer needed. Reply with up to 3 citations, most relevant first, one per line, each exactly in the form path/from/repo/root#Lstart-Lend, and nothing else."
+  },
+  {
+   "id": "q-T41",
+   "kind": "q",
+   "commit": "5ad9194",
+   "check": {
+    "qid": "T41"
+   },
+   "task": "You are working in this repository (current directory). A developer searched for `render svg pdf image read tool apply_patch citation` while working on this request:\n\n\"\"\"add and give the functionality to render svgs pdfs images everything anything that an agent can do, and make the apply patch and other tools and read render them and also cite them\"\"\"\n\nFind the code or documentation in this repository that the developer needed. Reply with up to 3 citations, most relevant first, one per line, each exactly in the form path/from/repo/root#Lstart-Lend, and nothing else."
+  },
+  {
+   "id": "q-T19",
+   "kind": "q",
+   "commit": "5ad9194",
+   "check": {
+    "qid": "T19"
+   },
+   "task": "You are working in this repository (current directory). A developer searched for `dispatchBootstrapHandoff` while working on this request:\n\n\"\"\"fix those things and finish the cleanup\"\"\"\n\nFind the code or documentation in this repository that the developer needed. Reply with up to 3 citations, most relevant first, one per line, each exactly in the form path/from/repo/root#Lstart-Lend, and nothing else."
+  },
+  {
+   "id": "q-T38",
+   "kind": "q",
+   "commit": "5ad9194",
+   "check": {
+    "qid": "T38"
+   },
+   "task": "You are working in this repository (current directory). A developer searched for `preview.*children` while working on this request:\n\n\"\"\"we are going to improve the tern bash rendering, please make it 1:1 to with OMP's tern rendering more styled and make sure that we are streaming everything in real time not just waiting for the request to finish\"\"\"\n\nFind the code or documentation in this repository that the developer needed. Reply with up to 3 citations, most relevant first, one per line, each exactly in the form path/from/repo/root#Lstart-Lend, and nothing else."
+  },
+  {
+   "id": "q-T30",
+   "kind": "q",
+   "commit": "5ad9194",
+   "check": {
+    "qid": "T30"
+   },
+   "task": "You are working in this repository (current directory). A developer searched for `kind: \"answer\"` while working on this request:\n\n\"\"\"Yes do that\"\"\"\n\nFind the code or documentation in this repository that the developer needed. Reply with up to 3 citations, most relevant first, one per line, each exactly in the form path/from/repo/root#Lstart-Lend, and nothing else."
+  },
+  {
+   "id": "q-T14",
+   "kind": "q",
+   "commit": "5ad9194",
+   "check": {
+    "qid": "T14"
+   },
+   "task": "You are working in this repository (current directory). A developer searched for `splitEvidence` while working on this request:\n\n\"\"\"Lets go ahead and create tests that check for those errrors they should all fail, we need to make sure we iron out these things, so please show me what we should do to make sure we test for all behavior and evidence and stops this\"\"\"\n\nFind the code or documentation in this repository that the developer needed. Reply with up to 3 citations, most relevant first, one per line, each exactly in the form path/from/repo/root#Lstart-Lend, and nothing else."
+  },
+  {
+   "id": "q-T07",
+   "kind": "q",
+   "commit": "5ad9194",
+   "check": {
+    "qid": "T07"
+   },
+   "task": "You are working in this repository (current directory). A developer searched for `gitCommonDir` while working on this request:\n\n\"\"\"yeah remove the bash workspace check 100%\"\"\"\n\nFind the code or documentation in this repository that the developer needed. Reply with up to 3 citations, most relevant first, one per line, each exactly in the form path/from/repo/root#Lstart-Lend, and nothing else."
+  },
+  {
+   "id": "q-T25",
+   "kind": "q",
+   "commit": "5ad9194",
+   "check": {
+    "qid": "T25"
+   },
+   "task": "You are working in this repository (current directory). A developer searched for `class TernInlineSurface` while working on this request:\n\n\"\"\"Yes implement all of those things and start working on it\"\"\"\n\nFind the code or documentation in this repository that the developer needed. Reply with up to 3 citations, most relevant first, one per line, each exactly in the form path/from/repo/root#Lstart-Lend, and nothing else."
+  },
+  {
+   "id": "q-T20",
+   "kind": "q",
+   "commit": "5ad9194",
+   "check": {
+    "qid": "T20"
+   },
+   "task": "You are working in this repository (current directory). A developer searched for `withMentions` while working on this request:\n\n\"\"\"we need to add the ability to @ things in our tern extension just like omp add that\"\"\"\n\nFind the code or documentation in this repository that the developer needed. Reply with up to 3 citations, most relevant first, one per line, each exactly in the form path/from/repo/root#Lstart-Lend, and nothing else."
+  }
+ ]
+}

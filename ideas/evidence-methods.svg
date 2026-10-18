@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="840" viewBox="0 0 1200 840">
+  <style>
+    .title { font: bold 24px sans-serif; fill: #1d2b44; }
+    .sub { font: 14px sans-serif; fill: #555; }
+    .head { font: bold 18px sans-serif; fill: #1d2b44; }
+    .tid { font: bold 14px Menlo, monospace; fill: #2e7d32; }
+    .code { font: 14px Menlo, monospace; fill: #222; }
+    .body { font: 14px sans-serif; fill: #333; }
+    .foot { font: bold 15px sans-serif; fill: #1d2b44; }
+  </style>
+  <rect width="1200" height="840" fill="#ffffff"/>
+  <text x="20" y="40" class="title">Six ways to make evidence easier to give</text>
+  <text x="20" y="62" class="sub">Tool ids refer to the current TaskManage / Bash contract. New tools are marked (new).</text>
+
+  <g transform="translate(20,80)">
+    <rect width="520" height="210" rx="12" fill="#f7f9fc" stroke="#3b5b8c" stroke-width="2"/>
+    <text x="16" y="34" class="head">1. Inline shorthand (no new tool)</text>
+    <text x="16" y="62" class="tid">Tool id: TaskManage  answers[].evidence</text>
+    <text x="16" y="92" class="code">call: evidence:"docs/plan.md#Results"</text>
+    <text x="16" y="116" class="body">change: fuzzy heading match plus did-you-mean on a miss</text>
+    <text x="16" y="138" class="body">gain: no new tool, same contract the model already has</text>
+    <text x="16" y="160" class="body">cost: still needs the model to type the exact path</text>
+  </g>
+
+  <g transform="translate(640,80)">
+    <rect width="520" height="210" rx="12" fill="#f7f9fc" stroke="#3b5b8c" stroke-width="2"/>
+    <text x="16" y="34" class="head">2. Evidence handles from every tool</text>
+    <text x="16" y="62" class="tid">Tool id: any tool returns a handle</text>
+    <text x="16" y="92" class="code">output: [ev:7] Bash exit 0</text>
+    <text x="16" y="116" class="code">call: evidence:"ev:7"</text>
+    <text x="16" y="140" class="body">change: runtime maps the handle to the live result</text>
+    <text x="16" y="162" class="body">gain: no tool names to recall, no indexes to count</text>
+  </g>
+
+  <g transform="translate(20,310)">
+    <rect width="520" height="210" rx="12" fill="#f7f9fc" stroke="#3b5b8c" stroke-width="2"/>
+    <text x="16" y="34" class="head">3. Last-result shortcut</text>
+    <text x="16" y="62" class="tid">Tool id: tool:Bash#last</text>
+    <text x="16" y="92" class="code">call: evidence:"tool:Bash#last"</text>
+    <text x="16" y="116" class="body">change: most recent Bash result on this branch</text>
+    <text x="16" y="138" class="body">gain: one token, no counting</text>
+    <text x="16" y="160" class="body">risk: wrong result when several Bash calls ran</text>
+  </g>
+
+  <g transform="translate(640,310)">
+    <rect width="520" height="210" rx="12" fill="#f7f9fc" stroke="#3b5b8c" stroke-width="2"/>
+    <text x="16" y="34" class="head">4. Named evidence registry (new)</text>
+    <text x="16" y="62" class="tid">Tool id: Evidence  op: attach</text>
+    <text x="16" y="92" class="code">call: Evidence{op:"attach", name:"build",</text>
+    <text x="16" y="114" class="code">      source:"tool:Bash#3"}</text>
+    <text x="16" y="138" class="code">then: TaskManage evidence:"@build"</text>
+    <text x="16" y="162" class="body">gain: cite once, reuse across questions and tasks</text>
+  </g>
+
+  <g transform="translate(20,540)">
+    <rect width="520" height="210" rx="12" fill="#f7f9fc" stroke="#3b5b8c" stroke-width="2"/>
+    <text x="16" y="34" class="head">5. Question-aware suggestions</text>
+    <text x="16" y="62" class="tid">Tool id: TaskManage  op: get, include_suggestions</text>
+    <text x="16" y="92" class="code">output: q1 suggested [tool:Bash#3,</text>
+    <text x="16" y="114" class="code">                      docs/plan.md#Results]</text>
+    <text x="16" y="138" class="body">call: copy one suggestion into answers[].evidence</text>
+    <text x="16" y="162" class="body">gain: the model picks from a list, does not invent refs</text>
+  </g>
+
+  <g transform="translate(640,540)">
+    <rect width="520" height="210" rx="12" fill="#f7f9fc" stroke="#3b5b8c" stroke-width="2"/>
+    <text x="16" y="34" class="head">6. Git and test auto-links (new prefixes)</text>
+    <text x="16" y="62" class="tid">Tool id: git: and test: prefixes</text>
+    <text x="16" y="92" class="code">call: evidence:"git:HEAD"  or  "test:last"</text>
+    <text x="16" y="116" class="body">resolves: commit exists; last test run passed</text>
+    <text x="16" y="138" class="body">gain: no tool-name knowledge needed</text>
+    <text x="16" y="160" class="body">cost: needs a test-run recorder to exist first</text>
+  </g>
+
+  <text x="20" y="790" class="foot">Suggested first pass: 1 + 2 + 5. They target the GLM failure modes</text>
+  <text x="20" y="812" class="foot">(string vs object, tool-name drift mcp__Bash vs Bash) and add no new tool.</text>
+</svg>

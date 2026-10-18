@@ -83,7 +83,7 @@ function startTsp(): void {
 		} else if (effect.kind === "submit") {
 			void bridge.submitDraft();
 		} else if (effect.kind === "followUp") {
-			void bridge.submitFollowUp(bridge.draft);
+			void bridge.submitFollowUp(bridge.expandedDraft);
 		} else if (effect.kind === "dequeue") {
 			bridge.restoreQueuedMessages();
 		} else if (effect.kind === "newline") {
@@ -106,10 +106,12 @@ function startTsp(): void {
 			bridge.undoDraft();
 		} else if (effect.kind === "deleteWord") {
 			bridge.deleteWordDraft();
+		} else if (effect.kind === "toggleOutput") {
+			bridge.toggleToolOutput();
 		} else bridge.appendDraft(effect.text);
 	});
 	// Pasted text stays in the draft; embedded newlines do not submit.
-	keyBuffer.on("paste", (text: string) => bridge?.appendDraft(text.replace(/\r\n?|\n/g, " ")));
+	keyBuffer.on("paste", (text: string) => bridge?.pasteText(text));
 
 	const onData = (chunk: Buffer): void => {
 		const text = chunk.toString("utf8");

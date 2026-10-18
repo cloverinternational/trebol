@@ -56,9 +56,8 @@ spinner in the dock and a running state; after a harmless turn the controlled
 pane showed `LOADING_VISIBLE_OK`, `Context 8%`, five actual output tokens,
 `0m 01s active`, `idle`, and no spinner (`loading-finished.png`). These are
 observed TSP values from that isolated session, not the native Pi session's
-`123.8k` tokens or Autogen skill state. `loading.ts` and the bridge clear
-the indicator on `agent_end`/`agent_settled`, abort, failure and close;
-terminal cases have focused tests.
+`123.8k` tokens or Autogen skill state. The "Working"/"Waiting for agent"
+indicator above the composer has since been removed.
 
 The canonical TaskManager snapshot projector (`.pi/lib/tern/task-view.ts`)
 uses `TaskManager.rehydrate` from the compiled package artifact because the

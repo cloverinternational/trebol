@@ -27,3 +27,6 @@ Untitled
 .pi/render-debug*
 .pi/latest-box.png
 *.before-paseo-disabled
+
+# Local CLI/editor state (machine-specific, never commit)
+.local/

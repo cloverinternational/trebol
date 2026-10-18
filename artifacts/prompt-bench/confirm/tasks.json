@@ -1,0 +1,268 @@
+{
+ "provenance": {
+  "fix": "Fresh confirmatory task set (tasks not in artifacts/prompt-bench/tasks.json).\nfix: commits validated by validate-fix.sh (shipped tests fail at parent, pass at fix) and\n     check-api.py (fix-version tests import nothing the parent lacks); bug text paraphrases\n     the failing assertions at the parent (failnames), not the fix. Excluded: ddd5857\n     (assertion is a description wording only), 63b1757/1372f45/d7e0827/e65b5ac (fail at fix),\n     b7f001a/825f4b5/569d418 (pass at parent), adab0a7 (test deleted), fc690fc/d75cd6c/235c9b7\n     (tests import symbols the parent lacks), 5427563/d08f054/f59eb6b/46828a8/5036f7c (7+ or\n     multi-file failures, too broad for a single bug report).",
+  "q": "q:next 14 eligible qids in the same seeded order as ab/select_ab.py (hash '20261018'+qid),\n   skipping the 15 used; same grading (qrels span overlap) and workspace 5ad9194."
+ },
+ "tasks": [
+  {
+   "id": "fix-ebd3f0f",
+   "kind": "fix",
+   "commit": "ebd3f0f^",
+   "check": {
+    "fixCommit": "ebd3f0f",
+    "tests": [
+     ".pi/test/runtime/program-status.test.ts"
+    ]
+   },
+   "task": "Bug report for this repository (current directory):\n\nProgram status (OSC 7501): buildProgramStatusSequence silently drops a `kind` given with a state other than blocked, and a `progress` given with a state other than working or blocked, and still emits a sequence. Such incompatible combinations must be rejected (return null). Separately, ProgramStatusReporter crashes the host when its write function throws (for example EPIPE on a closed stderr); reporting must never throw.\n\nFind the cause and fix it in the source. Do not commit. When done, reply with one line naming the file(s) you changed."
+  },
+  {
+   "id": "fix-7345849",
+   "kind": "fix",
+   "commit": "7345849^",
+   "check": {
+    "fixCommit": "7345849",
+    "tests": [
+     "packages/tools/taskmanage/test/evidence-lifecycle.test.ts"
+    ]
+   },
+   "task": "Bug report for this repository (current directory):\n\nTaskManage: in an atomic batch, if the abort signal fires after the first operation succeeded but before the next one runs, the batch fails but the first operation's task is left in the store. A cancelled atomic batch must leave the task store exactly as it was before the batch.\n\nFind the cause and fix it in the source. Do not commit. When done, reply with one line naming the file(s) you changed."
+  },
+  {
+   "id": "fix-032871f",
+   "kind": "fix",
+   "commit": "032871f^",
+   "check": {
+    "fixCommit": "032871f",
+    "tests": [
+     "packages/tools/taskmanage/test/evidence-lifecycle.test.ts",
+     "packages/tools/taskmanage/test/review-regressions.test.ts"
+    ]
+   },
+   "task": "Bug report for this repository (current directory):\n\nTaskManage (two problems):\n1. Completing a task whose answers cite file evidence runs git worktree discovery (execFileSync) once per evidence reference instead of once per batch; it must run once per execute() batch and again on the next batch.\n2. new TaskManager(...) accepts the legacy `resolveEvidence` option together with `canReadEvidence` or `evidenceRoots`. That combination must throw an error whose message says the options are mutually exclusive.\n\nFind the cause and fix it in the source. Do not commit. When done, reply with one line naming the file(s) you changed."
+  },
+  {
+   "id": "fix-0f76e1b",
+   "kind": "fix",
+   "commit": "0f76e1b^",
+   "check": {
+    "fixCommit": "0f76e1b",
+    "tests": [
+     ".pi/test/ui/green-chat-input.test.ts",
+     ".pi/test/ui/running-work-view.test.ts"
+    ]
+   },
+   "task": "Bug report for this repository (current directory):\n\nUI (two problems):\n1. The green-chat-input extension replaces whatever editor component is already installed, losing its input handler (for example the work browser's), and it installs an editor even when no editor factory was present. It must keep the existing editor's input handler and only restyle its border green, and do nothing when there is no editor factory.\n2. RunningWorkView renders more rows than fit on a short terminal (terminal rows 12 -> 12 rendered rows). The list must be bounded to the terminal height (at most 8 rows for a 12-row terminal) while still showing the selected row marker.\n\nFind the cause and fix it in the source. Do not commit. When done, reply with one line naming the file(s) you changed."
+  },
+  {
+   "id": "fix-03359d7",
+   "kind": "fix",
+   "commit": "03359d7^",
+   "check": {
+    "fixCommit": "03359d7",
+    "tests": [
+     "packages/tools/taskmanage/test/pi-extension.test.ts"
+    ]
+   },
+   "task": "Bug report for this repository (current directory):\n\nBash tool result rendering: tab characters in output are left as raw tabs, so wrapping by terminal width is wrong (a tab occupies several cells but counts as one). Rendered result lines must expand tabs to spaces and every rendered line must fit the requested width.\n\nFind the cause and fix it in the source. Do not commit. When done, reply with one line naming the file(s) you changed."
+  },
+  {
+   "id": "fix-9ddef13",
+   "kind": "fix",
+   "commit": "9ddef13^",
+   "check": {
+    "fixCommit": "9ddef13",
+    "tests": [
+     ".pi/test/tools/swarm-history-vault-tools.test.ts"
+    ]
+   },
+   "task": "Bug report for this repository (current directory):\n\nHistorySearch: passing `fields` with non-normalized names such as [\" BODY \"] crashes (TypeError reading 'includes'), and segment searches (segment_kind set) ignore case_sensitive, exclude_runtime, sort and order. Field names must be normalized (trim, lower-case), and segment searches must honor case_sensitive, exclude_runtime, sort and order like conversation searches.\n\nFind the cause and fix it in the source. Do not commit. When done, reply with one line naming the file(s) you changed."
+  },
+  {
+   "id": "fix-d2f2acb",
+   "kind": "fix",
+   "commit": "d2f2acb^",
+   "check": {
+    "fixCommit": "d2f2acb",
+    "tests": [
+     ".pi/test/runtime/swarm-transport-parity.test.ts"
+    ]
+   },
+   "task": "Bug report for this repository (current directory):\n\nTool surface gating: the memory_history tool is registered by the state layer but is missing from the gated model tool surface (for example the headless surface), so the model never sees it. memory_history must be part of the surface.\n\nFind the cause and fix it in the source. Do not commit. When done, reply with one line naming the file(s) you changed."
+  },
+  {
+   "id": "fix-2577572",
+   "kind": "fix",
+   "commit": "2577572^",
+   "check": {
+    "fixCommit": "2577572",
+    "tests": [
+     "packages/tools/agents/test/agents.test.ts"
+    ]
+   },
+   "task": "Bug report for this repository (current directory):\n\nSubagents (createPiRunner): the child Pi session file is named only after the deterministic session id (<id>.jsonl), so two parents or concurrent runs of the same task share and clobber one transcript. Each child run must get its own session file named <id>-<pid>-<uuid>.jsonl in the same directory.\n\nFind the cause and fix it in the source. Do not commit. When done, reply with one line naming the file(s) you changed."
+  },
+  {
+   "id": "fix-ad38501",
+   "kind": "fix",
+   "commit": "ad38501^",
+   "check": {
+    "fixCommit": "ad38501",
+    "tests": [
+     "packages/tools/taskmanage/test/evidence-lifecycle.test.ts"
+    ]
+   },
+   "task": "Bug report for this repository (current directory):\n\nTaskManage: registerTaskManage(pi, ..., options) writes session callbacks onto the caller's options object. Frozen options make it throw (TypeError: cannot add property), and two registrations that reuse one options object share session callbacks, so one session's tool results satisfy the other's evidence. Registration must not mutate the caller's options and each registration must keep its own session binding.\n\nFind the cause and fix it in the source. Do not commit. When done, reply with one line naming the file(s) you changed."
+  },
+  {
+   "id": "fix-dcadf80",
+   "kind": "fix",
+   "commit": "dcadf80^",
+   "check": {
+    "fixCommit": "dcadf80",
+    "tests": [
+     "packages/tools/taskmanage/test/review-regressions.test.ts"
+    ]
+   },
+   "task": "Bug report for this repository (current directory):\n\nTaskManage: if a host callback (for example canonicalizeToolEvidence) throws while an atomic batch is running, the exception escapes execute() with its message. It must be contained: the batch fails with a validation_failed result for that operation, earlier operations in the atomic batch are rolled back, and the host's error message must not appear in the result.\n\nFind the cause and fix it in the source. Do not commit. When done, reply with one line naming the file(s) you changed."
+  },
+  {
+   "id": "fix-a2b2f3a",
+   "kind": "fix",
+   "commit": "a2b2f3a^",
+   "check": {
+    "fixCommit": "a2b2f3a",
+    "tests": [
+     ".pi/test/tools/paseo-startup-lifecycle.test.ts"
+    ]
+   },
+   "task": "Bug report for this repository (current directory):\n\nPaseo extension: startup is asynchronous, and if the session shuts down before startup resolves, the late result still touches ctx.ui of the expired session (there is no session_shutdown handling). After session_shutdown, a delayed startup result must not access the UI; while the session is active, startup failures must still be reported via notify.\n\nFind the cause and fix it in the source. Do not commit. When done, reply with one line naming the file(s) you changed."
+  },
+  {
+   "id": "q-T18",
+   "kind": "q",
+   "commit": "5ad9194",
+   "check": {
+    "qid": "T18"
+   },
+   "task": "You are working in this repository (current directory). A developer searched for `TernAskDialog` while working on this request:\n\n\"\"\"Lets go ahead and implement this and build the extension components\"\"\"\n\nFind the code or documentation in this repository that the developer needed. Reply with up to 3 citations, most relevant first, one per line, each exactly in the form path/from/repo/root#Lstart-Lend, and nothing else."
+  },
+  {
+   "id": "q-T28",
+   "kind": "q",
+   "commit": "5ad9194",
+   "check": {
+    "qid": "T28"
+   },
+   "task": "You are working in this repository (current directory). A developer searched for `Mandatory changelog` while working on this request:\n\n\"\"\"Continue check the thing and merge\"\"\"\n\nFind the code or documentation in this repository that the developer needed. Reply with up to 3 citations, most relevant first, one per line, each exactly in the form path/from/repo/root#Lstart-Lend, and nothing else."
+  },
+  {
+   "id": "q-T17",
+   "kind": "q",
+   "commit": "5ad9194",
+   "check": {
+    "qid": "T17"
+   },
+   "task": "You are working in this repository (current directory). A developer searched for `trebol` while working on this request:\n\n\"\"\"Continue dogfood it and test it out\"\"\"\n\nFind the code or documentation in this repository that the developer needed. Reply with up to 3 citations, most relevant first, one per line, each exactly in the form path/from/repo/root#Lstart-Lend, and nothing else."
+  },
+  {
+   "id": "q-T09",
+   "kind": "q",
+   "commit": "5ad9194",
+   "check": {
+    "qid": "T09"
+   },
+   "task": "You are working in this repository (current directory). A developer searched for `buildResultXML` while working on this request:\n\n\"\"\"we are going to improve the tern bash rendering, please make it 1:1 to with OMP's tern rendering more styled and make sure that we are streaming everything in real time not just waiting for the request to finish\"\"\"\n\nFind the code or documentation in this repository that the developer needed. Reply with up to 3 citations, most relevant first, one per line, each exactly in the form path/from/repo/root#Lstart-Lend, and nothing else."
+  },
+  {
+   "id": "q-T13",
+   "kind": "q",
+   "commit": "5ad9194",
+   "check": {
+    "qid": "T13"
+   },
+   "task": "You are working in this repository (current directory). A developer searched for `read-only` while working on this request:\n\n\"\"\"look at the failures and fix\"\"\"\n\nFind the code or documentation in this repository that the developer needed. Reply with up to 3 citations, most relevant first, one per line, each exactly in the form path/from/repo/root#Lstart-Lend, and nothing else."
+  },
+  {
+   "id": "q-T16",
+   "kind": "q",
+   "commit": "5ad9194",
+   "check": {
+    "qid": "T16"
+   },
+   "task": "You are working in this repository (current directory). A developer searched for `dispatchRegisteredHook` while working on this request:\n\n\"\"\"Continue do it\"\"\"\n\nFind the code or documentation in this repository that the developer needed. Reply with up to 3 citations, most relevant first, one per line, each exactly in the form path/from/repo/root#Lstart-Lend, and nothing else."
+  },
+  {
+   "id": "q-T05",
+   "kind": "q",
+   "commit": "5ad9194",
+   "check": {
+    "qid": "T05"
+   },
+   "task": "You are working in this repository (current directory). A developer searched for `stripANSI` while working on this request:\n\n\"\"\"we are going to improve the tern bash rendering, please make it 1:1 to with OMP's tern rendering more styled and make sure that we are streaming everything in real time not just waiting for the request to finish\"\"\"\n\nFind the code or documentation in this repository that the developer needed. Reply with up to 3 citations, most relevant first, one per line, each exactly in the form path/from/repo/root#Lstart-Lend, and nothing else."
+  },
+  {
+   "id": "q-T29",
+   "kind": "q",
+   "commit": "5ad9194",
+   "check": {
+    "qid": "T29"
+   },
+   "task": "You are working in this repository (current directory). A developer searched for `status: \"pending\"` while working on this request:\n\n\"\"\"continue\"\"\"\n\nFind the code or documentation in this repository that the developer needed. Reply with up to 3 citations, most relevant first, one per line, each exactly in the form path/from/repo/root#Lstart-Lend, and nothing else."
+  },
+  {
+   "id": "q-T21",
+   "kind": "q",
+   "commit": "5ad9194",
+   "check": {
+    "qid": "T21"
+   },
+   "task": "You are working in this repository (current directory). A developer searched for `doctor` while working on this request:\n\n\"\"\"please fix the pi extension why is it not isntalling please critique the extension and figure out why the extensions are not working nitpickit swarm@Kawzs-Mac-mini-2 trebol % pi\nError: Failed to load extension \"/Users/swarm/Work/Clover/trebol/.pi/extensions/00-runtime/.trebol-guards/05-swarm-runtime.ts\": Failed to load extension: Cannot find module '../../../runtime/runtime-contracts/dist/general-agent.js'\nRequire stack:\n- /Users/swarm/Work/Clover/trebol/packages/tools/agents/src/general-agent-adapter.ts\nError: Failed to load extension \"/Users/swarm/Work/Clover/trebol/.pi/extensions/30-tools/.\"\"\"\n\nFind the code or documentation in this repository that the developer needed. Reply with up to 3 citations, most relevant first, one per line, each exactly in the form path/from/repo/root#Lstart-Lend, and nothing else."
+  },
+  {
+   "id": "q-T35",
+   "kind": "q",
+   "commit": "5ad9194",
+   "check": {
+    "qid": "T35"
+   },
+   "task": "You are working in this repository (current directory). A developer searched for `^export interface Task\\b` while working on this request:\n\n\"\"\"we are going to fix the task header in the tern extension look at how the regular pi one works by rendering 1 task at a time and teh qeustions but with tern we can do that but we can click and hover over it and stuff and even make it pop up a task menu and shit like that\"\"\"\n\nFind the code or documentation in this repository that the developer needed. Reply with up to 3 citations, most relevant first, one per line, each exactly in the form path/from/repo/root#Lstart-Lend, and nothing else."
+  },
+  {
+   "id": "q-T03",
+   "kind": "q",
+   "commit": "5ad9194",
+   "check": {
+    "qid": "T03"
+   },
+   "task": "You are working in this repository (current directory). A developer searched for `inspector` while working on this request:\n\n\"\"\"Continue ensure that it all works please\"\"\"\n\nFind the code or documentation in this repository that the developer needed. Reply with up to 3 citations, most relevant first, one per line, each exactly in the form path/from/repo/root#Lstart-Lend, and nothing else."
+  },
+  {
+   "id": "q-T24",
+   "kind": "q",
+   "commit": "5ad9194",
+   "check": {
+    "qid": "T24"
+   },
+   "task": "You are working in this repository (current directory). A developer searched for `k: \"table\"` while working on this request:\n\n\"\"\"This is a clean intro and then have it slide to the right and then have a bar with the status of the directory like a table showing the last commits and files that are edited and stuff and git branch. like all in all a clean animation\"\"\"\n\nFind the code or documentation in this repository that the developer needed. Reply with up to 3 citations, most relevant first, one per line, each exactly in the form path/from/repo/root#Lstart-Lend, and nothing else."
+  },
+  {
+   "id": "q-T31",
+   "kind": "q",
+   "commit": "5ad9194",
+   "check": {
+    "qid": "T31"
+   },
+   "task": "You are working in this repository (current directory). A developer searched for `export function buildBoard` while working on this request:\n\n\"\"\"continue\"\"\"\n\nFind the code or documentation in this repository that the developer needed. Reply with up to 3 citations, most relevant first, one per line, each exactly in the form path/from/repo/root#Lstart-Lend, and nothing else."
+  },
+  {
+   "id": "q-T40",
+   "kind": "q",
+   "commit": "5ad9194",
+   "check": {
+    "qid": "T40"
+   },
+   "task": "You are working in this repository (current directory). A developer searched for `^## .badge` while working on this request:\n\n\"\"\"make the thing go to the left the trebol and make it cleaner dont render it inside of the tui and make it cliockable it looks a bit rough use customer rendering from https://docs.stencil.so/tern/index.md\"\"\"\n\nFind the code or documentation in this repository that the developer needed. Reply with up to 3 citations, most relevant first, one per line, each exactly in the form path/from/repo/root#Lstart-Lend, and nothing else."
+  }
+ ]
+}

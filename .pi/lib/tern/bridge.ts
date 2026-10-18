@@ -13,23 +13,27 @@ import {
 	type CommandSource,
 } from "./commands.ts";
 import type { Model } from "@earendil-works/pi-ai";
-import { projectTranscript, type TspMessage, type TspNode, type TspWriter, TernInlineSurface } from "./tsp.ts";
+import { encodeTspBlob, projectTranscript, type TspMessage, type TspNode, type TspWriter, TernInlineSurface } from "./tsp.ts";
 import { composerNodes, modelDisplayName, type GitFacts } from "./composer-view.ts";
+import { artifactNodes, previewFile, type ArtifactPreview } from "./artifact-previews.ts";
+import { STARTUP_CSS, gitDiffNodes, gitDismissNode, gitFileRefs, gitStatusNodes, readRepoStatus, startupBlob, startupNodes, trebolVersion, watchRepo, type GitFileRef, type RepoStatus } from "./startup-card.ts";
+import { readFileDiff, type GitSection } from "./git-status.ts";
+import { patchArtifactPaths } from "../tools/swarm-artifacts.ts";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { readGitFacts } from "./git-facts.ts";
 import { PI_COMPOSER_CSS } from "./composer-style.ts";
-import { IDLE_LOADING, loadingNode, reduceLoading, type LoadingState } from "./loading.ts";
 import { projectTaskView, type TaskView, type TaskViewRow, type TaskViewSessionManager } from "./task-view.ts";
 import { buildBoard } from "./task-board.ts";
-import { TernAskDialog, type AskEventBus } from "./ask-dialog.ts";
+import { ASK_OPTIONS_ID, TernAskDialog, type AskEventBus } from "./ask-dialog.ts";
 import { TernExtensionUI, UI_PROMPT_LIST_ID } from "./ext-ui.ts";
 import { AUTOCOMPLETE_ID, SlashAutocomplete, type Edit } from "./autocomplete.ts";
 import { expandMentions } from "./mentions.ts";
-import { DraftEditor } from "./draft-edit.ts";
+import { segmentTranscript, summarizeToolGroup } from "./turn-groups.ts";
+import { DraftEditor, isLargePaste } from "./draft-edit.ts";
 import { getNativeClipboard } from "@earendil-works/pi-tui";
 import { randomUUID } from "node:crypto";
-import { writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { extractBashDisplayText } from "../tools/swarm-bash.ts";
 
 export interface PiEventLike {
@@ -74,6 +78,18 @@ export interface PiSessionLike {
 	};
 }
 
+const GIT_STATUS_TTL_MS = 10_000;
+const modelFavoritesPath = () => join(process.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi", "agent"), "tern-model-favorites.json");
+
+function loadModelFavorites(): Set<string> {
+	try {
+		const value: unknown = JSON.parse(readFileSync(modelFavoritesPath(), "utf8"));
+		return new Set(Array.isArray(value) ? value.filter((id): id is string => typeof id === "string") : []);
+	} catch {
+		return new Set();
+	}
+}
+
 type Role = "user" | "assistant" | "system" | "tool";
 
 interface Item {
@@ -91,6 +107,8 @@ interface Item {
 	cancelled?: boolean;
 	// TaskManage's structured batch from the final result, rendered as task rows (never as JSON).
 	batch?: TaskManageBatch;
+	// Picture previews for Read and apply_patch results; set after the result is known.
+	artifacts?: ArtifactPreview[];
 	// Repeated terminal callbacks must not erase the last foreground snapshot.
 }
 
@@ -218,10 +236,37 @@ export class TranscriptProjector {
 			if (typeof raw !== "object" || raw === null) continue;
 			const entry = raw as { id?: unknown; type?: unknown; message?: unknown };
 			if (entry.type !== "message" || typeof entry.id !== "string") continue;
+			if ((entry.message as { role?: unknown } | null)?.role === "toolResult") {
+				this.#settleRestoredTool(entry.message as ToolResultLike);
+				continue;
+			}
 			const role = roleOf(entry.message);
 			if (role !== "user" && role !== "assistant") continue;
 			this.#items.push({ id: entry.id, role, text: messageText(entry.message) });
+			// Persisted tool calls live in the assistant message; their results arrive later as toolResult entries.
+			for (const call of toolCallsOf(entry.message)) {
+				this.#items.push({ id: `t-${call.id}`, role: "tool", text: `tool ${call.name}`, status: "running", name: call.name, args: call.arguments });
+			}
 		}
+		// A call with no persisted result was interrupted before the session was saved.
+		for (const item of this.#items) {
+			if (item.role === "tool" && item.status === "running") {
+				item.status = "error";
+				item.cancelled = true;
+			}
+		}
+	}
+
+	#settleRestoredTool(result: ToolResultLike): void {
+		const item = this.#items.find((i) => i.id === `t-${result.toolCallId}`);
+		if (!item || item.status !== "running") return;
+		const details = result.details as { exit_code?: unknown; duration_ms?: unknown } | undefined;
+		item.exit = typeof details?.exit_code === "number" && details.exit_code !== 0 ? details.exit_code : undefined;
+		item.status = result.isError || item.exit !== undefined ? "error" : "ok";
+		item.took = typeof details?.duration_ms === "number" ? details.duration_ms : undefined;
+		const text = messageText(result);
+		item.output = item.name?.toLowerCase() === "bash" && !result.isError ? extractBashDisplayText(text) : resultText(text);
+		item.text = `tool ${item.name ?? "tool"} ${item.status}`;
 	}
 
 	apply(event: PiEventLike): boolean {
@@ -305,7 +350,7 @@ export class TranscriptProjector {
 			case "agent_end": {
 				let changed = false;
 				for (const item of this.#items) {
-				if (item.role !== "tool" || item.name?.toLowerCase() !== "bash" || item.status !== "running") continue;
+				if (item.role !== "tool" || item.status !== "running") continue;
 					// Pi's aborted turn can omit tool_execution_end; never leave a live spinner.
 					item.cancelled = true;
 					item.took = item.startedAt ? Date.now() - item.startedAt : undefined;
@@ -324,21 +369,69 @@ export class TranscriptProjector {
 		this.#items.push({ id: `n${++this.#seq}`, role, text });
 	}
 
-	nodes(): TspNode[] {
+	nodes(outputExpanded = false): TspNode[] {
 		const out: TspNode[] = [];
-		for (const item of this.#items) {
-			if (item.role === "tool") out.push(toolNode(item));
-			else out.push(...projectTranscript([{ id: item.id, role: item.role, text: item.text }]));
+		let goal = "";
+		for (const segment of segmentTranscript(this.#items)) {
+			if (segment.kind === "tools") {
+				out.push(toolGroupNode(segment.items, goal, outputExpanded));
+				continue;
+			}
+			const { item } = segment;
+			if (item.role === "user") goal = item.text;
+			out.push(...projectTranscript([{ id: item.id, role: item.role, text: item.text }]));
 		}
 		return out;
 	}
 }
 
-function toolNode(item: Item): TspNode {
+function toolRow(item: Item, outputExpanded: boolean): TspNode {
+	const tool = toolNode(item, outputExpanded);
+	const previews = artifactNodes(item.id, item.artifacts ?? []);
+	return previews.length === 0 ? tool : { id: `${item.id}-group`, k: "col", p: { role: "tern.tool-group", gap: "none" }, c: [tool, ...previews] };
+}
+
+interface ToolResultLike {
+	toolCallId: string;
+	isError: boolean;
+	content?: unknown;
+	details?: unknown;
+}
+
+function toolCallsOf(message: unknown): Array<{ id: string; name: string; arguments: unknown }> {
+	const content = (message as { content?: unknown } | null)?.content;
+	if (!Array.isArray(content)) return [];
+	return content.filter((part): part is { type: "toolCall"; id: string; name: string; arguments: unknown } => typeof part === "object" && part !== null && (part as { type?: unknown }).type === "toolCall" && typeof (part as { id?: unknown }).id === "string" && typeof (part as { name?: unknown }).name === "string");
+}
+
+// Live: one line with the running count. Done: one collapsed card; its steps sit behind the fold.
+function toolGroupNode(items: Item[], goal: string, outputExpanded: boolean): TspNode {
+	const id = `g-${items[0]?.id ?? "empty"}`;
+	const summary = summarizeToolGroup(items);
+	const steps = items.length === 1 ? "1 step" : `${items.length} steps`;
+	if (summary.status === "running") {
+		return { id, k: "text", p: { role: "tern.work-live", tone: "pending", text: `${goal || "Working"} · ${summary.active} running` } };
+	}
+	const label = summary.status === "done" ? "Done" : summary.status === "failed" ? "Failed" : "Interrupted";
+	const status = summary.status === "done" ? "done" : summary.status === "failed" ? "error" : "cancelled";
+	return {
+		id, k: "tool",
+		p: {
+			role: "tern.work", key: id, name: "work", title: label, status,
+			...(goal ? { target: goal, targetKind: "text" } : {}),
+			frame: "card", collapsible: true, collapsed: true, meta: [steps],
+			...(summary.durationMs !== undefined ? { took: summary.durationMs } : {}),
+			...(summary.status === "interrupted" ? { note: "interrupted" } : {}),
+		},
+		c: items.map((item) => toolRow(item, outputExpanded)),
+	};
+}
+
+function toolNode(item: Item, outputExpanded: boolean): TspNode {
 	const status = item.cancelled ? "cancelled" : item.status === "ok" ? "done" : item.status === "error" ? "error" : "running";
 	const { target, targetKind } = toolTarget(item.args);
 	const bash = item.name === "bash" || item.name === "Bash";
-	if (bash) return bashToolNode(item, status);
+	if (bash) return bashToolNode(item, status, outputExpanded);
 	if (item.name === "TaskManage") return taskManageToolNode(item, status);
 	const node: TspNode = {
 		id: item.id,
@@ -347,8 +440,10 @@ function toolNode(item: Item): TspNode {
 			name: item.name ?? "tool",
 			title: item.name ?? "tool",
 			status,
-			collapsed: status !== "running",
+			collapsible: true,
+			collapsed: status !== "running" && !outputExpanded,
 			...(target !== undefined ? { target, targetKind } : {}),
+			...(status === "running" && item.startedAt !== undefined ? { age: Date.now() - item.startedAt } : item.took !== undefined ? { took: item.took } : {}),
 		},
 	};
 	if (item.output) node.c = [{ id: `${item.id}-out`, k: "text", p: { text: item.output } }];
@@ -426,7 +521,7 @@ function taskManageToolNode(item: Item, status: "running" | "done" | "error" | "
 
 // Mirror OMP's native bash describeCall/describeResult: the head names the intent,
 // while a single borderless run contains the command, live output and state foot.
-function bashToolNode(item: Item, status: "running" | "done" | "error" | "cancelled"): TspNode {
+function bashToolNode(item: Item, status: "running" | "done" | "error" | "cancelled", outputExpanded: boolean): TspNode {
 	const args = item.args as { command?: unknown; description?: unknown; name?: unknown } | undefined;
 	const command = typeof args?.command === "string" && args.command ? args.command : "…";
 	// OMP's optional name annotates the verb; our description is the intent.
@@ -454,7 +549,7 @@ function bashToolNode(item: Item, status: "running" | "done" | "error" | "cancel
 		p: {
 			role: "omp.tool.bash", key: item.id.slice(2), name: "bash", title: label,
 			...(typeof args?.description === "string" && args.description ? { target: args.description, targetKind: "text" } : {}),
-			command, status, frame: "inline", collapsible: true, collapsed: true, preview: "children",
+			command, status, frame: "inline", collapsible: true, collapsed: !outputExpanded, preview: "children",
 			...(status === "running" ? { age: elapsed } : { took: elapsed }),
 			...(item.exit !== undefined ? { exit: item.exit } : {}),
 			...(item.timedOut ? { note: "timed out", tone: "warning" } : status === "cancelled" ? { note: "cancelled" } : {}),
@@ -499,7 +594,17 @@ function backgroundWorkTitle(item: RunningWorkItem): string {
 export class PiTernBridge {
 	#session: PiSessionLike;
 	readonly #surface: TernInlineSurface;
+	readonly #write: TspWriter;
 	readonly #projector = new TranscriptProjector();
+	readonly #logo = startupBlob();
+	readonly #version = trebolVersion();
+	#repo: RepoStatus | undefined;
+	#repoLoading = false;
+	#repoDirty = false;
+	#repoWatch: (() => void) | undefined;
+	#repoWatchKey = "";
+	#gitView: { mode: "list" } | { mode: "diff"; ref: GitFileRef; text: string } | undefined;
+	#gitRefs: GitFileRef[] = [];
 	readonly #onClose?: () => void;
 	readonly #commands: CommandSource;
 	readonly #complete: SlashAutocomplete;
@@ -508,7 +613,6 @@ export class PiTernBridge {
 	readonly #reload?: () => Promise<{ css: string; pluginStatus: string }>;
 	#dialog: TernAskDialog | null = null;
 	#reloading = false;
-	#loading: LoadingState = IDLE_LOADING;
 	#unsubscribe: (() => void) | null = null;
 	#workUnsubscribe: (() => void) | null = null;
 	#busy = false;
@@ -523,6 +627,8 @@ export class PiTernBridge {
 	#treePickerSelected: string | undefined;
 	#lastEligibleEscapeAt = 0;
 	#modelQuery = "";
+	#modelFavorites = loadModelFavorites();
+	#collapsedProviders = new Set<string>();
 	#modelSelected: string | undefined;
 	#modelCatalog: ReadonlyArray<Model<any>> = [];
 	#modelCatalogLoading = false;
@@ -530,14 +636,18 @@ export class PiTernBridge {
 	#modelCatalogRequest = 0;
 	#taskQuestionsCollapsed = false;
 	#taskBoardMode = false;
+	#toolOutputExpanded = false;
 	readonly #kinds: readonly string[];
 	#git: GitFacts | undefined;
+	#gitRefreshing = false;
+	#gitTimer: ReturnType<typeof setInterval> | undefined;
 	#columns = 100;
 	readonly #ui: TernExtensionUI;
 	readonly #clipboard: NonNullable<BridgeOptions["clipboard"]>;
 
 	constructor(session: PiSessionLike, options: BridgeOptions) {
 		this.#session = session;
+		this.#write = options.write;
 		this.#clipboard = options.clipboard ?? {
 			filePaths: async () => getNativeClipboard()?.getFilePaths?.(),
 			image: async () => getNativeClipboard()?.getImage(),
@@ -562,7 +672,7 @@ export class PiTernBridge {
 				this.#projector.add("system", text);
 				this.#render();
 			},
-			getDraft: () => this.#draft,
+			getDraft: () => this.#editor.expandedText,
 			setDraft: (text) => this.setDraft(text),
 			remoteFlowActive: () => this.#dialog?.active ?? false,
 			columns: () => this.#columns,
@@ -593,6 +703,11 @@ export class PiTernBridge {
 		return this.#draft;
 	}
 
+	// The draft with large-paste markers expanded; this is what a submit sends.
+	get expandedDraft(): string {
+		return this.#editor.expandedText;
+	}
+
 	get #draft(): string {
 		return this.#editor.text;
 	}
@@ -618,6 +733,10 @@ export class PiTernBridge {
 	start(title = "pi"): void {
 		this.#surface.open(title);
 		this.#surface.stylesheet("composer", PI_COMPOSER_CSS);
+		this.#surface.stylesheet("startup", STARTUP_CSS);
+		// The blob precedes any frame that references it, as with artifact previews.
+		for (const chunk of encodeTspBlob(this.#logo.id, this.#logo.mime, this.#logo.base64)) this.#write(chunk);
+		this.#loadRepo();
 		this.#unsubscribe = this.#session.subscribe((event) => this.#onEvent(event));
 		this.#workUnsubscribe?.();
 		this.#workUnsubscribe = onRunningWorkChange(() => this.#render());
@@ -627,15 +746,40 @@ export class PiTernBridge {
 		}
 		this.#syncSession();
 		this.#refreshGit();
+		this.#gitTimer = setInterval(() => this.#refreshGit(), GIT_STATUS_TTL_MS);
 		this.#render();
 	}
 
-	// Clears loading state when Pi's active session changes.
+	// Resets per-session state when Pi's active session changes.
 	#syncSession(): void {
 		const id = sessionIdOf(this.#session);
 		if (id === this.#sessionId) return;
 		this.#sessionId = id;
-		this.#loading = reduceLoading(this.#loading, { type: "session_switch", sessionId: id ?? null });
+	}
+
+	// Sends picture blobs before re-rendering, so no frame references a blob Tern has not received.
+	async #previewArtifacts(event: PiEventLike): Promise<void> {
+		const name = String(event.toolName);
+		const args = (this.#projector.items.find((i) => i.id === `t-${String(event.toolCallId)}`)?.args ?? {}) as Record<string, unknown>;
+		const cwd = this.#session.sessionManager?.getCwd?.() ?? process.cwd();
+		const paths = name === "Read"
+			? [typeof args.file_path === "string" ? args.file_path : undefined]
+			: name === "apply_patch" ? patchArtifactPaths(args.input) : [];
+		const previews: ArtifactPreview[] = [];
+		for (const raw of paths) {
+			if (!raw) continue;
+			const preview = await previewFile(isAbsolute(raw) ? raw : resolve(cwd, raw), cwd);
+			if (preview) previews.push(preview);
+		}
+		if (previews.length === 0 || this.#closed) return;
+		const item = this.#projector.items.find((i) => i.id === `t-${String(event.toolCallId)}`);
+		if (!item) return;
+		for (const preview of previews) {
+			if (!preview.blob) continue;
+			for (const chunk of encodeTspBlob(preview.blob.id, preview.blob.mime, preview.blob.base64)) this.#write(chunk);
+		}
+		item.artifacts = previews;
+		this.#render();
 	}
 
 	#onEvent(event: PiEventLike): void {
@@ -650,17 +794,16 @@ export class PiTernBridge {
 		}
 		if (event.type === "agent_start") {
 			this.#busy = true;
-			this.#loading = reduceLoading(this.#loading, { type: "agent_start" });
 		}
 		if (event.type === "agent_settled" || event.type === "agent_end") {
 			this.#busy = false;
-			this.#loading = reduceLoading(this.#loading, { type: event.type });
 			this.#refreshGit();
 		}
 		if (event.type === "model_select") {
 			this.#model = modelDisplayName(event.model) ?? this.#model;
 			this.#modelCatalog = this.#session.modelRuntime?.getAvailableSnapshot() ?? this.#modelCatalog;
 		}
+		if (event.type === "tool_execution_end" && event.isError !== true) void this.#previewArtifacts(event);
 		if (this.#projector.apply(event) || event.type.startsWith("agent_") || event.type === "model_select" || event.type === "thinking_level_changed" || event.type === "queue_update" || event.type === "session_tree") this.#render();
 	}
 
@@ -668,7 +811,7 @@ export class PiTernBridge {
 	// level, git status of Pi's cwd, session cost. OMP's tok/s, focus crumbs and shell mode have no Pi source.
 	#dock(): TspNode[] {
 		// An open ask flow takes over the input slot: its inline card replaces the composer.
-		if (this.#dialog?.active) return [...this.#taskTop(), ...this.#dialog.nodes()];
+		if (this.#dialog?.active) return [...this.#taskTop(), ...this.#dialog.nodes(this.#columns)];
 		const work = this.#backgroundWork();
 		const usage = contextUsageOf(this.#session) as { tokens?: unknown; contextWindow?: unknown } | undefined;
 		const window = typeof usage?.contextWindow === "number" && usage.contextWindow > 0 ? usage.contextWindow : undefined;
@@ -687,7 +830,7 @@ export class PiTernBridge {
 			effortKind: this.#kinds.includes("effort"),
 			git: this.#git,
 			cost: costOf(this.#session),
-		}, loadingNode(this.#loading) ?? undefined, this.#taskTop()), ...this.#ui.widgetNodes("belowEditor")];
+		}, this.#taskTop()), ...this.#ui.widgetNodes("belowEditor")];
 	}
 
 	// The bar's facts are clickable in OMP (it opens panels). Pi has no such panels; a click states the
@@ -705,18 +848,71 @@ export class PiTernBridge {
 			const at = compactionPercent(this.#session, u.contextWindow);
 			return `context: ${used}${at !== undefined ? `, auto-compact at ${Math.round(at)}%` : ""}`;
 		}
-		if (act === "status.git") {
-			const g = this.#git;
-			if (!g) return "not a git repository";
-			return `git: ${g.branch ?? "detached"}, ${g.staged} staged, ${g.unstaged} unstaged, ${g.untracked} untracked`;
-		}
 		return undefined;
+	}
+
+	// OMP's git segment re-reads status on a 10 s TTL and after turns, so edits made outside Pi show up too.
+	// The startup card shows the directory as it was when the bridge started.
+	// Re-reads the startup card's git state when the watcher fires. A change that arrives during a read is re-read after it.
+	#loadRepo(): void {
+		if (this.#closed) return;
+		if (this.#repoLoading) { this.#repoDirty = true; return; }
+		this.#repoLoading = true;
+		const cwd = this.#session.sessionManager?.getCwd?.() ?? process.cwd();
+		void readRepoStatus(cwd).then((repo) => {
+			this.#repoLoading = false;
+			if (this.#closed) return;
+			this.#watchRepo(repo);
+			if (JSON.stringify(repo) !== JSON.stringify(this.#repo)) {
+				this.#repo = repo;
+				if (this.#gitView?.mode === "diff") void this.#showGitDiff(this.#gitView.ref.section, this.#gitView.ref.entry.path);
+				this.#render();
+			}
+			if (this.#repoDirty) {
+				this.#repoDirty = false;
+				this.#loadRepo();
+			}
+		});
+	}
+
+	#watchRepo(repo: RepoStatus): void {
+		const key = repo.git ? `${repo.root}|${repo.gitDir ?? ""}` : "";
+		if (key === this.#repoWatchKey) return;
+		this.#repoWatch?.();
+		this.#repoWatch = repo.git ? watchRepo(repo.root, repo.gitDir, () => this.#loadRepo()) : undefined;
+		this.#repoWatchKey = key;
+	}
+
+	// The status overlay: a list of changed files, then one file's diff. Clicks carry indexes into the list last rendered.
+	#openGitView(): void {
+		if (!this.#repo?.git) return;
+		this.#gitView = { mode: "list" };
+		this.#render();
+	}
+
+	#showGitDiff(section: GitSection, path: string): Promise<void> {
+		const repo = this.#repo;
+		if (!repo?.git) return Promise.resolve();
+		const ref = gitFileRefs(repo.snapshot).find((r) => r.section === section && r.entry.path === path);
+		if (!ref) {
+			this.#gitView = { mode: "list" };
+			this.#render();
+			return Promise.resolve();
+		}
+		// The diff node is added only with its text: a later text update to an existing diff node is not applied by Tern.
+		return readFileDiff(repo.root, ref.entry, section).then((text) => {
+			if (this.#closed) return;
+			this.#gitView = { mode: "diff", ref, text };
+			this.#render();
+		});
 	}
 
 	#refreshGit(): void {
 		const cwd = this.#session.sessionManager?.getCwd?.();
-		if (!cwd) return;
+		if (!cwd || this.#gitRefreshing) return;
+		this.#gitRefreshing = true;
 		void readGitFacts(cwd).then((git) => {
+			this.#gitRefreshing = false;
 			if (this.#closed || JSON.stringify(git) === JSON.stringify(this.#git)) return;
 			this.#git = git;
 			this.#render();
@@ -727,6 +923,13 @@ export class PiTernBridge {
 	// The slash autocomplete is OMP's caret-anchored list; keys stay
 	// in the editor and the bridge routes ↑/↓, Tab, Enter and Esc to it.
 	#layer(): TspNode[] {
+		if (this.#gitView && this.#repo?.git) {
+			// The dismiss layer sits under the card, so a click outside the card closes the view.
+			const dismiss = gitDismissNode();
+			if (this.#gitView.mode === "diff") return [dismiss, gitDiffNodes(this.#gitView.ref, this.#gitView.text)];
+			this.#gitRefs = gitFileRefs(this.#repo.snapshot);
+			return [dismiss, gitStatusNodes(this.#repo, this.#gitRefs)];
+		}
 		if (this.#ui.active) return this.#ui.nodes();
 		if (this.#treePickerOpen) return [this.#treePickerNode()];
 		if (this.#modelPickerOpen) return [this.#modelPickerNode()];
@@ -734,10 +937,10 @@ export class PiTernBridge {
 	}
 
 	#treePickerNode(): TspNode {
-		const items: Record<string, unknown> = {};
+		const items: unknown[] = [];
 		const order: string[] = [];
 		for (const item of this.#treePickerItems) {
-			items[item.id] = { id: item.id, label: item.label, ...(item.description ? { detail: item.description } : {}) };
+			items.push({ id: item.id, label: item.label, ...(item.description ? { detail: item.description } : {}) });
 			order.push(item.id);
 		}
 		return {
@@ -807,30 +1010,48 @@ export class PiTernBridge {
 		this.#render();
 	}
 
+	// Rows shown by the model picker: favorites first, then provider groups. A collapsed provider keeps its
+	// header (with its full count) but none of its models.
+	#modelPickerLayout(): { favorites: Model<any>[]; groups: { provider: string; count: number; models: Model<any>[] }[]; shown: Model<any>[]; visible: Model<any>[] } {
+		const query = this.#modelQuery.trim().toLowerCase();
+		const visible = this.#modelCatalog.filter((m) => `${m.provider}/${m.id} ${m.name}`.toLowerCase().includes(query));
+		const isFavorite = (m: Model<any>) => this.#modelFavorites.has(`${m.provider}/${m.id}`);
+		const favorites = visible.filter(isFavorite);
+		const rest = visible.filter((m) => !isFavorite(m));
+		const groups = [...new Set(rest.map((m) => m.provider))].map((provider) => {
+			const models = rest.filter((m) => m.provider === provider);
+			return { provider, count: models.length, models: this.#collapsedProviders.has(provider) ? [] : models };
+		});
+		return { favorites, groups, shown: [...favorites, ...groups.flatMap((g) => g.models)], visible };
+	}
+
 	#modelPickerNode(): TspNode {
 		const models = this.#modelCatalog;
 		const query = this.#modelQuery.trim().toLowerCase();
-		const visible = models.filter((m) => `${m.provider}/${m.id} ${m.name}`.toLowerCase().includes(query));
-		const providers = [...new Set(visible.map((m) => m.provider))];
+		const { favorites, groups, shown, visible } = this.#modelPickerLayout();
+		const pickerItems: unknown[] = [];
 		const order: (string | { group: string; label: string; count: number })[] = [];
-		const pickerItems: Record<string, unknown> = {};
-		for (const provider of providers) {
-			const group = visible.filter((m) => m.provider === provider);
-			order.push({ group: `provider:${provider}`, label: provider, count: group.length });
-			for (const model of group) {
-				const id = `${model.provider}/${model.id}`;
-				order.push(id);
-				pickerItems[id] = { id, label: model.id, detail: model.name, mono: true, facts: { ctx: model.contextWindow ?? 0, price: `$${model.cost?.input ?? 0}/$${model.cost?.output ?? 0}` }, title: id };
-			}
+		const pushModel = (model: Model<any>, favorite: boolean) => {
+			const id = `${model.provider}/${model.id}`;
+			order.push(id);
+			pickerItems.push({ id, label: model.id, detail: model.name, mono: true, facts: { ctx: model.contextWindow ?? 0, price: `$${model.cost?.input ?? 0}/$${model.cost?.output ?? 0}` }, title: id, ...(favorite ? { badges: [{ text: "★" }] } : {}) });
+		};
+		if (favorites.length) {
+			order.push({ group: "favorites", label: "Favorites", count: favorites.length });
+			for (const model of favorites) pushModel(model, true);
 		}
-		const selected = visible.some((m) => `${m.provider}/${m.id}` === this.#modelSelected) ? this.#modelSelected : visible[0] ? `${visible[0].provider}/${visible[0].id}` : null;
+		for (const group of groups) {
+			order.push({ group: `provider:${group.provider}`, label: group.provider, count: group.count });
+			for (const model of group.models) pushModel(model, false);
+		}
+		const selected = shown.some((m) => `${m.provider}/${m.id}` === this.#modelSelected) ? this.#modelSelected : shown[0] ? `${shown[0].provider}/${shown[0].id}` : null;
 		this.#modelSelected = selected ?? undefined;
 		const current = modelIdentity(this.#session.model);
 		const currentIds = current && models.some((m) => `${m.provider}/${m.id}` === current) ? [current] : [];
-		const preview = visible.find((m) => `${m.provider}/${m.id}` === selected);
+		const preview = shown.find((m) => `${m.provider}/${m.id}` === selected);
 		return {
 			id: "model-picker-sheet", k: "picker",
-			p: { title: "Model", subtitle: this.#modelCatalogLoading ? "Loading available models…" : this.#modelCatalogError, state: this.#modelCatalogError ? "error" : this.#modelCatalogLoading ? "loading" : "ready", ...(this.#modelCatalogError ? { message: this.#modelCatalogError } : {}), icon: "cpu", noun: "models", size: "md", layout: "rows", preview: "below", query: this.#modelQuery, cursor: this.#modelQuery.length, placeholder: "Search models…", items: pickerItems, order, selected, current: currentIds, total: models.length, empty: query ? "No matching models" : "No models available", actions: [{ id: "use", label: "Use", keys: ["enter"], primary: true, disabled: !selected || this.#modelCatalogLoading }, { id: "close", label: "Cancel", keys: ["esc"] }] },
+			p: { title: "Model", subtitle: this.#modelCatalogLoading ? "Loading available models…" : this.#modelCatalogError, state: this.#modelCatalogError ? "error" : this.#modelCatalogLoading ? "loading" : "ready", ...(this.#modelCatalogError ? { message: this.#modelCatalogError } : {}), icon: "cpu", noun: "models", size: "md", layout: "rows", preview: "below", query: this.#modelQuery, cursor: this.#modelQuery.length, placeholder: "Search models…", items: pickerItems, order, selected, current: currentIds, total: models.length, columns: [{ id: "ctx", head: "Context", format: "num" }], empty: query ? "No matching models" : "No models available", actions: [{ id: "favorite", label: "Favorite", keys: ["ctrl+f"], disabled: !selected }, { id: "use", label: "Use", keys: ["enter"], primary: true, disabled: !selected || this.#modelCatalogLoading }, { id: "close", label: "Cancel", keys: ["esc"] }] },
 			c: preview ? [{ id: "model-preview", k: "col", c: [
 				{ id: "preview-name", k: "text", p: { text: preview.name, role: "omp.picker.title" } },
 				{ id: "preview-id", k: "text", p: { text: `${preview.provider}/${preview.id}` } },
@@ -941,7 +1162,14 @@ export class PiTernBridge {
 		if (this.#closed) return;
 		this.#syncSession();
 		const focus = this.#ui.focusId ?? (this.#treePickerOpen ? "session-tree-picker" : this.#modelPickerOpen ? "model-picker-sheet" : "composer");
-		this.#surface.render(this.#projector.nodes(), this.#dock(), focus, this.#layer(), this.#complete.selectedId);
+		this.#surface.render([...startupNodes(this.#logo, this.#version, this.#repo), ...this.#projector.nodes(this.#toolOutputExpanded)], this.#dock(), focus, this.#layer(), this.#complete.selectedId);
+	}
+
+	// ctrl+o folds or unfolds all tool output; each tool's head click still toggles just that tool.
+	toggleToolOutput(): void {
+		if (this.#closed) return;
+		this.#toolOutputExpanded = !this.#toolOutputExpanded;
+		this.#render();
 	}
 
 	// A programmatic draft change (extension setEditorText, pasteToEditor) closes the autocomplete, as
@@ -1062,8 +1290,19 @@ export class PiTernBridge {
 		}
 		const text = await this.#clipboard.text().catch(() => null);
 		if (text && !this.#closed && !this.#ui.active && !this.#dialog?.active && !this.#modelPickerOpen) {
-			this.appendDraft(text.replace(/\r\n?|\n/g, " "));
+			this.pasteText(text);
 		}
+	}
+
+	// Bracketed or clipboard paste. Large text becomes a marker that expands on submit; small text is flattened to
+	// one line, so embedded newlines never submit.
+	pasteText(text: string): void {
+		const normalized = text.replace(/\r\n?/g, "\n");
+		if (!isLargePaste(normalized) || this.#ui.active || this.#dialog?.active || this.#modelPickerOpen || this.#treePickerOpen) {
+			this.appendDraft(normalized.replace(/\n/g, " "));
+			return;
+		}
+		this.#editDraft(() => this.#editor.insertPaste(normalized), { kind: "set" });
 	}
 
 	// Shift+Enter: a newline in an open multi-line prompt; the composer is single-line.
@@ -1091,6 +1330,12 @@ export class PiTernBridge {
 	// Escape: dismiss transient UI, cancel a running turn, or clear non-empty input before idle double-Escape.
 	// Returns true only when the configured `none` action closes the Tern surface.
 	escape(): boolean {
+		if (this.#gitView) {
+			this.#gitView = this.#gitView.mode === "diff" ? { mode: "list" } : undefined;
+			this.#lastEligibleEscapeAt = 0;
+			this.#render();
+			return false;
+		}
 		if (this.#treePickerOpen) {
 			this.#treePickerOpen = false;
 			this.#treePickerSelected = undefined;
@@ -1152,7 +1397,7 @@ export class PiTernBridge {
 	// Routes one parsed TSP message. Returns the promise of any submitted prompt, for tests.
 	handle(msg: TspMessage): Promise<void> | undefined {
 		if (this.#closed) return undefined;
-		if (msg.verb === "e" && msg.body.ev === "resize" && typeof msg.body.cols === "number" && msg.body.cols > 0) this.#columns = msg.body.cols;
+		if (msg.verb === "e" && msg.body.ev === "resize" && typeof msg.body.cols === "number" && msg.body.cols > 0) { this.#columns = msg.body.cols; if (this.#dialog?.active) this.#render(); }
 		if (msg.verb === "e" && (msg.body.ev === "select" || msg.body.ev === "activate") && msg.body.id === UI_PROMPT_LIST_ID) {
 			this.#ui.pick(msg.body.item, msg.body.ev === "activate");
 			return undefined;
@@ -1169,6 +1414,10 @@ export class PiTernBridge {
 			this.#render();
 			return undefined;
 		}
+		if (msg.verb === "e" && msg.body.ev === "key" && this.#gitView && msg.body.key === "escape") {
+			this.escape();
+			return undefined;
+		}
 		if (msg.verb === "e" && msg.body.ev === "key" && this.#treePickerOpen) {
 			const key = typeof msg.body.key === "string" ? msg.body.key : "";
 			if (key === "up") this.movePicker(-1);
@@ -1179,6 +1428,7 @@ export class PiTernBridge {
 			return undefined;
 		}
 		if (msg.verb === "e" && msg.body.ev === "action" && typeof msg.body.id === "string" && this.#dialog?.handleAction(msg.body.id)) return undefined;
+		if (msg.verb === "e" && (msg.body.ev === "select" || msg.body.ev === "activate") && msg.body.id === ASK_OPTIONS_ID && typeof msg.body.item === "string" && this.#dialog?.handleSelect(msg.body.item, msg.body.ev === "activate")) return undefined;
 		if (msg.verb === "e" && (msg.body.ev === "select" || msg.body.ev === "activate") && typeof msg.body.id === "string" && msg.body.id.startsWith(`${AUTOCOMPLETE_ID}.`)) {
 			if (typeof msg.body.item === "string") this.#complete.select(msg.body.item, msg.body.ev === "activate");
 			return undefined;
@@ -1188,6 +1438,7 @@ export class PiTernBridge {
 			if (msg.body.ev === "activate" && typeof msg.body.item === "string") { this.#modelSelected = msg.body.item; return this.#applyModelSelection(); }
 			if (msg.body.ev === "action") {
 				if (msg.body.act === "use") return this.#applyModelSelection();
+				if (msg.body.act === "favorite") { this.#toggleModelFavorite(); return undefined; }
 				if (msg.body.act === "close") this.#modelPickerOpen = false;
 			}
 			this.#render();
@@ -1200,6 +1451,8 @@ export class PiTernBridge {
 			else if (key === "enter") return this.#applyModelSelection();
 			else if (key === "escape") { this.#modelPickerOpen = false; }
 			else if (key === "backspace") this.#modelQuery = [...this.#modelQuery].slice(0, -1).join("");
+			else if (key === "ctrl+f") this.#toggleModelFavorite();
+			else if (key === "left" || key === "right") this.#setSelectedProviderCollapsed(key === "left");
 			else if (key && !key.startsWith("\x1b")) { this.#modelQuery += key; this.#modelSelected = undefined; }
 			this.#render();
 			return undefined;
@@ -1223,6 +1476,13 @@ export class PiTernBridge {
 			this.#taskBoardMode = !this.#taskBoardMode;
 			this.#render();
 		}
+		if (act === "git.open") { this.#openGitView(); return undefined; }
+		if (act === "git.file" && typeof msg.body.value === "string") {
+			const ref = this.#gitRefs[Number(msg.body.value)];
+			return ref ? this.#showGitDiff(ref.section, ref.entry.path) : undefined;
+		}
+		if (act === "git.back") { this.#gitView = { mode: "list" }; this.#render(); return undefined; }
+		if (act === "git.close") { this.#gitView = undefined; this.#render(); return undefined; }
 		if (act === "tasks.collapse" || act === "tasks.expand") {
 			this.#taskQuestionsCollapsed = act === "tasks.collapse";
 			this.#render();
@@ -1276,11 +1536,34 @@ export class PiTernBridge {
 	}
 
 	#moveModelSelection(delta: number): void {
-		const models = this.#modelCatalog.filter((m) => `${m.provider}/${m.id} ${m.name}`.toLowerCase().includes(this.#modelQuery.trim().toLowerCase()));
+		const { shown: models } = this.#modelPickerLayout();
 		if (!models.length) { this.#modelSelected = undefined; return; }
 		const index = models.findIndex((m) => `${m.provider}/${m.id}` === this.#modelSelected);
 		const next = models[(index + delta + models.length) % models.length];
 		this.#modelSelected = `${next.provider}/${next.id}`;
+	}
+
+	// Left collapses and right expands the provider group of the selected model.
+	#setSelectedProviderCollapsed(collapsed: boolean): void {
+		const model = this.#modelCatalog.find((m) => `${m.provider}/${m.id}` === this.#modelSelected);
+		if (!model) return;
+		if (collapsed) this.#collapsedProviders.add(model.provider);
+		else this.#collapsedProviders.delete(model.provider);
+		this.#render();
+	}
+
+	#toggleModelFavorite(): void {
+		const id = this.#modelSelected;
+		if (!id) return;
+		if (this.#modelFavorites.has(id)) this.#modelFavorites.delete(id);
+		else this.#modelFavorites.add(id);
+		try {
+			mkdirSync(dirname(modelFavoritesPath()), { recursive: true });
+			writeFileSync(modelFavoritesPath(), JSON.stringify([...this.#modelFavorites], null, 2));
+		} catch (error) {
+			this.#projector.add("system", `Could not save model favorites: ${error instanceof Error ? error.message : String(error)}`);
+		}
+		this.#render();
 	}
 
 	async #applyModelSelection(): Promise<void> {
@@ -1406,11 +1689,9 @@ export class PiTernBridge {
 		this.#draft = "";
 		this.#projector.add("user", prompt);
 		this.#busy = true;
-		this.#loading = reduceLoading(this.#loading, { type: "prompt_start" });
 		this.#render();
 		return this.#session.prompt(this.#withMentions(prompt)).catch((error: unknown) => {
 			this.#busy = false;
-			this.#loading = reduceLoading(this.#loading, { type: "failure" });
 			this.#projector.add("system", `error: ${error instanceof Error ? error.message : String(error)}`);
 			this.#render();
 		});
@@ -1469,7 +1750,7 @@ export class PiTernBridge {
 		const owned = this.#ui.active || this.#dialog?.active || this.#modelPickerOpen;
 		if (!owned && this.#complete.active && !this.#complete.enter()) return Promise.resolve();
 		this.#complete.close();
-		return this.submit(this.#draft);
+		return this.submit(this.#editor.expandedText);
 	}
 
 	// The builtins Pi's interactive mode runs that only need the live session (TERN_BUILTINS). /reload is
@@ -1536,7 +1817,6 @@ export class PiTernBridge {
 		if (this.#closed || !this.#busy) return;
 		await this.#session.abort();
 		this.#busy = false;
-		this.#loading = reduceLoading(this.#loading, { type: "abort" });
 		this.#projector.apply({ type: "agent_end" });
 		this.#projector.add("system", "cancelled");
 		this.#render();
@@ -1547,7 +1827,8 @@ export class PiTernBridge {
 		this.#workUnsubscribe = null;
 		if (this.#closed) return;
 		this.#closed = true;
-	this.#loading = reduceLoading(this.#loading, { type: "close" });
+		clearInterval(this.#gitTimer);
+		this.#repoWatch?.();
 		this.#unsubscribe?.();
 		this.#unsubscribe = null;
 		this.#ui.dispose();

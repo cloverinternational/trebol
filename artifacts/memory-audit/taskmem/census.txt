@@ -1,0 +1,8 @@
+{"events":3647,"liveRecords":1683,"deleted":0}
+taskmanage|candidate	1249
+lifecycle-extraction|candidate	374
+candidate-review|verified	57
+user request|candidate	1
+hoja realtime stress benchmark session 2026-10-16|candidate	1
+Hoja API access verified in session|verified	1
+{"taskmanageRecords":1249,"completedTasks":654,"tasksWithAnswers":672,"questions":3240,"answers":1341,"evidenceRefs":{"file":1594,"tool":980,"other":10},"dirs":["worktree/0dbe3fe60b6b98c4d8565c74984ac8cd","worktree/11fe14a563f7aed66191800dc08fe0d1","worktree/1abe20bb010301b8506df562964b9d78","worktree/2034befdba187e502d9b05cdf8706e24","worktree/22526a84cb14a1f6cc0b08b95b828268","worktree/24f2136f6255d579cc44522acb1e4da2","worktree/2f6bccd464227734779b7f091a353d8c","worktree/3328fc473e82be0efe47665c206d899d","worktree/34671b2a7626bc3581ddd4dcfb253980","worktree/3db2a932c76bbd88bc8a8b6e30a63cf7","worktree/3e25dbc80a1f8413cff4bb2c6aa9f0b2","worktree/5b76422a284a6ec13829c14d6356a5d1","worktree/6a77c49c6f95fd0ff2f3eb24ccfc3f14","worktree/76c4cf666f886e847b0938018b21b6a5","worktree/7d32bc212cd152117fb90e051de514eb","worktree/809cd68537c959c4b8e8a5325942188d","worktree/90e0fe9cdc56160297a8937cdf08a54f","worktree/92a311952f30a6e5a08358a5d799e912","worktree/ab21bbd385537ad69fe2bd0e84f59f4c","worktree/d2634835ea7e7f52c7802a415400dd59","worktree/e6911ea2e78451325d038e7b423b7c94","worktree/f26e225e35a71f49eb2bddf2a99f9fe4","worktree/fb96b85b494cc17d3be0d79ea06e16c4"],"revisionsMedian":2,"revisionsMax":38,"distinctSubjects":976,"recordsSharingSubject":318,"verifiedTaskmanage":0}

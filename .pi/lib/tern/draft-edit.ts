@@ -8,6 +8,14 @@ export interface DraftSnapshot {
 
 const WORD_CHAR = /[\p{L}\p{N}_]/u;
 const UNDO_LIMIT = 200;
+// Same thresholds and marker shapes as pi-tui's Editor: a large paste is shown as a marker and expanded on submit.
+const LARGE_PASTE_LINES = 10;
+const LARGE_PASTE_CHARS = 1000;
+const PASTE_MARKER = /\[paste #(\d+)(?: \+\d+ lines| \d+ chars)?\]/g;
+
+export function isLargePaste(text: string): boolean {
+	return text.length > LARGE_PASTE_CHARS || text.split("\n").length > LARGE_PASTE_LINES;
+}
 
 function isLowSurrogate(code: number): boolean {
 	return code >= 0xdc00 && code <= 0xdfff;
@@ -68,9 +76,19 @@ export class DraftEditor {
 	#undo: DraftSnapshot[] = [];
 	// Consecutive typed characters share one undo step, so Ctrl+Z removes a typed run, not one character.
 	#typing = false;
+	// Large pastes kept out of the visible text, keyed by the id in their marker. Never cleared: undo can restore a marker.
+	#pastes = new Map<number, string>();
+	// The exact marker text each paste id was inserted with. Only this text is a marker, so typed look-alikes stay literal.
+	#markers = new Map<number, string>();
+	#pasteCounter = 0;
 
 	get text(): string {
 		return this.#text;
+	}
+
+	// The text with every paste marker replaced by its pasted content; what gets sent.
+	get expandedText(): string {
+		return this.#text.replace(PASTE_MARKER, (marker, id: string) => this.#markers.get(Number(id)) === marker ? this.#pastes.get(Number(id)) ?? marker : marker);
 	}
 
 	get cursor(): number {
@@ -96,6 +114,22 @@ export class DraftEditor {
 		if (!input) return;
 		if (!this.#typing) this.#record();
 		this.#typing = true;
+		this.#splice(input);
+	}
+
+	// A large paste enters as one marker, so the visible draft stays small however much text was pasted.
+	insertPaste(text: string): void {
+		const lines = text.split("\n").length;
+		const id = ++this.#pasteCounter;
+		this.#pastes.set(id, text);
+		const marker = lines > LARGE_PASTE_LINES ? `[paste #${id} +${lines} lines]` : `[paste #${id} ${text.length} chars]`;
+		this.#markers.set(id, marker);
+		this.#record();
+		this.#typing = false;
+		this.#splice(marker);
+	}
+
+	#splice(input: string): void {
 		this.#deleteSelection();
 		this.#text = this.#text.slice(0, this.#cursor) + input + this.#text.slice(this.#cursor);
 		this.#cursor += input.length;
@@ -105,7 +139,9 @@ export class DraftEditor {
 		if (this.selection) return this.#record(), this.#deleteSelection();
 		if (this.#cursor === 0) return;
 		this.#record();
-		const start = prevBoundary(this.#text, this.#cursor);
+		const before = this.#text.slice(0, this.#cursor);
+		const pasted = [...this.#markers.values()].find(m => before.endsWith(m));
+		const start = pasted !== undefined ? this.#cursor - pasted.length : prevBoundary(this.#text, this.#cursor);
 		this.#text = this.#text.slice(0, start) + this.#text.slice(this.#cursor);
 		this.#cursor = start;
 	}

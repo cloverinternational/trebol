@@ -1,0 +1,916 @@
+[
+{
+"qid": "T04",
+"query": "STARTUP_CSS",
+"need": "please center it, add an animation and make it be the same width and heigh as the OMP code intro and make it fade in and stuff",
+"next_files": [
+"package.json",
+"tools/e2e/tern-task-board.mjs"
+],
+"edited_or_committed": [],
+"items": [
+{
+"h": "T04-000",
+"text": "docs/reference/tern-site/styles/variables.md#L167-L172\n0f0f12` | not set | stable |\n| `--dim` | Scrim behind modal sheets. | `rgba(244,244,241,.5)` / `rgba(0,0,0,.55)` | not set | stable |\n| `--rail` | Rail and guide color. | `rgb(96,120,178)` / `rgb(110,150,255)` | not set | stable |\n| `--grid-dot` | Dot-grid color. | ink 10% / white 6.5% | not set | stable |\n| `--topbar-bg` | App top bar material. | translucent page | derived | internal |\n| `--sheet-a`, `--sheet-b` | The two stops of a sheet's background. | translucent white / `var(--card)` | not"
+},
+{
+"h": "T04-001",
+"text": "docs/reference/tern-site/protocol/index.md#L53-L63\nrface](surfaces.md), which sits at the cursor row among\nits output, then installs one sheet and adds the `main` region's root, whose\nparent is the surface id. The form is `el` nodes (the sheet's `css` is one\nstring and the node one line on the wire):\n\n```css\n.ask { display: flex; flex-direction: column; gap: 8px; max-width: 460px;\n  padding: 10px 12px; border-radius: 8px; background: var(--card);\n  box-shadow: inset 0 0 0 1px var(--l2) }\n.ask p { margin: 0 }\n.ask .sizes { display: flex; gap: 14p"
+},
+{
+"h": "T04-002",
+"text": "docs/reference/tern-site/elements/layout.md#L609-L609\n/styles/css.md)."
+},
+{
+"h": "T04-003",
+"text": "docs/reference/tern-site/protocol/index.md#L114-L114\nand styling in [Styling Views](../styles/index.md)."
+},
+{
+"h": "T04-004",
+"text": ".pi/lib/tern/startup-card.ts#L177-L201\nexport function startupNodes(blob: ArtifactBlob, version: string, repo?: RepoStatus): TspNode[] {\n\treturn [{\n\t\tid: \"tern-startup\",\n\t\tk: \"row\",\n\t\tp: { role: \"pi.startup\", gap: \"lg\", align: \"start\" },\n\t\tc: [\n\t\t\t{\n\t\t\t\tid: \"tern-startup-mark\",\n\t\t\t\tk: \"col\",\n\t\t\t\tp: { role: \"pi.startup.mark\", gap: \"sm\", align: \"center\", basis: \"content\" },\n\t\t\t\tc: [\n\t\t\t\t\t{ id: \"tern-startup-logo\", k: \"image\", p: { blob: blob.id, alt: \"Trebol\", title: \"Trebol\", max: { h: \"7lines\" }, role: \"pi.startup.logo\" } },\n\t\t\t\t\t{ id: \"tern-startup-version\", k: \"text\", p: { role: \"pi.startup.version\", text: `v${version}`, tone: \"muted\", wrap: \"none\" } },\n\t\t\t\t],\n\t\t\t},\n\t\t\t{ id: \"tern-startup-info\", k: \"col\", p: { role: \"pi.startup.info\", gap: \"md\", grow: 1, min: { w: \"40ch\" } }, c: infoNodes(repo) },\n\t\t],\n\t}];\n}\n\nconst SECTIONS: GitSection[] = [\"conflicts\", \"staged\", \"unstaged\", \"untracked\"];\nconst SECTION_LABEL: Record<GitSection, string> = { conflicts: \"Conflicts\", staged: \"Staged\", unstaged: \"Unstaged\", untracked: \"Untracked\" };\nconst SECTION_TONE: Record<GitSection, string> = { conflicts: \"error\", staged: \"success\", unstaged: \"warning\", untracked: \"muted\" };\n\n// One row per (section, file), in the order the view draw"
+},
+{
+"h": "T04-005",
+"text": ".pi/lib/tern/startup-card.ts#L1-L31\n// Tern startup card: the Trebol shamrock on the left (an SVG blob, faded in), the directory's git state on the right.\n// The blob is sent once when the bridge starts; the node list only references it by SHA-256 id.\nimport { execFile } from \"node:child_process\";\nimport { createHash } from \"node:crypto\";\nimport { readFileSync, realpathSync, watch, type FSWatcher } from \"node:fs\";\nimport type { ArtifactBlob } from \"./artifact-previews.ts\";\nimport { readGitSnapshot, type GitEntry, type GitSection, type GitSnapshot, type GitStat } from \"./git-status.ts\";\nimport type { TspNode } from \"./tsp.ts\";\n\nconst SVG_BYTES = readFileSync(new URL(\"./assets/trebol-shamrock.svg\", import.meta.url));\nconst PACKAGE_JSON = new URL(\"../../../package.json\", import.meta.url);\n\n// Fade-in only; the rest of the card is static text, badges and tables.\nexport const STARTUP_CSS = `\n[data-role='pi.startup.mark'] { animation: pi-startup-in 0.9s ease-out both; }\n@keyframes pi-startup-in {\n  from { opacity: 0; transform: translateY(6px); }\n  to { opacity: 1; transform: none; }\n}\n@media (prefers-reduced-motion: reduce) {\n  [data-role='pi.startup.mark'] { animation: none; }\n}\n`;\n\nexport interface CommitRow { hash: str"
+},
+{
+"h": "T04-006",
+"text": "docs/reference/tern-site/styles/index.md\nt'] .sf-item { min-height: var(--sf-lh); }\"\n\t\t\telse \"\")\n\tend,\n})\n```\n\n## Debugging styles\n\nRun a window with a control endpoint and ask it\n([Debugging](../guides/debugging.md#driving-a-window-from-a-script)):\n\n```sh\ntern --control /tmp/tern-ctl.sock ~/src/my-plugin &\ntern ctl --control /tmp/tern-ctl.sock css\ntern ctl --control /tmp/tern-ctl.sock tree \"[data-surface='plugin.todo.list'] [data-role='todo.day']\"\n```\n\n- `css` lists the installed sheets in cascade order. Look for\n  `plugin:local:<id>:"
+},
+{
+"h": "T04-007",
+"text": "docs/reference/tern-site/examples/workspaces.md#L648-L649\ntatusline .sl-plugin[data-plugin=\"workspaces\"] {\n\tfont-weight: 600;\n}\n```"
+},
+{
+"h": "T04-008",
+"text": "docs/reference/tern-site/MANIFEST.md#L86-L90\ncfdabd854fd183cbbed5b99315ec |\n| scripts/status.md | https://docs.stencil.so/tern/scripts/status.md | 200 | 6330 | be74f2a28ba7f2694bc790d19af740430926913c7888b0cb77a069b94f180a43 |\n| scripts/terminal.md | https://docs.stencil.so/tern/scripts/terminal.md | 200 | 10692 | e82c73842b7ec654e90cab64d194f3b0510478a3e3c39d11a06c1d002c302dfc |\n| styles/css.md | https://docs.stencil.so/tern/styles/css.md | 200 | 49499 | 9ec1bc54278be052157dcb50a65a173b6e07c4a6c7adbdce939d2d994a5b6f09 |\n| styles/index.md"
+},
+{
+"h": "T04-009",
+"text": "tools/e2e/tern-startup-card.mjs\n}"
+},
+{
+"h": "T04-010",
+"text": "extensions/clover-startup/extension.ts#L1-L16\nimport { execFile } from \"node:child_process\";\nimport { fileURLToPath } from \"node:url\";\nimport { resolve } from \"node:path\";\nimport { promisify } from \"node:util\";\nimport { truncateToWidth, visibleWidth } from \"@earendil-works/pi-tui\";\nimport { cloverRows } from \"../../.pi/lib/ui/clover-layout.ts\";\nimport { gitPanel } from \"../../.pi/lib/ui/git-panel-layout.ts\";\nimport { setStartupNoticeRender, startupNotices } from \"../../.pi/lib/ui/startup-notices.ts\";\nimport { ternSetupWizard } from \"../../.pi/lib/ui/tern-setup-wizard.ts\";\n\nconst exec = promisify(execFile);\nconst MAX_OUTPUT_BYTES = 12000;\nconst MAX_LINES = 32;\nconst REPO_ROOT = resolve(fileURLToPath(new URL(\"../..\", import.meta.url)));\n\ntype StartupData = { cwd: string; branch: string; added: number; removed: number; commits: string[] };"
+},
+{
+"h": "T04-011",
+"text": ".pi/lib/ui/startup-notices.ts\nFile: .pi/lib/ui/startup-notices.ts\n{\n  \"document_type\": \"file_summary\",\n  \"file_path\": \"/home/swarm/trebol-corpus-v2/.pi/lib/ui/startup-notices.ts\",\n  \"language\": \"javascript\",\n  \"total_lines\": 17,\n  \"imports\": [],\n  \"entities\": [\n    {\n      \"type\": \"function\",\n      \"name\": \"state\",\n      \"start_line\": 4,\n      \"end_line\": 4\n    },\n    {\n      \"type\": \"function\",\n      \"name\": \"setStartupNoticeRender\",\n      \"start_line\": 9,\n      \"end_line\": 9\n    },\n    {\n      \"type\": \"function\",\n      \"name\": \"pushStartupNotice\",\n      \"start_line\": 10,\n      \"end_line\": 10\n    },\n    {\n      \"type\": \"function\",\n      \"name\": \"startupNotices\",\n      \"start_line\": 16,\n      \"end_line\": 16\n    },\n    {\n      \"type\": \"function\",\n      \"name\": \"KEY\",\n      \"start_line\": 2,\n      \"end_line\": 2\n    },\n    {\n      \"type\": \"function\",\n      \"name\": \"root\",\n      \"start_line\": 5,\n      \"end_line\": 5\n    },\n    {\n      \"type\": \"component\",\n      \"name\": \"KEY\",\n      \"start_line\": 2,\n      \"end_line\": 2\n    }\n  ],\n  \"entity_count\": {\n    \"functions\": 6,\n    \"classes\": 0,\n    \"methods\": 0,\n    \"components\": 1\n  },\n  \"entity_names\": {\n    \"functions\": [\n      \"state\",\n      \"setStartupNoticeRender\",\n    "
+},
+{
+"h": "T04-012",
+"text": ".pi/lib/tern/startup-card.ts#L33-L42\nexport function trebolVersion(): string {\n\tconst version = JSON.parse(readFileSync(PACKAGE_JSON, \"utf8\")).version;\n\treturn typeof version === \"string\" ? version : \"unknown\";\n}\n\nexport function startupBlob(): ArtifactBlob {\n\treturn {\n\t\tid: createHash(\"sha256\").update(SVG_BYTES).digest(\"hex\"),\n\t\tmime: \"image/svg+xml\",\n\t\tbase64: SVG_BYTES.toString(\"base64\"),\n\t};\n}"
+},
+{
+"h": "T04-013",
+"text": "extensions/clover-startup/extension.ts#L62-L117\nexport function lines(data: StartupData, theme: any, width: number, height = MAX_LINES): string[] {\n  const green = (text: string) => theme?.fg?.(\"success\", text) ?? `\\x1b[32m${text}\\x1b[0m`;\n  const left = cloverRows(width, height).map(green);\n  const gap = \"    \";\n  const leftWidth = Math.max(...left.map((line) => visibleWidth(line)));\n  const split = width >= leftWidth + gap.length + 26;\n  const right = gitPanel(data, Math.max(24, width - leftWidth - gap.length));\n  const rows = split ? Math.max(left.length, right.length) : left.length + right.length;\n  const output = Array.from({ length: rows }, (_, i) => {\n    const stacked = !split && i >= left.length;\n    const l = stacked ? \"\" : left[i] ?? \"\";\n    const r = right[i] ?? \"\";\n    const row = split ? padVisible(l, leftWidth) + gap + r : stacked ? r : l;\n    // TuiMainScreen treats each returned string as one terminal row and\n    // rejects rows wider than the current viewport. This is especially easy\n    // to hit with long branch names and commit subjects.\n    return truncateToWidth(row, Math.max(0, width), \"\u2026\");\n  }).slice(0, Math.min(MAX_LINES, Math.max(1, height)));\n  return output.slice(0, Math.max(1, height));\n}\n\nexport d"
+},
+{
+"h": "T04-014",
+"text": "docs/reference/tern-site/elements/text.md#L323-L335\nn's.\n\n**Styling:**\n\n```html\n<div class=\"sf sf-md\" data-id=\"\u2026\">\n\t<div class=\"md\">\n\t\t<h2 id=\"h-\u2026\">Setup</h2>\n\t\t<p>Run <code>make</code> first.</p>\n\t</div>\n\t<div class=\"md streaming\">\n\t\t<div class=\"callout warning\"><svg class=\"co-ic\">\u2026</svg><div class=\"co-body\"><p>\u2026</p></div></div>\n\t\t<div class=\"code\">\n\t\t\t<div class=\"code-head\"><span>rust</span><button class=\"btn sm quiet code-copy\">Copy</button></div>\n\t\t\t<pre><code><span><span class=\"tk-keyword\">fn</span> main() {}</span></code></pre>\n\t\t</div>\n\t</"
+},
+{
+"h": "T04-015",
+"text": "docs/reference/tern-site/elements/lists.md#L120-L120\ns](../styles/variables.md)."
+},
+{
+"h": "T04-016",
+"text": ".pi/lib/tern/bridge.ts#L605-L695\nsetDraft: (text) => this.setDraft(text),\n\t\t\tremoteFlowActive: () => this.#dialog?.active ?? false,\n\t\t\tcolumns: () => this.#columns,\n\t\t}, options.theme);\n\t\tthis.#complete = new SlashAutocomplete({\n\t\t\tcommands: () => autocompleteCommands(this.#commands),\n\t\t\tcwd: () => this.#session.sessionManager?.getCwd?.() ?? process.cwd(),\n\t\t\tdraft: () => this.#draft,\n\t\t\tsetDraft: (text) => this.#writeDraft(text, null),\n\t\t\trender: () => this.#render(),\n\t\t});\n\t}\n\n\t// Bind as Pi's ExtensionUIContext (session.bindExtensions({ uiContext })).\n\tuiContext(): Record<string, unknown> {\n\t\treturn this.#ui.context();\n\t}\n\n\tget busy(): boolean {\n\t\treturn this.#busy;\n\t}\n\n\tget closed(): boolean {\n\t\treturn this.#closed;\n\t}\n\n\tget draft(): string {\n\t\treturn this.#draft;\n\t}\n\n\t// The draft with large-paste markers expanded; this is what a submit sends.\n\tget expandedDraft(): string {\n\t\treturn this.#editor.expandedText;\n\t}\n\n\tget #draft(): string {\n\t\treturn this.#editor.text;\n\t}\n\n\tset #draft(text: string) {\n\t\tthis.#editor.setText(text);\n\t}\n\n\tget items(): readonly Item[] {\n\t\treturn this.#projector.items;\n\t}\n\n\t// Pi replaces the session on resume and similar switches; the bridge follows the replacement.\n\trebind(session: Pi"
+},
+{
+"h": "T04-017",
+"text": "extensions/clover-startup/extension.ts\nFile: extensions/clover-startup/extension.ts\n{\n  \"document_type\": \"file_summary\",\n  \"file_path\": \"/home/swarm/trebol-corpus-v2/extensions/clover-startup/extension.ts\",\n  \"language\": \"javascript\",\n  \"total_lines\": 135,\n  \"imports\": [\n    \"@earendil-works/pi-tui\",\n    \"node:path\",\n    \"../../.pi/lib/ui/startup-notices.ts\",\n    \"node:child_process\",\n    \"node:url\",\n    \"../../.pi/lib/ui/git-panel-layout.ts\",\n    \"node:util\",\n    \"../../.pi/lib/ui/clover-layout.ts\",\n    \"../../.pi/lib/ui/tern-setup-wizard.ts\"\n  ],\n  \"entities\": [\n    {\n      \"type\": \"function\",\n      \"name\": \"padVisible\",\n      \"start_line\": 18,\n      \"end_line\": 18\n    },\n    {\n      \"type\": \"function\",\n      \"name\": \"clip\",\n      \"start_line\": 22,\n      \"end_line\": 22\n    },\n    {\n      \"type\": \"function\",\n      \"name\": \"git\",\n      \"start_line\": 26,\n      \"end_line\": 26\n    },\n    {\n      \"type\": \"function\",\n      \"name\": \"collect\",\n      \"start_line\": 40,\n      \"end_line\": 40\n    },\n    {\n      \"type\": \"function\",\n      \"name\": \"lines\",\n      \"start_line\": 62,\n      \"end_line\": 62\n    },\n    {\n      \"type\": \"function\",\n      \"name\": \"cloverStartupExtension\",\n      \"start_line\": 83,\n      \"end_line\": 83\n    },\n    {"
+},
+{
+"h": "T04-018",
+"text": "docs/reference/tern-ui-semantic-source-map.md#L61-L61\nce/tern-ui-semantic-source-map.md` (new)."
+},
+{
+"h": "T04-019",
+"text": ".pi/lib/tern/bridge.ts#L1-L21\n// Minimal Pi-to-TSP bridge. Projects Pi session events into TSP nodes on one inline surface:\n// `main` holds the keyed transcript and tool cards, `dock` holds the composer and status.\n// Tern submit/cancel/close actions and typed keys map back onto the Pi session.\n// Pi remains the authority for prompts and tools; this module adds no grants. Extension UI prompts\n// (select, confirm, input, editor, notify, text widgets) are answered by native Tern dialogs (ext-ui.ts),\n// so every extension command works without per-command code. They resolve only from user action.\nimport { onRunningWorkChange, runningWorkSnapshot, type RunningWorkItem } from \"../ui/running-work-store.ts\";\nimport {\n\tautocompleteCommands,\n\tEMPTY_COMMAND_SOURCE,\n\tbuildCatalog,\n\trouteSubmission,\n\ttype CommandSource,\n} from \"./commands.ts\";\nimport type { Model } from \"@earendil-works/pi-ai\";\nimport { encodeTspBlob, projectTranscript, type TspMessage, type TspNode, type TspWriter, TernInlineSurface } from \"./tsp.ts\";\nimport { composerNodes, modelDisplayName, type GitFacts } from \"./composer-view.ts\";\nimport { artifactNodes, previewFile, type ArtifactPreview } from \"./artifact-previews.ts\";\nimport { STARTUP_CSS, gitDiffNo"
+},
+{
+"h": "T04-020",
+"text": ".pi/lib/tern/startup-card.ts\nFile: .pi/lib/tern/startup-card.ts\n{\n  \"document_type\": \"file_summary\",\n  \"file_path\": \"/home/swarm/trebol-corpus-v2/.pi/lib/tern/startup-card.ts\",\n  \"language\": \"javascript\",\n  \"total_lines\": 270,\n  \"imports\": [\n    \"./tsp.ts\",\n    \"node:crypto\",\n    \"node:child_process\",\n    \"./artifact-previews.ts\",\n    \"./git-status.ts\",\n    \"node:fs\"\n  ],\n  \"entities\": [\n    {\n      \"type\": \"function\",\n      \"name\": \"trebolVersion\",\n      \"start_line\": 33,\n      \"end_line\": 33\n    },\n    {\n      \"type\": \"function\",\n      \"name\": \"startupBlob\",\n      \"start_line\": 38,\n      \"end_line\": 38\n    },\n    {\n      \"type\": \"function\",\n      \"name\": \"git\",\n      \"start_line\": 46,\n      \"end_line\": 46\n    },\n    {\n      \"type\": \"function\",\n      \"name\": \"readRepoStatus\",\n      \"start_line\": 52,\n      \"end_line\": 52\n    },\n    {\n      \"type\": \"function\",\n      \"name\": \"watchRepo\",\n      \"start_line\": 78,\n      \"end_line\": 78\n    },\n    {\n      \"type\": \"function\",\n      \"name\": \"sameDirectory\",\n      \"start_line\": 102,\n      \"end_line\": 102\n    },\n    {\n      \"type\": \"function\",\n      \"name\": \"counts\",\n      \"start_line\": 106,\n      \"end_line\": 106\n    },\n    {\n      \"type\": \"function\",\n      \"name\": \"head"
+}
+]
+},
+{
+"qid": "T10",
+"query": "overflow",
+"need": "yeah but ux wise the moment you unhover it should hide and it looks sort of ugly there needs to be colors and make the text a lot smaller when it comes to font, remove the running thing on the top right and make sure that its no translucent or the background is invisible",
+"next_files": [
+"docs/reference/tern-pi-rendered-regression.md",
+"docs/reference/tern-site/guides/debugging.md"
+],
+"edited_or_committed": [
+".pi/lib/tern/bridge.ts",
+".pi/lib/tern/composer-style.ts",
+".pi/lib/tern/task-view.ts",
+".pi/test/tern/dock.test.ts",
+"docs/reference/tern-pi-rendered-regression.md",
+"docs/reference/tern-site/guides/debugging.md"
+],
+"items": [
+{
+"h": "T10-000",
+"text": "vendor/pi-mono/packages/coding-agent/docs/custom-provider.md#L23-L37\n#unregister-provider)\n- [OAuth Support](#oauth-support)\n- [Custom Streaming API](#custom-streaming-api)\n- [Context Overflow Errors](#context-overflow-errors)\n- [Testing Your Implementation](#testing-your-implementation)\n- [Config Reference](#config-reference)\n- [Model Definition Reference](#model-definition-reference)\n\n## Quick Reference\n\n```typescript\nimport type { ExtensionAPI } from \"@earendil-works/pi-coding-agent\";\n\nexport default function (pi: ExtensionAPI) {\n  // Override baseUrl for exis"
+},
+{
+"h": "T10-001",
+"text": "[memory note, 2026-10-18]\n{\"source\":\"TaskManage\",\"taskId\":\"1\",\"subject\":\"Write the verdict for the bootstrap audit\",\"description\":\"Write the bootstrap audit verdict covering bounded delivery of selected skills, memory selections, and evidence. Verify each bound against source code, not only memory or session logs, and record the verdict with file#Lx-Ly evidence.\",\"status\":\"in_progress\",\"parentTaskId\":\"\",\"dependsOn\":[],\"category\":\"acting\",\"priority\":\"medium\",\"notes\":[\"Memory notes bootstrap caps: 2 skills, 12000 UTF-16 units inline per skill (overflow spilled to a 0600 temp file read in chunks), 8 memory items at 1200 chars, skill bodies at 4000 chars, and 20 evidence entries. Treat these as claims to verify in source"
+},
+{
+"h": "T10-002",
+"text": "vendor/pi-mono/packages/coding-agent/docs/custom-provider.md#L564-L580\nsage.includes(\"context_length_exceeded\")) return;\n    if (!MY_PROVIDER_OVERFLOW_PATTERN.test(errorMessage)) return;\n\n    return {\n      message: {\n        ...message,\n        errorMessage: `context_length_exceeded: ${errorMessage}`,\n      },\n    };\n  });\n}\n```\n\n`message_end` runs before pi tracks the assistant message for auto-compaction, so the rewritten `errorMessage` is what pi checks. With this in place, pi will:\n\n1. Detect the overflow from `errorMessage`.\n2. Drop the failed assistant messa"
+},
+{
+"h": "T10-003",
+"text": "vendor/pi-mono/packages/ai/src/utils/overflow.ts#L1-L24\nimport type { AssistantMessage } from \"../types.ts\";\n\n/**\n * Regex patterns to detect context overflow errors from different providers.\n *\n * These patterns match error messages returned when the input exceeds\n * the model's context window.\n *\n * Provider-specific patterns (with example error messages):\n *\n * - Anthropic: \"prompt is too long: 213462 tokens > 200000 maximum\"\n * - Anthropic: \"413 {\\\"error\\\":{\\\"type\\\":\\\"request_too_large\\\",\\\"message\\\":\\\"Request exceeds the maximum size\\\"}}\"\n * - OpenAI: \"Your input exceeds the context window of this model\"\n * - OpenAI/LiteLLM: \"Requested token count exceeds the model's maximum context length of 131072 tokens\"\n * - Google: \"The input token count (1196265) exceeds the maximum number of tokens allowed (1048575)\"\n * - xAI: \"This model's maximum prompt length is 131072 but the request contains 537812 tokens\"\n * - Groq: \"Please reduce the length of the messages or completion\"\n * - OpenRouter: \"This endpoint's maximum context length is X tokens. However, you requested about Y tokens\"\n * - OpenRouter/Poolside: \"Input length X exceeds the maximum allowed input length of Y tokens.\"\n * - Together AI: \"The input (X tokens) is longer than the mode"
+},
+{
+"h": "T10-004",
+"text": "vendor/pi-mono/packages/ai/src/utils/overflow.ts#L159-L160\nexport function getOverflowPatterns(): RegExp[] {\n\treturn [...OVERFLOW_PATTERNS];\n}"
+},
+{
+"h": "T10-005",
+"text": "vendor/pi-mono/packages/coding-agent/test/agent-session-auto-compaction-queue.test.ts#L114-L208\nconst runAutoCompaction = (\n\t\t\tsession as unknown as {\n\t\t\t\t_runAutoCompaction: (reason: \"overflow\" | \"threshold\", willRetry: boolean) => Promise<boolean>;\n\t\t\t}\n\t\t)._runAutoCompaction.bind(session);\n\n\t\tawait expect(runAutoCompaction(\"threshold\", false)).resolves.toBe(true);\n\n\t\texpect(continueSpy).not.toHaveBeenCalled();\n\t});\n\n\tit(\"should not compact repeatedly after overflow recovery already attempted\", async () => {\n\t\tconst model = session.model!;\n\t\tconst overflowMessage: AssistantMessage = {\n\t\t\trole: \"assistant\",\n\t\t\tcontent: [{ type: \"text\", text: \"\" }],\n\t\t\tapi: model.api,\n\t\t\tprovider: model.provider,\n\t\t\tmodel: model.id,\n\t\t\tusage: {\n\t\t\t\tinput: 0,\n\t\t\t\toutput: 0,\n\t\t\t\tcacheRead: 0,\n\t\t\t\tcacheWrite: 0,\n\t\t\t\ttotalTokens: 0,\n\t\t\t\tcost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },\n\t\t\t},\n\t\t\tstopReason: \"error\",\n\t\t\terrorMessage: \"prompt is too long\",\n\t\t\ttimestamp: Date.now(),\n\t\t};\n\n\t\tconst runAutoCompactionSpy = vi\n\t\t\t.spyOn(\n\t\t\t\tsession as unknown as {\n\t\t\t\t\t_runAutoCompaction: (reason: \"overflow\" | \"threshold\", willRetry: boolean) => Promise<void>;\n\t\t\t\t},\n\t\t\t\t\"_runAutoCompaction\",\n\t\t\t)\n\t\t\t.mockResolvedValue();\n\n\t\tconst events: Array<{ type: string; reason: string; errorMes"
+},
+{
+"h": "T10-006",
+"text": "vendor/pi-mono/packages/coding-agent/docs/custom-provider.md#L527-L538\nt.usage.input = response.usage.input_tokens;\noutput.usage.output = response.usage.output_tokens;\noutput.usage.cacheRead = response.usage.cache_read_tokens ?? 0;\noutput.usage.cacheWrite = response.usage.cache_write_tokens ?? 0;\noutput.usage.totalTokens = output.usage.input + output.usage.output +\n                           output.usage.cacheRead + output.usage.cacheWrite;\ncalculateCost(model, output.usage);\n```\n\n### Context Overflow Errors\n\nWhen a request exceeds the model's context window, pi ca"
+},
+{
+"h": "T10-007",
+"text": "vendor/pi-mono/packages/ai/test/overflow.test.ts\nFile: vendor/pi-mono/packages/ai/test/overflow.test.ts\n{\n  \"document_type\": \"file_summary\",\n  \"file_path\": \"/home/swarm/trebol-corpus-v2/vendor/pi-mono/packages/ai/test/overflow.test.ts\",\n  \"language\": \"javascript\",\n  \"total_lines\": 121,\n  \"imports\": [\n    \"vitest\",\n    \"../src/types.ts\",\n    \"../src/utils/overflow.ts\"\n  ],\n  \"entities\": [\n    {\n      \"type\": \"function\",\n      \"name\": \"createErrorMessage\",\n      \"start_line\": 5,\n      \"end_line\": 5\n    },\n    {\n      \"type\": \"function\",\n      \"name\": \"createLengthStopMessage\",\n      \"start_line\": 86,\n      \"end_line\": 86\n    },\n    {\n      \"type\": \"function\",\n      \"name\": \"message\",\n      \"start_line\": 34,\n      \"end_line\": 34\n    },\n    {\n      \"type\": \"function\",\n      \"name\": \"message\",\n      \"start_line\": 39,\n      \"end_line\": 39\n    },\n    {\n      \"type\": \"function\",\n      \"name\": \"message\",\n      \"start_line\": 46,\n      \"end_line\": 46\n    },\n    {\n      \"type\": \"function\",\n      \"name\": \"message\",\n      \"start_line\": 53,\n      \"end_line\": 53\n    },\n    {\n      \"type\": \"function\",\n      \"name\": \"message\",\n      \"start_line\": 60,\n      \"end_line\": 60\n    },\n    {\n      \"type\": \"function\",\n      \"name\": \"message\",\n      \"start_"
+},
+{
+"h": "T10-008",
+"text": "docs/reference/tern-site/styles/css.md#L326-L331\nproperty: `-webkit-backdrop-filter`, `-webkit-mask` and every `-webkit-mask-*`\nlonghand (legacy `-webkit-mask-composite` operators `xor`, `source-over`, `source-in`, `source-out` translate),\n`-webkit-background-clip`, `-webkit-user-select`, `-webkit-transform`, `-webkit-filter`, `-webkit-app-region`,\n`-webkit-line-clamp`, `word-wrap` (\u2192 `overflow-wrap`), `grid-gap`, `grid-row-gap`, `grid-column-gap`.\n\n\"Animates\" means transitions and animations interpolate the property; the others switch discre"
+},
+{
+"h": "T10-009",
+"text": "vendor/pi-mono/packages/coding-agent/docs/containerization.md#L111-L111\nles to the container."
+},
+{
+"h": "T10-010",
+"text": "docs/reference/tern-site/reference/limits.md#L57-L68\nn.parse.json_tree` nodes | 5000 | The rest is summarized by an overflow line |\n\nTern's built-in lenses also stop at 5000 rows and add\n`tern.ui.overflow(n)`'s line; plugin builders such as `tern.ui.table` don't\ntruncate, so cap long views yourself.\n\n## Blocks\n\n| Limit | Value | At the limit |\n| --- | --- | --- |\n| Frame message size | 64 KiB | Larger frames are split into chunks the surface protocol reassembles |\n| Pending input from the pane | 16 MiB | An incomplete sequence larger than this is"
+},
+{
+"h": "T10-011",
+"text": "[memory note, 2026-10-13]\n{\"source\":\"TaskManage\",\"taskId\":\"7\",\"subject\":\"Render TaskManage calls in Tern as Hoja-style task cards (JSON hidden by default)\",\"description\":\"\",\"status\":\"in_progress\",\"parentTaskId\":\"\",\"dependsOn\":[],\"category\":\"verifying\",\"priority\":\"high\",\"notes\":[\"Implemented: bridge card, CSS, e2e check (tools/e2e/tern-taskmanage-card.mjs PASS). Tern suite 207/207 and task-board e2e and overlay tmux e2e all pass. Left in_progress: a live tmux/visual run is awaiting the user's test (e2e-live).\",\"User's live visual feedback: cards look good but operation content is squeezed onto one ellipsized line. Improve vertical layout so full subjects wrap.\",\"Changed TaskManage operation card to vertical TSP col: h"
+},
+{
+"h": "T10-012",
+"text": "vendor/pi-mono/packages/ai/src/utils/overflow.ts#L104-L123\n* - Xiaomi MiMo: Truncates input to fit contextWindow then returns stopReason \"length\" with\n *   output=0. Pass contextWindow param to detect via the \"filled context + zero output\" signal.\n * - Ollama: May truncate input silently for some setups, but may also return explicit\n *   overflow errors that match the patterns above. Silent truncation still cannot be\n *   detected here because we do not know the expected token count.\n *\n * ## Custom Providers\n *\n * If you've added custom models via settings.json, this function may not detect\n * overflow errors from those providers. To add support:\n *\n * 1. Send a request that exceeds the model's context window\n * 2. Check the errorMessage in the response\n * 3. Create a regex pattern that matches the error\n * 4. The pattern should be added to OVERFLOW_PATTERNS in this file, or\n *    check the errorMessage yourself before calling this function\n *\n * @param message - The assistant message to check\n * @param contextWindow - Optional context window size for detecting silent overflow (z.ai)\n * @returns true if the message indicates a context overflow\n */"
+},
+{
+"h": "T10-013",
+"text": "vendor/pi-mono/packages/coding-agent/docs/custom-provider.md#L538-L545\nrequest exceeds the model's context window, pi can recover automatically by compacting the conversation and retrying. This recovery only kicks in if pi recognizes the failure as an overflow.\n\nDetection runs on the finalized assistant message:\n\n- `stopReason === \"error\"`\n- `errorMessage` matches one of pi's known overflow patterns (see [`packages/ai/src/utils/overflow.ts`](https://github.com/earendil-works/pi-mono/blob/main/packages/ai/src/utils/overflow.ts))\n\nIf your provider returns overflow e"
+},
+{
+"h": "T10-014",
+"text": "docs/reference/tern-sdk/pages/go/tern/README.md\n`"
+},
+{
+"h": "T10-015",
+"text": "vendor/pi-mono/packages/ai/test/context-overflow.test.ts#L2-L30\n/**\n * Test context overflow error handling across providers.\n *\n * Context overflow occurs when the input (prompt + history) exceeds\n * the model's context window. This is different from output token limits.\n *\n * Expected behavior: All providers should return stopReason: \"error\"\n * with an errorMessage that indicates the context was too large,\n * OR (for z.ai) return successfully with usage.input > contextWindow.\n *\n * The isContextOverflow() function must return true for all providers.\n */\n\nimport type { ChildProcess } from \"child_process\";\nimport { execSync, spawn } from \"child_process\";\nimport { afterAll, beforeAll, describe, expect, it } from \"vitest\";\nimport { getModel, getModels } from \"../src/models.ts\";\nimport { complete } from \"../src/stream.ts\";\nimport type { AssistantMessage, Context, Model, Usage } from \"../src/types.ts\";\nimport { isContextOverflow } from \"../src/utils/overflow.ts\";\nimport { hasAzureOpenAICredentials } from \"./azure-utils.ts\";\nimport { hasBedrockCredentials } from \"./bedrock-utils.ts\";\nimport { resolveApiKey } from \"./oauth.ts\";\n\n// Resolve OAuth tokens at module level (async, runs before tests)\nconst oauthTokens = await Promise.all([resolveApiKey(\"gi"
+},
+{
+"h": "T10-016",
+"text": "vendor/pi-mono/packages/coding-agent/test/suite/agent-session-compaction.test.ts#L2-L12\nimport {\n\ttype AssistantMessage,\n\tcreateAssistantMessageEventStream,\n\tfauxAssistantMessage,\n\ttype Model,\n} from \"@earendil-works/pi-ai\";\nimport { afterEach, describe, expect, it, vi } from \"vitest\";\nimport { createHarness, type Harness } from \"./harness.ts\";\n\ntype SessionWithCompactionInternals = {\n\t_checkCompaction: (assistantMessage: AssistantMessage, skipAbortedCheck?: boolean) => Promise<boolean>;\n\t_runAutoCompaction: (reason: \"overflow\" | \"threshold\", willRetry: boolean) => Promise<boolean>;\n};"
+},
+{
+"h": "T10-017",
+"text": "docs/reference/tern-site/reference/errors.md#L227-L227\n- [Limits](limits.md)."
+},
+{
+"h": "T10-018",
+"text": "vendor/pi-mono/packages/ai/test/context-overflow.test.ts\nFile: vendor/pi-mono/packages/ai/test/context-overflow.test.ts\n{\n  \"document_type\": \"file_summary\",\n  \"file_path\": \"/home/swarm/trebol-corpus-v2/vendor/pi-mono/packages/ai/test/context-overflow.test.ts\",\n  \"language\": \"javascript\",\n  \"total_lines\": 736,\n  \"imports\": [\n    \"../src/models.ts\",\n    \"../src/stream.ts\",\n    \"../src/types.ts\",\n    \"./bedrock-utils.ts\",\n    \"child_process\",\n    \"./oauth.ts\",\n    \"vitest\",\n    \"./azure-utils.ts\",\n    \"../src/utils/overflow.ts\"\n  ],\n  \"entities\": [\n    {\n      \"type\": \"function\",\n      \"name\": \"generateOverflowContent\",\n      \"start_line\": 34,\n      \"end_line\": 34\n    },\n    {\n      \"type\": \"function\",\n      \"name\": \"testContextOverflow\",\n      \"start_line\": 52,\n      \"end_line\": 52\n    },\n    {\n      \"type\": \"function\",\n      \"name\": \"logResult\",\n      \"start_line\": 82,\n      \"end_line\": 82\n    },\n    {\n      \"type\": \"function\",\n      \"name\": \"result\",\n      \"start_line\": 100,\n      \"end_line\": 100\n    },\n    {\n      \"type\": \"function\",\n      \"name\": \"result\",\n      \"start_line\": 132,\n      \"end_line\": 132\n    },\n    {\n      \"type\": \"function\",\n      \"name\": \"result\",\n      \"start_line\": 167,\n      \"end_line\": 167\n    },\n    {\n      \"type\""
+},
+{
+"h": "T10-019",
+"text": "docs/reference/tern-site/reference/ui.md#L209-L230\nber, failed: number, skipped: number, took: string?) -> Node\n```\n\nA row with a stacked pass/fail/skip meter and the counts (`3 passed \u00b7 1\nfailed \u00b7 1.2s`), toned `error` when `failed > 0`, else `success`. The counts\nare non-negative integers.\n\n### `overflow`\n\n```lua\ntern.ui.overflow: (hidden: number) -> Node\n```\n\nA muted text line `\u2026 N more (Raw shows everything)`. Use it when a lens\nshows only part of long output.\n\n## Tables\n\n### `table`\n\n```lua\ntern.ui.table: (cols: { Col }, rows: { { Cell } })"
+},
+{
+"h": "T10-020",
+"text": "docs/reference/tern-site/styles/css.md#L586-L592\nign-content`, `justify-content` | `align [justify]` |\n| `overflow` | `overflow-x`, `overflow-y` | `x [y]` |\n| `grid-template` | rows, columns | `none` \\| `rows / columns` |\n| `text-decoration` | line, style, color | `line \u2016 style \u2016 color` |\n| `list-style` | type, position, image | `type \u2016 position \u2016 image` (a lone `none` sets type and image) |\n| `transition` | property, duration, timing function, delay | items#: `property \u2016 duration \u2016 easing \u2016 delay` (first time is the duration) |\n| `animation`"
+},
+{
+"h": "T10-021",
+"text": "vendor/pi-mono/packages/coding-agent/docs/custom-provider.md#L543-L550\noverflow.ts))\n\nIf your provider returns overflow errors with a message pi does not recognize, normalize the error from the same extension that registers the provider. Use a `message_end` handler to rewrite the assistant message so its `errorMessage` starts with a phrase pi recognizes. The generic fallback `context_length_exceeded` is the safest choice.\n\n```typescript\nconst MY_PROVIDER_OVERFLOW_PATTERN = /your provider's overflow phrase/i;\n\nexport default function (pi: ExtensionAPI) {\n  pi.regist"
+},
+{
+"h": "T10-022",
+"text": "vendor/pi-mono/packages/ai/test/overflow.test.ts#L1-L33\nimport { describe, expect, it } from \"vitest\";\nimport type { AssistantMessage } from \"../src/types.ts\";\nimport { isContextOverflow } from \"../src/utils/overflow.ts\";\n\nfunction createErrorMessage(errorMessage: string): AssistantMessage {\n\treturn {\n\t\trole: \"assistant\",\n\t\tcontent: [],\n\t\tapi: \"openai-completions\",\n\t\tprovider: \"ollama\",\n\t\tmodel: \"qwen3.5:35b\",\n\t\tusage: {\n\t\t\tinput: 0,\n\t\t\toutput: 0,\n\t\t\tcacheRead: 0,\n\t\t\tcacheWrite: 0,\n\t\t\ttotalTokens: 0,\n\t\t\tcost: {\n\t\t\t\tinput: 0,\n\t\t\t\toutput: 0,\n\t\t\t\tcacheRead: 0,\n\t\t\t\tcacheWrite: 0,\n\t\t\t\ttotal: 0,\n\t\t\t},\n\t\t},\n\t\tstopReason: \"error\",\n\t\terrorMessage,\n\t\ttimestamp: Date.now(),\n\t};\n}\n\ndescribe(\"isContextOverflow\", () => {\n\tit(\"detects explicit Ollama prompt-too-long errors\", () => {"
+},
+{
+"h": "T10-023",
+"text": "vendor/pi-mono/packages/ai/src/utils/overflow.ts#L79-L103\n* 1. Error-based overflow: Most providers return stopReason \"error\" with a\n *    specific error message pattern.\n * 2. Silent overflow: Some providers accept overflow requests and return\n *    successfully. For these, we check if usage.input exceeds the context window.\n *\n * ## Reliability by Provider\n *\n * **Reliable detection (returns error with detectable message):**\n * - Anthropic: \"prompt is too long: X tokens > Y maximum\" or \"request_too_large\"\n * - OpenAI (Completions & Responses): \"exceeds the context window\" or \"exceeds the model's maximum context length of X tokens\"\n * - Google Gemini: \"input token count exceeds the maximum\"\n * - xAI (Grok): \"maximum prompt length is X but request contains Y\"\n * - Groq: \"reduce the length of the messages\"\n * - Cerebras: 400/413 status code (no body)\n * - Mistral: \"Prompt contains X tokens ... too large for model with Y maximum context length\"\n * - OpenRouter (most backends): \"maximum context length is X tokens\"\n * - OpenRouter/Poolside: \"Input length X exceeds the maximum allowed input length of Y tokens.\"\n * - Together AI: \"The input (X tokens) is longer than the model's context length (Y tokens).\"\n * - llama.cpp: \"exceeds the available "
+},
+{
+"h": "T10-024",
+"text": "vendor/pi-mono/packages/tui/src/utils.ts#L1003-L1024\noverflowed = true;\n\t\t\t\t\tbreak;\n\t\t\t\t}\n\t\t\t}\n\t\t\tif (overflowed) {\n\t\t\t\tbreak;\n\t\t\t}\n\t\t\ti = end;\n\t\t}\n\t\texhaustedInput = i >= text.length;\n\t}\n\n\tif (!overflowed && exhaustedInput) {\n\t\treturn pad ? text + \" \".repeat(Math.max(0, maxWidth - visibleSoFar)) : text;\n\t}\n\n\treturn finalizeTruncatedResult(result, keptWidth, ellipsis, ellipsisWidth, maxWidth, pad);\n}\n\n/**\n * Extract a range of visible columns from a line. Handles ANSI codes and wide chars.\n * @param strict - If true, exclude wide chars at boundary that would extend past the range\n */"
+},
+{
+"h": "T10-025",
+"text": "packages/context/skills/builtins/swarm-workflow/references/EXECUTION-STRATEGIES.md\n```"
+},
+{
+"h": "T10-026",
+"text": "docs/reference/tern-site/styles/css.md#L365-L374\nom` | `<length-percentage>` | `0` | no | yes |\n| `padding-left` | `<length-percentage>` | `0` | no | yes |\n| `overflow-x` | `visible` `hidden` `clip` `scroll` `auto` | `visible` | no | no |\n| `overflow-y` | same as `overflow-x` | `visible` | no | no |\n| `visibility` | `visible` `hidden` `collapse` | `visible` | yes | no |\n| `zoom` | `normal` \\| `<number>` \\| `<percentage>` (\u2265 0; `0` = `normal`) | `1` | yes | no |\n\n### Flex and grid\n\n| Property | Values | Initial | Inherited | Animates |\n| --- |"
+},
+{
+"h": "T10-027",
+"text": "vendor/pi-mono/packages/ai/test/overflow.test.ts#L106-L113\nit(\"detects Xiaomi-style overflow (length stop with zero output and filled context)\", () => {\n\t\tconst message = createLengthStopMessage(58, 1048512, 0);\n\t\texpect(isContextOverflow(message, 1048576)).toBe(true);\n\t});\n\n\tit(\"does not treat normal length stops with output as overflow\", () => {\n\t\tconst message = createLengthStopMessage(1000, 0, 4096);\n\t\texpect(isContextOverflow(message, 200000)).toBe(false);\n\t});\n\n\tit(\"does not treat length stops far below context as overflow\", () => {\n\t\tconst message = createLengthStopMessage(100, 0, 0);\n\t\texpect(isContextOverflow(message, 200000)).toBe(false);\n\t});\n});"
+},
+{
+"h": "T10-028",
+"text": "vendor/pi-mono/packages/ai/src/utils/overflow.ts#L46-L78\n/exceeds the limit of \\d+/i, // GitHub Copilot\n\t/exceeds the available context size/i, // llama.cpp server\n\t/greater than the context length/i, // LM Studio\n\t/context window exceeds limit/i, // MiniMax\n\t/exceeded model token limit/i, // Kimi For Coding\n\t/too large for model with \\d+ maximum context length/i, // Mistral\n\t/model_context_window_exceeded/i, // z.ai non-standard finish_reason surfaced as error text\n\t/prompt too long; exceeded (?:max )?context length/i, // Ollama explicit overflow error\n\t/context[_ ]length[_ ]exceeded/i, // Generic fallback\n\t/too many tokens/i, // Generic fallback\n\t/token limit exceeded/i, // Generic fallback\n\t/^4(?:00|13)\\s*(?:status code)?\\s*\\(no body\\)/i, // Cerebras: 400/413 with no body\n];\n\n/**\n * Patterns that indicate non-overflow errors (e.g. rate limiting, server errors).\n * Error messages matching any of these are excluded from overflow detection\n * even if they also match an OVERFLOW_PATTERN.\n *\n * Example: Bedrock formats throttling errors as \"ThrottlingException: Too many tokens,\n * please wait before trying again.\" which would match the /too many tokens/i overflow\n * pattern without this exclusion.\n */\nconst NON_OVERFLOW_PATTERNS = [\n\t/^(Th"
+},
+{
+"h": "T10-029",
+"text": "vendor/pi-mono/packages/ai/src/utils/overflow.ts\nFile: vendor/pi-mono/packages/ai/src/utils/overflow.ts\n{\n  \"document_type\": \"file_summary\",\n  \"file_path\": \"/home/swarm/trebol-corpus-v2/vendor/pi-mono/packages/ai/src/utils/overflow.ts\",\n  \"language\": \"javascript\",\n  \"total_lines\": 162,\n  \"imports\": [\n    \"../types.ts\"\n  ],\n  \"entities\": [\n    {\n      \"type\": \"function\",\n      \"name\": \"isContextOverflow\",\n      \"start_line\": 125,\n      \"end_line\": 125\n    },\n    {\n      \"type\": \"function\",\n      \"name\": \"getOverflowPatterns\",\n      \"start_line\": 159,\n      \"end_line\": 159\n    },\n    {\n      \"type\": \"function\",\n      \"name\": \"isNonOverflow\",\n      \"start_line\": 129,\n      \"end_line\": 129\n    }\n  ],\n  \"entity_count\": {\n    \"functions\": 3,\n    \"classes\": 0,\n    \"methods\": 0,\n    \"components\": 0\n  },\n  \"entity_names\": {\n    \"functions\": [\n      \"isContextOverflow\",\n      \"getOverflowPatterns\",\n      \"isNonOverflow\"\n    ],\n    \"classes\": [],\n    \"components\": []\n  }\n}"
+},
+{
+"h": "T10-030",
+"text": "vendor/pi-mono/packages/tui/src/utils.ts#L884-L941\nexport function truncateToWidth(\n\ttext: string,\n\tmaxWidth: number,\n\tellipsis: string = \"...\",\n\tpad: boolean = false,\n): string {\n\tif (maxWidth <= 0) {\n\t\treturn \"\";\n\t}\n\n\tif (text.length === 0) {\n\t\treturn pad ? \" \".repeat(maxWidth) : \"\";\n\t}\n\n\tconst ellipsisWidth = visibleWidth(ellipsis);\n\tif (ellipsisWidth >= maxWidth) {\n\t\tconst textWidth = visibleWidth(text);\n\t\tif (textWidth <= maxWidth) {\n\t\t\treturn pad ? text + \" \".repeat(maxWidth - textWidth) : text;\n\t\t}\n\n\t\tconst clippedEllipsis = truncateFragmentToWidth(ellipsis, maxWidth);\n\t\tif (clippedEllipsis.width === 0) {\n\t\t\treturn pad ? \" \".repeat(maxWidth) : \"\";\n\t\t}\n\t\treturn finalizeTruncatedResult(\"\", 0, clippedEllipsis.text, clippedEllipsis.width, maxWidth, pad);\n\t}\n\n\tif (isPrintableAscii(text)) {\n\t\tif (text.length <= maxWidth) {\n\t\t\treturn pad ? text + \" \".repeat(maxWidth - text.length) : text;\n\t\t}\n\t\tconst targetWidth = maxWidth - ellipsisWidth;\n\t\treturn finalizeTruncatedResult(text.slice(0, targetWidth), targetWidth, ellipsis, ellipsisWidth, maxWidth, pad);\n\t}\n\n\tconst targetWidth = maxWidth - ellipsisWidth;\n\tlet result = \"\";\n\tlet pendingAnsi = \"\";\n\tlet visibleSoFar = 0;\n\tlet keptWidth = 0;\n\tlet keepContiguousPrefix = true;\n\tlet overflow"
+},
+{
+"h": "T10-031",
+"text": "docs/reference/upstream-snapshot.md\nblished."
+},
+{
+"h": "T10-032",
+"text": "vendor/pi-mono/packages/ai/test/context-overflow.test.ts#L32-L49\n// Generate a string that will exceed the context window\n// Using chars/4 as token estimate (works better with varied text than repeated chars)\nfunction generateOverflowContent(contextWindow: number): string {\n\tconst targetTokens = contextWindow + 10000; // Exceed by 10k tokens\n\tconst targetChars = targetTokens * 4 * 1.5;\n\tconst repetitions = Math.ceil(targetChars / LOREM_IPSUM.length);\n\treturn LOREM_IPSUM.repeat(repetitions);\n}\n\ninterface OverflowResult {\n\tprovider: string;\n\tmodel: string;\n\tcontextWindow: number;\n\tstopReason: string;\n\terrorMessage: string | undefined;\n\tusage: Usage;\n\thasUsageData: boolean;\n\tresponse: AssistantMessage;\n}"
+},
+{
+"h": "T10-033",
+"text": "vendor/pi-mono/packages/ai/src/utils/overflow.ts#L125-L157\nexport function isContextOverflow(message: AssistantMessage, contextWindow?: number): boolean {\n\t// Case 1: Check error message patterns\n\tif (message.stopReason === \"error\" && message.errorMessage) {\n\t\t// Skip messages matching known non-overflow patterns (e.g. throttling / rate-limit)\n\t\tconst isNonOverflow = NON_OVERFLOW_PATTERNS.some((p) => p.test(message.errorMessage!));\n\t\tif (!isNonOverflow && OVERFLOW_PATTERNS.some((p) => p.test(message.errorMessage!))) {\n\t\t\treturn true;\n\t\t}\n\t}\n\n\t// Case 2: Silent overflow (z.ai style) - successful but usage exceeds context\n\tif (contextWindow && message.stopReason === \"stop\") {\n\t\tconst inputTokens = message.usage.input + message.usage.cacheRead;\n\t\tif (inputTokens > contextWindow) {\n\t\t\treturn true;\n\t\t}\n\t}\n\n\t// Case 3: Length-stop overflow (Xiaomi MiMo style) - server truncates oversized input\n\t// to fit the context window, leaving no room for output. Returns stopReason \"length\"\n\t// with output=0 and input+cacheRead filling the context window.\n\tif (contextWindow && message.stopReason === \"length\" && message.usage.output === 0) {\n\t\tconst inputTokens = message.usage.input + message.usage.cacheRead;\n\t\tif (inputTokens >= contextWindow * 0.99) {\n\t\t\tr"
+},
+{
+"h": "T10-034",
+"text": "vendor/pi-mono/packages/ai/test/context-overflow.test.ts#L309-L371\nconst result = await testContextOverflow(model, process.env.CEREBRAS_API_KEY!);\n\t\t\tlogResult(result);\n\n\t\t\texpect(result.stopReason).toBe(\"error\");\n\t\t\t// Cerebras returns status code with no body (400, 413, or 429 for token rate limit)\n\t\t\texpect(result.errorMessage).toMatch(/4(00|13|29).*\\(no body\\)/i);\n\t\t\texpect(isContextOverflow(result.response, model.contextWindow)).toBe(true);\n\t\t}, 120000);\n\t});\n\n\t// =============================================================================\n\t// Hugging Face\n\t// Uses OpenAI-compatible Inference Router\n\t// =============================================================================\n\n\tdescribe.skipIf(!process.env.HF_TOKEN)(\"Hugging Face\", () => {\n\t\tit(\"Kimi-K2.5 - should detect overflow via isContextOverflow\", async () => {\n\t\t\tconst model = getModel(\"huggingface\", \"moonshotai/Kimi-K2.5\");\n\t\t\tconst result = await testContextOverflow(model, process.env.HF_TOKEN!);\n\t\t\tlogResult(result);\n\n\t\t\texpect(result.stopReason).toBe(\"error\");\n\t\t\texpect(isContextOverflow(result.response, model.contextWindow)).toBe(true);\n\t\t}, 120000);\n\t});\n\n\t// =============================================================================\n\t// Together AI\n\t// Uses OpenAI-compati"
+},
+{
+"h": "T10-035",
+"text": "vendor/pi-mono/packages/coding-agent/src/core/agent-session.ts#L2-L50\n/**\n * AgentSession - Core abstraction for agent lifecycle and session management.\n *\n * This class is shared between all run modes (interactive, print, rpc).\n * It encapsulates:\n * - Agent state access\n * - Event subscription with automatic session persistence\n * - Model and thinking level management\n * - Compaction (manual and auto)\n * - Bash execution\n * - Session switching and branching\n *\n * Modes use this class and add their own I/O layer on top.\n */\n\nimport { existsSync, mkdirSync, readFileSync, writeFileSync } from \"node:fs\";\nimport { basename, dirname } from \"node:path\";\nimport type {\n\tAgent,\n\tAgentEvent,\n\tAgentMessage,\n\tAgentState,\n\tAgentTool,\n\tThinkingLevel,\n} from \"@earendil-works/pi-agent-core\";\nimport type { AssistantMessage, ImageContent, Message, Model, TextContent } from \"@earendil-works/pi-ai\";\nimport {\n\tclampThinkingLevel,\n\tcleanupSessionResources,\n\tgetSupportedThinkingLevels,\n\tisContextOverflow,\n\tmodelsAreEqual,\n\tresetApiProviders,\n\tstreamSimple,\n} from \"@earendil-works/pi-ai\";\nimport { theme } from \"../modes/interactive/theme/theme.ts\";\nimport { stripFrontmatter } from \"../utils/frontmatter.ts\";\nimport { resolvePath } from \"../utils/paths.ts\";\nimport { sleep } "
+},
+{
+"h": "T10-036",
+"text": "tools/experiments/bootstrap-agent/runner.mjs#L1-L10\nimport { spawn } from \"node:child_process\";\nimport { mkdir, writeFile } from \"node:fs/promises\";\nimport { performance } from \"node:perf_hooks\";\nimport { cases, corpusText, allEvidence, catalog } from \"./fixtures.mjs\";\n\nexport const MODEL = \"clover-plexus/claude-fable-5\";\n// JSONL contains the full event envelope plus deltas; bound it, but leave room for a\n// normal bounded plan. Overflow is a hard failure, never a fabricated truncation.\nconst DEFAULT_TIMEOUT = 45_000, DEFAULT_OUTPUT = 256_000;\nexport const arms = [\"main-only\", \"combined-selector\", \"selector-drafter\", \"parallel-selectors-drafter\"];"
+},
+{
+"h": "T10-037",
+"text": "vendor/pi-mono/packages/ai/test/context-overflow.test.ts#L52-L77\nasync function testContextOverflow(model: Model<any>, apiKey: string): Promise<OverflowResult> {\n\tconst overflowContent = generateOverflowContent(model.contextWindow);\n\n\tconst context: Context = {\n\t\tsystemPrompt: \"You are a helpful assistant.\",\n\t\tmessages: [\n\t\t\t{\n\t\t\t\trole: \"user\",\n\t\t\t\tcontent: overflowContent,\n\t\t\t\ttimestamp: Date.now(),\n\t\t\t},\n\t\t],\n\t};\n\n\tconst response = await complete(model, context, { apiKey });\n\n\tconst hasUsageData = response.usage.input > 0 || response.usage.cacheRead > 0;\n\n\treturn {\n\t\tprovider: model.provider,\n\t\tmodel: model.id,\n\t\tcontextWindow: model.contextWindow,\n\t\tstopReason: response.stopReason,\n\t\terrorMessage: response.errorMessage,\n\t\tusage: response.usage,\n\t\thasUsageData,\n\t\tresponse,\n\t};\n}"
+},
+{
+"h": "T10-038",
+"text": "vendor/pi-mono/packages/ai/test/context-overflow.test.ts\n});"
+},
+{
+"h": "T10-039",
+"text": "vendor/pi-mono/packages/coding-agent/docs/json.md#L16-L20\nring[]; followUp: readonly string[] }\n  | { type: \"compaction_start\"; reason: \"manual\" | \"threshold\" | \"overflow\" }\n  | { type: \"compaction_end\"; reason: \"manual\" | \"threshold\" | \"overflow\"; result: CompactionResult | undefined; aborted: boolean; willRetry: boolean; errorMessage?: string }\n  | { type: \"auto_retry_start\"; attempt: number; maxAttempts: number; delayMs: number; errorMessage: string }\n  | { type: \"auto_retry_end\"; success: boolean; attempt: number; finalError?: string };\n```\n\n`queue"
+}
+]
+},
+{
+"qid": "T16",
+"query": "dispatchRegisteredHook",
+"need": "Continue do it",
+"next_files": [
+"extensions/trebol-toggle/index.ts",
+"packages/tools/taskmanage/test/pi-extension.test.ts",
+"tools/e2e/trebol-toggle-session.mjs"
+],
+"edited_or_committed": [],
+"items": [
+{
+"h": "T16-000",
+"text": "docs/architecture/independent-extensions.md#L257-L265\nshortcut adapter\n\nFallback hook dispatch now requires a real session ID, preserves distinct\nsame-group/event registrations, and selects only live handlers belonging to\nthat session. One lifecycle owner per ExtensionAPI attaches/removes its handler\nset on start/shutdown. This fixes the old mismatch where native Pi retained\nmultiple handlers but manual dispatch replaced all except the last. It also\nprevents disabled/reloaded extensions' handlers remaining in fallback dispatch.\nIt does NOT turn th"
+},
+{
+"h": "T16-001",
+"text": "docs/plans/active/hook-ordering-first-principles.md#L83-L105\nconsequence:\n\n```text\ntool_call handler is not a TUI insertion point.\ntool_result handler is not a TUI insertion point.\nsendMessage is a queued custom transcript message.\n```\n\n## 4. Current Pi-Swarm Data Path\n\n```text\nPi tool_call\n  -> hook-state registerHook wrapper\n  -> actual hook handler\n  -> recordHook()\n  -> addHookObservation()\n  -> setHookPresenter()\n  -> pi.sendMessage(display=true)\n  -> queued custom message\n  -> appears after tool output\n```\n\nThis explains the observed ordering. The"
+},
+{
+"h": "T16-002",
+"text": ".pi/lib/runtime/hook-state.ts\nFile: .pi/lib/runtime/hook-state.ts\n{\n  \"document_type\": \"file_summary\",\n  \"file_path\": \"/home/swarm/trebol-corpus-v2/.pi/lib/runtime/hook-state.ts\",\n  \"language\": \"javascript\",\n  \"total_lines\": 228,\n  \"imports\": [\n    \"./hook-correction.ts\",\n    \"./hook-observations.ts\"\n  ],\n  \"entities\": [\n    {\n      \"type\": \"function\",\n      \"name\": \"registerSessionHandler\",\n      \"start_line\": 16,\n      \"end_line\": 16\n    },\n    {\n      \"type\": \"function\",\n      \"name\": \"normalizeState\",\n      \"start_line\": 43,\n      \"end_line\": 43\n    },\n    {\n      \"type\": \"function\",\n      \"name\": \"hookState\",\n      \"start_line\": 54,\n      \"end_line\": 54\n    },\n    {\n      \"type\": \"function\",\n      \"name\": \"setHookPi\",\n      \"start_line\": 55,\n      \"end_line\": 55\n    },\n    {\n      \"type\": \"function\",\n      \"name\": \"setHookPresenter\",\n      \"start_line\": 56,\n      \"end_line\": 56\n    },\n    {\n      \"type\": \"function\",\n      \"name\": \"isHookEnabled\",\n      \"start_line\": 67,\n      \"end_line\": 67\n    },\n    {\n      \"type\": \"function\",\n      \"name\": \"toggleHook\",\n      \"start_line\": 68,\n      \"end_line\": 68\n    },\n    {\n      \"type\": \"function\",\n      \"name\": \"setHookVisibility\",\n      \"start_line\": 69,\n      \"en"
+},
+{
+"h": "T16-003",
+"text": ".pi/lib/runtime/bootstrap-dispatch.ts#L11-L52\nconst sessionId = (ctx: any) => ctx?.sessionManager?.getSessionId?.();\nexport function registerBootstrapHandoff(pi: any, tool: any) {\n  if (tool.name !== \"Skill\" && tool.name !== \"TaskManage\") return;\n  const owner = {};\n  let id: string | undefined;\n  const release = () => {\n    if (!id) return;\n    const tools = sessions.get(id);\n    if (tools?.get(tool.name)?.owner === owner) tools.delete(tool.name);\n    if (tools?.size === 0) sessions.delete(id);\n    id = undefined;\n  };\n  pi.on(\"session_start\", (_event: any, ctx: any) => {\n    release(); id = sessionId(ctx); if (!id) return;\n    const tools = sessions.get(id) ?? new Map();\n    tools.set(tool.name, { owner, tool }); sessions.set(id, tools);\n  });\n  pi.on(\"session_shutdown\", release);\n}\nexport async function dispatchBootstrapHandoff(name: \"Skill\" | \"TaskManage\", input: any, signal: AbortSignal, ctx: any, active: string[]) {\n  if (signal.aborted) throw new Error(\"Bootstrap cancelled\");\n  if (!active.includes(name)) throw new Error(`${name} is not active; bootstrap cannot widen tool permissions`);\n  if (typeof ctx?.executeTool === \"function\") {\n    const outcome = await ctx.executeTool(name, input, { signal });\n    if (signal.abor"
+},
+{
+"h": "T16-004",
+"text": ".pi/lib/runtime/hook-state.ts#L1-L15\nimport { addHookObservation } from \"./hook-observations.ts\";\nimport { installHookCorrection, correctionBlock } from \"./hook-correction.ts\";\n\nexport type HookGroup = \"taskmanage\" | \"autogenskills\" | \"swarm-prompt\" | \"disk-hooks\" | \"annoyance\" | \"structure-guard\";\nexport type HookOutcome = \"executed\" | \"blocked\" | \"failed\" | \"skipped\";\nexport interface HookRecord { id: string; group: HookGroup; event: string; at: string; enabled: boolean; outcome: HookOutcome; tool?: string; toolCallId?: string; reason?: string; output?: string; }\ninterface State { enabled: Record<string, boolean>; visible: boolean; recent: HookRecord[]; counts: { registered: number; executed: number; blocked: number; failed: number; skipped: number }; }\n\nconst KEY = Symbol.for(\"pi-swarm-hook-state\");\ntype Shared = { state: State; pi?: any; present?: (data: any) => void };\nconst root = globalThis as typeof globalThis & { [KEY]?: Shared };\nconst shared: Shared = root[KEY] ?? (root[KEY] = { state: { enabled: {}, visible: false, recent: [], counts: { registered: 0, executed: 0, blocked: 0, failed: 0, skipped: 0 } } });\ntype RegisteredHandler = { session?: string; event: string; handler: (payload: any, ctx: any) => Promi"
+},
+{
+"h": "T16-005",
+"text": "AGENTS.md\nwarm-thinking.ts` | Presentation/config only. |\n\nFor a hook bug, first identify the Pi event (`before_agent_start`, `tool_call`,\n`tool_result`, `turn_start/end`, `session_start/shutdown`, or compaction), then\nthe hook group, then the domain owner. Hook execution, policy, and rendering\nare separate seams and should remain decoupled.\n\n### Package source locator\n\n| Package | Primary source files | Change here when\u2026 |\n| --- | --- | --- |\n| `packages/tools/agents` | `packages/tools/agents/src/index.t"
+},
+{
+"h": "T16-006",
+"text": "vendor/pi-mono/packages/agent/docs/agent-harness.md#L169-L174\nurn a result.\n- Result-producing events are reduced by typed reducer tables; app-specific hooks add reducers only for app-specific result-producing events.\n- Hook registration provenance is sidecar metadata on the registration. Resource and tool provenance belongs on app-specific concrete value types.\n- Hook context should be a plain object of facades, not raw internals or late-bound getter mazes.\n\nEvent payloads describe what is happening. Harness getters describe latest config for future snaps"
+},
+{
+"h": "T16-007",
+"text": ".pi/test/runtime/session-hook-dispatch.test.ts#L1-L23\nimport { expect, it, vi } from \"vitest\";\nimport { dispatchRegisteredHook, registerHook } from \"../../lib/runtime/hook-state.ts\";\nfunction host(id: string) {\n  const handlers = new Map<string, Function[]>();\n  const pi = { on: (name: string, fn: Function) => handlers.set(name, [...handlers.get(name) ?? [], fn]), appendEntry: vi.fn() };\n  const ctx = { sessionManager: { getSessionId: () => id } };\n  return { pi, ctx, emit: async (name: string) => { for (const fn of handlers.get(name) ?? []) await fn({}, ctx); } };\n}\nit(\"preserves same-group handlers and isolates sessions/shutdown\", async () => {\n  const a = host(\"hook-a\"), b = host(\"hook-b\"); const first = vi.fn(), second = vi.fn(), other = vi.fn();\n  registerHook(a.pi, \"taskmanage\", \"tool_call\", first);\n  registerHook(a.pi, \"taskmanage\", \"tool_call\", second);\n  registerHook(b.pi, \"taskmanage\", \"tool_call\", other);\n  try {\n    await a.emit(\"session_start\"); await b.emit(\"session_start\");\n    await dispatchRegisteredHook(\"tool_call\", { toolName: \"Read\", toolCallId: \"one\" }, a.ctx);\n    expect(first).toHaveBeenCalledTimes(1); expect(second).toHaveBeenCalledTimes(1); expect(other).not.toHaveBeenCalled();\n    await a.emit(\"session_shutdo"
+},
+{
+"h": "T16-008",
+"text": ".pi/lib/runtime/hook-state.ts#L16-L42\nfunction registerSessionHandler(pi: any, entry: RegisteredHandler): void {\n  let owner = hookOwners.get(pi);\n  if (!owner) {\n    owner = { entries: [] }; hookOwners.set(pi, owner);\n    const owned = owner;\n    const release = () => {\n      for (const item of owned.entries) {\n        const index = registeredHandlers.indexOf(item);\n        if (index >= 0) registeredHandlers.splice(index, 1);\n        item.session = undefined;\n      }\n      owned.session = undefined;\n    };\n    pi.on(\"session_start\", (_event: any, ctx: any) => {\n      release();\n      const id = ctx?.sessionManager?.getSessionId?.();\n      if (typeof id !== \"string\" || !id) return;\n      owned.session = id;\n      for (const item of owned.entries) { item.session = id; registeredHandlers.push(item); }\n    });\n    pi.on(\"session_shutdown\", release);\n  }\n  owner.entries.push(entry);\n  if (owner.session) { entry.session = owner.session; registeredHandlers.push(entry); }\n}\n// Pi /reload can retain Symbol.for state from an older extension module. Normalize\n// it before any handler registration so upgrades never fail on missing fields."
+},
+{
+"h": "T16-009",
+"text": "docs/plans/archive/pi-swarm-hook-rendering-surgical.md#L786-L793\ns built-in tool behavior\n- a hook result is being returned as model-visible prose\n- an event is assumed to exist but is absent in the installed runtime\n- parallel calls cannot be isolated\n- the solution requires modifying unrelated extensions\n```\n\nThe correct fix is a first-class per-tool hook-slot bridge, not another message, timer, or global queue."
+},
+{
+"h": "T16-010",
+"text": "docs/architecture/independent-extensions.md#L235-L243\neview registry,\nterminal-input interception, or post-settlement correction wake remains. This\nintentionally changes early interruption timing, not execution authorization.\n\nLifecycle handoff tool registrations are now scoped by actual session ID, with\nowner-checked replacement and shutdown disposal. Bootstrap's native executeTool\npath is unchanged. The supervisor fallback still dispatches Trebol's own hook\nregistry, not every third-party native hook: this limitation is not solved by\nsession scop"
+},
+{
+"h": "T16-011",
+"text": ".pi/test/runtime/session-hook-dispatch.test.ts#L25-L26\n});\nit(\"rejects fallback dispatch without session identity\", async () => {\n  await expect(dispatchRegisteredHook(\"tool_call\", {}, {})).rejects.toThrow(\"session identity\");\n});"
+},
+{
+"h": "T16-012",
+"text": ".pi/lib/runtime/hook-state.ts\n}"
+},
+{
+"h": "T16-013",
+"text": ".pi/lib/runtime/hook-state.ts#L174-L192\n// context, so queue them explicitly as hidden custom messages.\n      if (event === \"turn_end\" && typeof result?.message === \"string\" && result.message.trim()) {\n        pi.sendMessage?.({ customType: \"swarm-hook-nudge\", content: result.message, display: false }, { triggerTurn: false });\n      }\n      return undefined;\n    } catch (error) {\n      recordHook(group, event, payload, \"failed\", error instanceof Error ? error.message : String(error)); persistHookState(pi); throw error;\n    }\n  };\n  // Each native registration remains distinct, even within the same group.\n  // Only live registrations for the caller's session participate in fallback\n  // dispatch. A reload/disabling an extension must not retain its closures.\n  registerSessionHandler(pi, { event, handler: callback });\n  pi.on(event, callback);\n}\n\n/** Compatibility-only supervisor dispatch for contexts without executeTool.\n * Native nested tools use Pi's executor instead. This registry contains only\n * Trebol hooks, never an assertion that all third-party host hooks are covered.\n */"
+},
+{
+"h": "T16-014",
+"text": "tern-plugins/code-puppy/python-plugin/README.md#L47-L54\n_response_hook.py` (15 tests) covers the hook\n  contract, fallback, exception isolation, subagent suppression, and both the\n  `display` and `AgentResponseMessage` routes.\n- Plugin: `tests/test_register_callbacks.py` (18 tests) installs the plugin into\n  a temp user dir and loads it with `_load_user_plugins`. It covers\n  registration, the hello-order rule, probe gating, claim and fallback,\n  and no duplicate output through the core display path.\n- Live smoke: `tern -e` pane, real loader, `TERM_PR"
+},
+{
+"h": "T16-015",
+"text": ".pi/lib/runtime/hook-state.ts#L194-L204\nexport async function dispatchRegisteredHook(event: string, payload: any, ctx: any = {}): Promise<any> {\n  const session = ctx?.sessionManager?.getSessionId?.();\n  if (typeof session !== \"string\" || !session) throw new Error(\"Hook dispatch requires an active session identity\");\n  let merged: any;\n  for (const entry of [...registeredHandlers]) {\n    if (entry.event !== event || entry.session !== session) continue;\n    const result = await entry.handler(payload, ctx);\n    if (result?.block === true) return result;\n    if (result && typeof result === \"object\") merged = { ...(merged ?? {}), ...result };\n  }\n  return merged;\n}"
+},
+{
+"h": "T16-016",
+"text": ".pi/lib/runtime/hook-state.ts#L126-L173\nexport function hookTurnGateOpen(ctx: any): boolean { return (turnCounts.get(turnSessionKey(ctx)) ?? 0) > HOOK_WARMUP_TURNS; }\n\nexport function registerHook(pi: any, group: HookGroup, event: string, handler: any) {\n  installTurnCounter(pi);\n  installHookCorrection(pi);\n  normalizeState();\n  shared.state.counts.registered++;\n  const callback = async (payload: any, ctx: any) => {\n    if (!hookTurnGateOpen(ctx)) return;\n    if (!isHookEnabled(group)) { recordHook(group, event, payload, \"skipped\", \"hook group disabled\"); persistHookState(pi); return; }\n    try {\n      const result = await handler(payload, ctx);\n      const hookPayload = result?.hookName ? { ...payload, hookName: result.hookName } : payload;\n      recordHook(\n        group,\n        event,\n        hookPayload,\n        result?.block === true ? \"blocked\" : \"executed\",\n        result?.block === true ? result.reason ?? \"blocked by hook\" : undefined,\n        result?.hookOutput,\n      );\n      persistHookState(pi);\n      // Hook messages are not transcript messages. Pi treats a returned\n      // `message` as model-visible context, which produced prose such as\n      // \"hook completed successfully\" after every successful hook. "
+},
+{
+"h": "T16-017",
+"text": "AGENTS.md\nroup / concern | Registration | Implementation / events |\n| --- | --- | --- |\n| Central hook state and ordering | `.pi/lib/runtime/hook-state.ts` | Registration, enablement, persistence, and visibility. |\n| Same-session hook correction | `.pi/lib/runtime/hook-correction.ts` | Authoritative tool_call denial with same-step feedback and bounded repeat escalation. No speculative abort or settlement wake. |\n| Prompt hook `packages/context/prompt` | `extensions/swarm-prompt/extension.ts` | `before_age"
+},
+{
+"h": "T16-018",
+"text": "docs/plans/archive/pi-swarm-hook-rendering-surgical.md#L415-L432\nl hook-slot field\n- render slots before/after the existing tool content\n- leave all existing tools unchanged when slots are absent\n- avoid importing Pi-Swarm into Pi\n- expose a generic callback/interface, not Swarm-specific names\n\nPi-Swarm then supplies the slots through a small integration bridge.\n\n---\n\n## 6. Exact Event/Data Flow\n\n### Pre-hook flow\n\n```text\n1. Pi emits tool_call(toolCallId, toolName, input)\n2. Pi-Swarm adapter receives event\n3. Budget/task hooks execute in registered priority"
+},
+{
+"h": "T16-019",
+"text": "extensions/swarm-disk-hooks/extension.ts#L20-L31\nconst result = await runtime.dispatch(e, eventName, c);\n    return canBlock && result.blocked ? { block: true, reason: result.blocked.message ?? `Blocked by ${result.blocked.hook}`, hookOutput: result.hookOutput } : result.hookOutput ? { hookOutput: result.hookOutput } : undefined;\n  };\n  registerHook(pi, \"disk-hooks\", \"tool_call\", (e:any,c:any) => dispatch(\"tool_call\", e, c, true));\n  registerHook(pi, \"disk-hooks\", \"tool_result\", (e:any,c:any) => dispatch(\"tool_result\", e, c));\n  registerHook(pi, \"disk-hooks\", \"session_start\", (e:any,c:any) => dispatch(\"session_start\", e, c));\n  registerHook(pi, \"disk-hooks\", \"session_shutdown\", (e:any,c:any) => dispatch(\"session_shutdown\", e, c));\n  registerHook(pi, \"disk-hooks\", \"before_agent_start\", (e:any,c:any) => dispatch(\"user.prompt_submit\", e, c));\n  registerHook(pi, \"disk-hooks\", \"session_before_compact\", (e:any,c:any) => dispatch(\"compact.before\", e, c));\n  pi.registerCommand?.(\"swarm-disk-hooks\",{description:\"Reload and inspect disk hooks\",handler:async(_a:string,ctx:any)=>ctx.ui?.notify?.(`Loaded ${loadFiles(cwd,home).length} disk hooks`,\"info\")}); return runtime;\n}\nexport default function swarmDiskHooksExtension(pi:any){return regist"
+},
+{
+"h": "T16-020",
+"text": "docs/plans/active/hook-ordering-first-principles.md#L105-L122\nput\n```\n\nThis explains the observed ordering. The label is `pre`, but the display operation is deferred.\n\nCurrent code facts:\n\n```text\n.pi/lib/runtime/hook-state.ts\n  recordHook() calls addHookObservation()\n  recordHook() calls shared.present()\n\nextensions/hooks/extension.ts\n  setHookPresenter() calls pi.sendMessage()\n\nextensions/hooks/extension.ts\n  registerHookRenderers() is intentionally empty\n\ncodemode\n  registers its own tool definition\n  has its own renderSummary result rendering\n  is not"
+},
+{
+"h": "T16-021",
+"text": ".pi/lib/runtime/bootstrap-dispatch.ts#L1-L10\n// Structural host/test adapters intentionally accept heterogeneous event and tool payloads; runtime guards narrow the fields used here.\nimport { randomUUID } from \"node:crypto\";\nimport { dispatchRegisteredHook } from \"./hook-state.ts\";\n\n// Explicit registration bridge, limited to the two bootstrap handoff tools.\n// Adapters replace their registration on reload; this does not create managers.\n// Pi loads extensions in separate jiti module graphs. Share only registrations,\n// never domain state; owning adapters refresh these definitions on each load.\nconst key = Symbol.for(\"pi-swarm-session-handoff-tools\");\nconst sessions: Map<string, Map<string, { owner: object; tool: any }>> = (globalThis as any)[key] ??= new Map();"
+}
+]
+},
+{
+"qid": "T22",
+"query": "LICENSE.pi-btw",
+"need": "and then go ahead and make a PR and with this.",
+"next_files": [
+"packages/tools/taskmanage/test/pi-extension.test.ts",
+"tools/install/check-load.mjs",
+"tools/repo/extension-moves.json"
+],
+"edited_or_committed": [],
+"items": [
+{
+"h": "T22-000",
+"text": "tern-plugins/code-puppy/README.md#L55-L55\npi-host.md, ui.md; tern-sdk/api/tern.d.luau."
+},
+{
+"h": "T22-001",
+"text": "packages/context/skills/src/skillmd.ts#L35-L48\n}\nexport const emptyMetadata = (): SkillMetadata => ({\n  name: \"\", description: \"\", version: \"\", author: \"\", category: \"\", tags: [], dependencies: [], enabled: false, priority: 0,\n  icon: \"\", homepage: \"\", license: \"\", compatibility: \"\", allowedTools: \"\", whenToUse: \"\", arguments: [], argumentHint: \"\",\n  context: \"\", model: \"\", disableModelInvocation: false, userInvocable: false, effort: \"\",\n});\n\ntype FieldKind = \"string\" | \"bool\" | \"int\" | \"strings\";\nconst FIELDS: Record<string, [keyof SkillMetadata, FieldKind]> = {\n  name: [\"name\", \"string\"], description: [\"description\", \"string\"], version: [\"version\", \"string\"], author: [\"author\", \"string\"],\n  category: [\"category\", \"string\"], tags: [\"tags\", \"strings\"], dependencies: [\"dependencies\", \"strings\"], enabled: [\"enabled\", \"bool\"],\n  priority: [\"priority\", \"int\"], icon: [\"icon\", \"string\"], homepage: [\"homepage\", \"string\"], license: [\"license\", \"string\"],\n  compatibility: [\"compatibility\", \"string\"], \"allowed-tools\": [\"allowedTools\", \"string\"], when_to_use: [\"whenToUse\", \"string\"],\n  arguments: [\"arguments\", \"strings\"], \"argument-hint\": [\"argumentHint\", \"string\"], context: [\"context\", \"string\"], model: [\"model\", \"string\"],\n  \"disable-mo"
+},
+{
+"h": "T22-002",
+"text": "docs/architecture/independent-extensions.md#L114-L124\ncs` | \u2014 | /metrics | agent_end, agent_settled, agent_start, message_end, session_before_compact, session_shutdown, session_start |\n| `clover-startup` | \u2014 | \u2014 | session_shutdown, session_start |\n| `swarm-themes` | \u2014 | \u2014 | session_start |\n| `swarm-tools-status` | \u2014 | /swarm-tools | \u2014 |\n| `swarm-btw` | \u2014 | /btw | \u2014 |\n| `swarm-image-paste` | \u2014 | \u2014 | \u2014 |\n| `green-chat-input` | \u2014 | \u2014 | session_start |\n\n## Settings migration\n\nOld exact filters reference `.trebol-guards` paths and will not match new pat"
+},
+{
+"h": "T22-003",
+"text": "docs/plans/active/pi-tmux-resurrection-and-btw-fix.md#L43-L50\nan array. This is independent of tmux work and directly addresses the\n   reported exception.\n2. **Add focused regression coverage.** Add a small source-level/contract test\n   or validation that the loader receives an array and that the `/btw` manifest\n   remains registered. This depends on step 1.\n3. **Install the Pi mapping extension.** Use the official npm package and reload\n   Pi. Verify its mapping directory and extension registration. This depends on\n   the live-install decision and does"
+},
+{
+"h": "T22-004",
+"text": "AGENTS.md#L240-L242\nider limits or policy gates are changed. |\n| `ask_user_question` | `extensions/ask-user/extension.ts` | Ask-user uses `eko24ive/pi-ask` at commit `49482b7e5d0d57be8af1db81f490f6e860792cfb` (MIT; LICENSE beside it). Private implementation, docs and tests live within `extensions/ask-user/`. The canonical tool name remains `ask_user_question` with the new questionnaire schema. |\n| OSC 7501 program status | `extensions/swarm-program-status/extension.ts` | `.pi/lib/runtime/program-status.ts` emitter;"
+},
+{
+"h": "T22-005",
+"text": "vendor/pi-mono/README.md\n## License\n\nMIT"
+},
+{
+"h": "T22-006",
+"text": "extensions/swarm-btw/extension.ts#L1-L22\nimport { contentText } from \"@earendil-works/pi-ai\";\nimport {\n\tbuildSessionContext,\n\tconvertToLlm,\n\tcreateAgentSession,\n\tDefaultResourceLoader,\n\tgetAgentDir,\n\tgetMarkdownTheme,\n\tSessionManager,\n\tSettingsManager,\n\ttype AgentSession,\n\ttype ExtensionAPI,\n\ttype ExtensionCommandContext,\n} from \"@earendil-works/pi-coding-agent\";\nimport { Input, Key, Markdown, matchesKey, type Component, type TUI, type Theme } from \"@earendil-works/pi-tui\";\n\n// Pi-Swarm-owned /btw side channel. It is deliberately in-tree and has no\n// runtime dependency on an upstream repository or package.\n// This implementation is derived from the Apache-2.0 pi-btw design; see\n// LICENSE.pi-btw for the required notice.\nconst SIDE_PROMPT = \"You are a temporary, read-only side agent. Answer directly using the current session as background context. You may inspect files, but never edit them or claim to have changed anything.\";\ntype Entry = { question: string; answer: string; error?: string };"
+},
+{
+"h": "T22-007",
+"text": ".pi/test/ui/swarm-btw.test.ts#L1-L16\nimport { describe, expect, it, vi } from \"vitest\";\n// The Pi host packages are supplied at runtime and are not installed here, so\n// stub the surface BtwView touches. Mirrors .pi/test/runtime/bootstrap-task-first.test.ts.\nvi.mock(\"@earendil-works/pi-ai\", () => ({ contentText: (c: unknown) => typeof c === \"string\" ? c : \"\" }));\nvi.mock(\"@earendil-works/pi-coding-agent\", () => ({ getMarkdownTheme: () => ({}) }));\nvi.mock(\"@earendil-works/pi-tui\", () => ({\n  Key: { escape: \"escape\" },\n  matchesKey: (data: string, key: string) => key === \"escape\" && data === \"\\x1b\",\n  // Minimal editable line: BtwView only sets/reads a value and renders one row.\n  Input: class { value = \"\"; onSubmit?: (value: string) => void;\n    setValue(v: string) { this.value = v; }\n    handleInput(data: string) { data === \"\\r\" ? this.onSubmit?.(this.value) : (this.value += data); }\n    render() { return [this.value]; } },\n  Markdown: class { constructor(private readonly text: string) {} render() { return [this.text]; } },\n}));\nimport { BtwView } from \"../../../extensions/swarm-btw/extension.ts\";"
+},
+{
+"h": "T22-008",
+"text": "docs/plans/archive/modular-pi-snapshot.md#L109-L111\nes official Pi documentation and local Swarm\n  source paths.\n- Every commit is independently reviewable and has an explicit verification\n  result."
+},
+{
+"h": "T22-009",
+"text": "packages/tools/taskmanage/test/pi-extension.test.ts\n});"
+},
+{
+"h": "T22-010",
+"text": "docs/plans/active/memory-lifecycle-and-agent-guidance.md#L22-L22\neval libraries under `.pi/lib/context/`, keep extensions as registration/lifecycle adapters. Use Git common-dir repository identity, isolated worktree and explicit global scope. Preserve legacy session entries. Add immutable revision/correction/tombstone events, atomic writes, concurrent-write protection, evidence references and source hashes. Avoid two competing sources of truth: shared-memory compatibility reads/writes route through the same owning service or an explicit idempotent migration."
+},
+{
+"h": "T22-011",
+"text": "docs/plans/2026-09-06-global-install-pi-package.md#L75-L86\nlity locator (`ask-user`\n  skill row \u2192 new path), and the 30-tools description.\n\nGate: `npm test`; parity probe tool list == baseline 28 + `vault` (the\n`ask_user_question` name is interactive-only and gated the same as before);\n`git submodule status` shows only `vendor/opencode`;\n`rg -n 'pi-ask-user' --hidden -g '!vendor/**' -g '!docs/plans/**'` lists only\nprovenance headers and the LICENSE.\n\n### 2. `feat(install): root pi manifest, prepare build, runtime deps`\n\nRoot `package.json`:\n\n```json\n\"ke"
+},
+{
+"h": "T22-012",
+"text": "CHANGELOG.md#L21-L32\nions for the `/btw` side-question view.\n- Running-work detail view: PageUp/PageDown only scroll in detail mode.\n\n## [0.6.0] - 2026-10-07\n\n### Highlights\n\n- Replace the previous ask-user implementation with the MIT-licensed\n  `eko24ive/pi-ask` implementation in `extensions/ask-user`. Add structured\n  questionnaires, single/multi-select answers, custom answers, notes, review,\n  replay and settings. Run its 205 focused tests in CI.\n- Port local compaction and context changes to the independent exte"
+},
+{
+"h": "T22-013",
+"text": "extensions/swarm-btw/extension.ts\nFile: extensions/swarm-btw/extension.ts\n{\n  \"document_type\": \"file_summary\",\n  \"file_path\": \"/home/swarm/trebol-corpus-v2/extensions/swarm-btw/extension.ts\",\n  \"language\": \"javascript\",\n  \"total_lines\": 174,\n  \"imports\": [\n    \"@earendil-works/pi-tui\",\n    \"@earendil-works/pi-ai\"\n  ],\n  \"entities\": [\n    {\n      \"type\": \"function\",\n      \"name\": \"swarmBtw\",\n      \"start_line\": 24,\n      \"end_line\": 24\n    },\n    {\n      \"type\": \"function\",\n      \"name\": \"ensureSide\",\n      \"start_line\": 33,\n      \"end_line\": 33\n    },\n    {\n      \"type\": \"function\",\n      \"name\": \"ask\",\n      \"start_line\": 71,\n      \"end_line\": 71\n    },\n    {\n      \"type\": \"function\",\n      \"name\": \"open\",\n      \"start_line\": 97,\n      \"end_line\": 97\n    },\n    {\n      \"type\": \"function\",\n      \"name\": \"loader\",\n      \"start_line\": 40,\n      \"end_line\": 40\n    },\n    {\n      \"type\": \"function\",\n      \"name\": \"response\",\n      \"start_line\": 84,\n      \"end_line\": 84\n    },\n    {\n      \"type\": \"function\",\n      \"name\": \"closed\",\n      \"start_line\": 102,\n      \"end_line\": 102\n    },\n    {\n      \"type\": \"function\",\n      \"name\": \"line\",\n      \"start_line\": 169,\n      \"end_line\": 169\n    }\n  ],\n  \"entity_count\": {\n    \""
+},
+{
+"h": "T22-014",
+"text": "vendor/pi-mono/README.md#L1-L12\n<p align=\"center\">\n  <a href=\"https://pi.dev\">\n    <img alt=\"pi logo\" src=\"https://pi.dev/logo-auto.svg\" width=\"128\">\n  </a>\n</p>\n<p align=\"center\">\n  <a href=\"https://discord.com/invite/3cU7Bz4UPx\"><img alt=\"Discord\" src=\"https://img.shields.io/badge/discord-community-5865F2?style=flat-square&logo=discord&logoColor=white\" /></a>\n</p>\n<p align=\"center\">\n  <a href=\"https://pi.dev\">pi.dev</a> domain graciously donated by\n  <br /><br />\n  <a href=\"https://exe.dev\"><img src=\"packages/coding-agent/do"
+},
+{
+"h": "T22-015",
+"text": "extensions/ask-user/README.md#L3-L9\n# Ask-user\n\nIndependent Trebol extension for interactive clarification, powered by the MIT-licensed\n[eko24ive/pi-ask](https://github.com/eko24ive/pi-ask) implementation at\n`49482b7e5d0d57be8af1db81f490f6e860792cfb`. See LICENSE for copyright and terms.\n\nLoaded through `index.ts`, like the other Trebol extensions. The public tool remains\n`ask_user_question`; its questionnaire schema, UI, replay and settings come from\npi-ask. See `docs/contract.md` and `docs/configuration.md`. No nested repository"
+},
+{
+"h": "T22-016",
+"text": "vendor/pi-mono/packages/tui/src/tui.ts\n}"
+},
+{
+"h": "T22-017",
+"text": "extensions/swarm-btw/index.ts#L1-L2\nimport { trebolFactory } from \"../../.pi/lib/runtime/trebol-toggle.ts\";\nexport default trebolFactory(() => import(\"./extension.ts\"));"
+},
+{
+"h": "T22-018",
+"text": ".pi/test/ui/swarm-btw.test.ts\nFile: .pi/test/ui/swarm-btw.test.ts\n{\n  \"document_type\": \"file_summary\",\n  \"file_path\": \"/home/swarm/trebol-corpus-v2/.pi/test/ui/swarm-btw.test.ts\",\n  \"language\": \"javascript\",\n  \"total_lines\": 41,\n  \"imports\": [\n    \"../../../extensions/swarm-btw/extension.ts\",\n    \"vitest\"\n  ],\n  \"entities\": [\n    {\n      \"type\": \"function\",\n      \"name\": \"theme\",\n      \"start_line\": 18,\n      \"end_line\": 18\n    },\n    {\n      \"type\": \"function\",\n      \"name\": \"active\",\n      \"start_line\": 24,\n      \"end_line\": 24\n    },\n    {\n      \"type\": \"function\",\n      \"name\": \"idle\",\n      \"start_line\": 29,\n      \"end_line\": 29\n    },\n    {\n      \"type\": \"function\",\n      \"name\": \"view\",\n      \"start_line\": 35,\n      \"end_line\": 35\n    }\n  ],\n  \"entity_count\": {\n    \"functions\": 4,\n    \"classes\": 0,\n    \"methods\": 0,\n    \"components\": 0\n  },\n  \"entity_names\": {\n    \"functions\": [\n      \"theme\",\n      \"active\",\n      \"idle\",\n      \"view\"\n    ],\n    \"classes\": [],\n    \"components\": []\n  }\n}"
+},
+{
+"h": "T22-019",
+"text": "AGENTS.md\nnt_start` supplies bounded branch and tracked-worktree context; settled `agent_end` follows an explicit progress marker only while idle. No global provider limits or policy gates are changed. |\n| `ask_user_question` | `extensions/ask-user/extension.ts` | Ask-user uses `eko24ive/pi-ask` at commit `49482b7e5d0d57be8af1db81f490f6e860792cfb` (MIT; LICENSE beside it). Private implementation, docs and tests live within `extensions/ask-user/`. The canonical tool name remains `ask_user_question` with th"
+},
+{
+"h": "T22-020",
+"text": "docs/plans/active/pi-tmux-resurrection-and-btw-fix.md#L1-L15\n# Pi tmux resurrection and `/btw` fix\n\n## Goal\n\nMake Pi sessions in tmux recover the exact Pi JSONL session after a reboot or\ntmux-server restart, and fix the local `/btw` command failure:\n`appendSources.map is not a function`.\n\n## Low-level breakdown\n\n### `/btw` bug\n\n**Need:** the Pi `DefaultResourceLoader` contract for `appendSystemPrompt`.\nThe current vendored API declares it as `string[]`; the local extension passes a\nsingle joined string. During loader reload Pi calls `.map()` on that value"
+},
+{
+"h": "T22-021",
+"text": "extensions/swarm-btw/extension.ts#L104-L149\nvoid ctx.ui.custom<void>((tui, theme, _keys, done) => {\n\t\t\topening = false;\n\t\t\tfinish = done;\n\t\t\tcloseView = () => {\n\t\t\t\tif (closed) return;\n\t\t\t\tclosed = true;\n\t\t\t\tif (overlayGeneration === generation) {\n\t\t\t\t\tview = undefined;\n\t\t\t\t\tcloseView = undefined;\n\t\t\t\t\tactive = undefined;\n\t\t\t\t}\n\t\t\t\topening = false;\n\t\t\t\tdone();\n\t\t\t};\n\t\t\tview = new BtwView(tui, theme, () => entries, () => active, (question) => void ask(ctx, question), () => { void side?.abort(); }, () => closeView?.());\n\t\t\treturn view;\n\t\t}, {\n\t\t\toverlay: true,\n\t\t\toverlayOptions: { width: \"78%\", minWidth: 48, maxHeight: \"78%\", anchor: \"top-center\", margin: { top: 1, left: 2, right: 2 } },\n\t\t\tonHandle: () => undefined,\n\t\t}).catch((error) => {\n\t\t\tif (overlayGeneration === generation) {\n\t\t\t\topening = false;\n\t\t\t\tview = undefined;\n\t\t\t\tcloseView = undefined;\n\t\t\t}\n\t\t\tctx.ui.notify(error instanceof Error ? error.message : String(error), \"error\");\n\t\t}).finally(() => {\n\t\t\t// custom() also resolves when the host closes the overlay. Always\n\t\t\t// release our ownership, but never tear down a newer instance.\n\t\t\tif (overlayGeneration === generation) {\n\t\t\t\topening = false;\n\t\t\t\tview = undefined;\n\t\t\t\tcloseView = undefined;\n\t\t\t\tactive = undefined;"
+},
+{
+"h": "T22-022",
+"text": "docs/plans/2026-09-06-global-install-pi-package.md#L62-L70\npi/extensions/30-tools/ask-user/` with `index.ts`,\n  `single-select-layout.ts`, `LICENSE` (MIT, Enzo Lucchesi), and\n  `skills/ask-user/` (SKILL.md + reference), copied from the submodule at\n  705fdc6 (v0.15.0). Each `.ts` gets a provenance header naming the upstream\n  repo, tag, commit, and license.\n- Fork edits, all in `index.ts`: replace the `createRequire`/`package.json`\n  version lookup (`:37-39`) with `const ASK_USER_VERSION = \"0.15.0+pi-swarm\"`;\n  nothing else changes.\n- Delete the adapter"
+},
+{
+"h": "T22-023",
+"text": ".pi/lib/policy/project-structure.ts#L37-L48\nconst BASE_ROOT_DIRS = [\".git\", \".project\", \"docs\", \"src\", \"tests\"];\n\nconst TIER_ROOT_FILES: Record<ProjectTier, string[]> = {\n  demo: [],\n  product: [\"AGENTS.md\", \"CHANGELOG.md\", \"LICENSE\", \".env.example\"],\n  platform: [\"AGENTS.md\", \"CHANGELOG.md\", \"LICENSE\", \".env.example\", \"CONTRIBUTING.md\", \"SECURITY.md\"],\n};\n\nconst TIER_ROOT_DIRS: Record<ProjectTier, string[]> = {\n  demo: [],\n  product: [\"scripts\"],\n  platform: [\"scripts\", \"infra\", \"knowledge\", \".github\"],\n};"
+},
+{
+"h": "T22-024",
+"text": "vendor/pi-mono/packages/coding-agent/docs/skills.md#L139-L146\nter-required):\n\n| Field | Required | Description |\n|-------|----------|-------------|\n| `name` | Yes | Max 64 chars. Lowercase a-z, 0-9, hyphens. Unlike the standard, Pi does not require this to match the parent directory because that standard requirement is suboptimal for shared skill directories. |\n| `description` | Yes | Max 1024 chars. What the skill does and when to use it. |\n| `license` | No | License name or reference to bundled file. |\n| `compatibility` | No | Max 500 chars. Environment"
+},
+{
+"h": "T22-025",
+"text": ".pi/lib/context/bootstrap-brief.ts\n}"
+},
+{
+"h": "T22-026",
+"text": "docs/plans/2026-09-06-global-install-pi-package.md#L84-L101\n, runtime deps`\n\nRoot `package.json`:\n\n```json\n\"keywords\": [\"pi-package\"],\n\"pi\": {\n  \"extensions\": [\n    \".pi/extensions/00-runtime\", \".pi/extensions/10-context\",\n    \".pi/extensions/20-policy\",  \".pi/extensions/30-tools\",\n    \".pi/extensions/40-state\",   \".pi/extensions/50-ui\"\n  ],\n  \"themes\": [\".pi/themes\"]\n},\n\"scripts\": {\n  \"prepare\": \"npm run build:runtime\",\n  \"build:runtime\": \"npm run build -w @pi-swarm/runtime-contracts && npm run build -w @pi-swarm/core\",\n  \"doctor\": \"node tools/install/d"
+},
+{
+"h": "T22-027",
+"text": "extensions/swarm-btw/extension.ts\n}"
+},
+{
+"h": "T22-028",
+"text": ".pi/lib/tern/keys.ts\n}"
+},
+{
+"h": "T22-029",
+"text": "extensions/swarm-btw/index.ts\nFile: extensions/swarm-btw/index.ts\n{\n  \"document_type\": \"file_summary\",\n  \"file_path\": \"/home/swarm/trebol-corpus-v2/extensions/swarm-btw/index.ts\",\n  \"language\": \"javascript\",\n  \"total_lines\": 3,\n  \"imports\": [\n    \"../../.pi/lib/runtime/trebol-toggle.ts\"\n  ],\n  \"entities\": [],\n  \"entity_count\": {\n    \"functions\": 0,\n    \"classes\": 0,\n    \"methods\": 0,\n    \"components\": 0\n  },\n  \"entity_names\": {\n    \"functions\": [],\n    \"classes\": [],\n    \"components\": []\n  }\n}"
+},
+{
+"h": "T22-030",
+"text": "vendor/pi-mono/packages/ai/src/env-api-keys.ts\n}"
+},
+{
+"h": "T22-031",
+"text": ".pi/lib/ui/bootstrap-settings.ts\n}"
+},
+{
+"h": "T22-032",
+"text": "vendor/pi-mono/packages/tui/src/utils.ts\n}"
+},
+{
+"h": "T22-033",
+"text": "AGENTS.md\nho runs the code. `.pi/` imports package\n  sources by relative path (`../../../packages/<layer>/<name>/src/index.ts`):\n  Pi loads extensions through jiti with plain Node resolution and no build\n  step, so a bare `@pi-swarm/<name>` import there would silently depend on a\n  stale or missing `dist/`. Package-to-package imports use the bare workspace\n  name (`@pi-swarm/core`, `@pi-swarm/runtime-contracts`) against that\n  package's `dist` exports so `tsc` `rootDir` boundaries hold. Do not mix the\n  t"
+}
+]
+},
+{
+"qid": "T28",
+"query": "Mandatory changelog",
+"need": "Continue check the thing and merge",
+"next_files": [
+"CHANGELOG.md"
+],
+"edited_or_committed": [
+"CHANGELOG.md"
+],
+"items": [
+{
+"h": "T28-000",
+"text": "vendor/pi-mono/AGENTS.md#L101-L115\nmux kill-session -t pi-test\n```\n\n## Changelog\n\nLocation: `packages/*/CHANGELOG.md` (one per package).\n\nSections under `## [Unreleased]`: `### Breaking Changes` (API changes requiring migration), `### Added`, `### Changed`, `### Fixed`, `### Removed`.\n\nRules:\n\n- All new entries go under `## [Unreleased]`. Read the full section first and append to existing subsections; never duplicate them.\n- Released version sections (e.g. `## [0.12.2]`) are immutable; never modify them.\n\nAttribution:\n\n- Internal"
+},
+{
+"h": "T28-001",
+"text": "CHANGELOG.md#L128-L134\nesponses up to an explicit 8 MiB bound, and\n  revalidate process start-time identity immediately before stopping a daemon.\n- Require explicit `/paseo setup apply` or tool `apply: true` before modifying hostname\n  configuration or Tailscale Serve; ordinary session startup does not expose the daemon.\n- Retain daemon records on failed stops, clean up failed launches, support legacy\n  stop records, and serialize update/build with lifecycle operations. Reject\n  non-target Serve routes and anchor Linu"
+},
+{
+"h": "T28-002",
+"text": ".pi/lib/policy/project-structure.ts#L37-L48\nconst BASE_ROOT_DIRS = [\".git\", \".project\", \"docs\", \"src\", \"tests\"];\n\nconst TIER_ROOT_FILES: Record<ProjectTier, string[]> = {\n  demo: [],\n  product: [\"AGENTS.md\", \"CHANGELOG.md\", \"LICENSE\", \".env.example\"],\n  platform: [\"AGENTS.md\", \"CHANGELOG.md\", \"LICENSE\", \".env.example\", \"CONTRIBUTING.md\", \"SECURITY.md\"],\n};\n\nconst TIER_ROOT_DIRS: Record<ProjectTier, string[]> = {\n  demo: [],\n  product: [\"scripts\"],\n  platform: [\"scripts\", \"infra\", \"knowledge\", \".github\"],\n};"
+},
+{
+"h": "T28-003",
+"text": "CHANGELOG.md#L58-L63\ncoordinator, with escalation after repeated attempts.\n- Compact sessions at a fixed token threshold with mandatory compaction instead of waiting for pressure.\n- Add a runtime switch (`/trebol-toggle`, Ctrl+N) for the Trebol extension pack with shape-checked reload and no per-press config writes.\n- Reconcile TaskManage #38 review evidence and guard validation error decoration.\n- Add `tools/repo/list-env-keys.py` to print environment variable names from a\n  JSON array without exposing values, with"
+},
+{
+"h": "T28-004",
+"text": "AGENTS.md\nLY flag is no longer required.\nIndependent confirmation, live snapshot checks and owning TaskManage hooks remain\nmandatory. Project `enabled:false` still disables audit/worker, not the normal\ntask-enforcement hooks. Reload is required for already-running sessions.\n\n### Durable skill-budget enforcement\n\nAutogen `gateTool` enforcement no longer depends on `modelContext`: disabling\nmanager-generated prose in the Pi adapter does not disable execution gating.\nIn auto mode, after task focus, the durab"
+},
+{
+"h": "T28-005",
+"text": "CHANGELOG.md#L157-L162\natory changelog gate, release-metadata consistency, build and test.\n- Add the Plexus OpenCodeReview (luna) advisory PR review workflow.\n- Refine bootstrap selector evidence, shared-memory namespaces, and renderer output.\n- Register the agent-mcp and oh-my-pi vendor submodules in `.gitmodules` so CI checkout succeeds.\n- Sync `package-lock.json` with the `@pi-swarm/bootstrap` workspace so `npm ci` succeeds.\n- Make tests CI-safe: honor explicit `headless: false` in InteractionBroker and derive the"
+},
+{
+"h": "T28-006",
+"text": "vendor/pi-mono/AGENTS.md#L113-L124\nable; never modify them.\n\nAttribution:\n\n- Internal (from issues): `Fixed foo bar ([#123](https://github.com/earendil-works/pi-mono/issues/123))`\n- External contributions: `Added feature X ([#456](https://github.com/earendil-works/pi-mono/pull/456) by [@username](https://github.com/username))`\n\n## Releasing\n\n**Lockstep versioning**: all packages share one version; every release updates all together. `patch` = fixes + additions, `minor` = breaking changes. No major releases.\n\n1. **Update CHANGELOG"
+},
+{
+"h": "T28-007",
+"text": "[memory note, 2026-10-09]\nIn the inspected CI log for HEAD 59cb9ef, the Build and test job's `rewrite-imports.mjs --check` failed with 1 unresolved specifier: packages/context/prompt/scripts/sync.mjs references ../../../../vendor/swarm-sdk/swarm-tui/internal/chat/settings/system_prompt.go. The same log shows the Mandatory changelog job failing on that SHA, while a later local diff against origin/main lists CHANGELOG.md. Current CI status for the latest commit is therefore not established."
+},
+{
+"h": "T28-008",
+"text": "tools/experiments/pi-tmux-dogfood/REPORT.md#L56-L65\nts AGENTS.md` passed.\nExpanded running work, pressure warning thresholds, unknown-after-compaction and\nextension toggle updates remain untested live; no claim of exhaustive mode coverage.\n\n## Changes\n\nNew rendering reads ctx.cwd/model/getContextUsage and native footer branch provider;\nsubscribes to branch invalidation and unsubscribes on footer disposal. Preserves\nexisting time/token accounting and expanded work branch. Changes only footer owner,\nits AGENTS.md description, and this report. Exist"
+},
+{
+"h": "T28-009",
+"text": "vendor/pi-mono/packages/coding-agent/src/utils/changelog.ts\nFile: vendor/pi-mono/packages/coding-agent/src/utils/changelog.ts\n{\n  \"document_type\": \"file_summary\",\n  \"file_path\": \"/home/swarm/trebol-corpus-v2/vendor/pi-mono/packages/coding-agent/src/utils/changelog.ts\",\n  \"language\": \"javascript\",\n  \"total_lines\": 100,\n  \"imports\": [\n    \"fs\"\n  ],\n  \"entities\": [\n    {\n      \"type\": \"function\",\n      \"name\": \"parseChangelog\",\n      \"start_line\": 14,\n      \"end_line\": 14\n    },\n    {\n      \"type\": \"function\",\n      \"name\": \"compareVersions\",\n      \"start_line\": 76,\n      \"end_line\": 76\n    },\n    {\n      \"type\": \"function\",\n      \"name\": \"getNewEntries\",\n      \"start_line\": 85,\n      \"end_line\": 85\n    }\n  ],\n  \"entity_count\": {\n    \"functions\": 3,\n    \"classes\": 0,\n    \"methods\": 0,\n    \"components\": 0\n  },\n  \"entity_names\": {\n    \"functions\": [\n      \"parseChangelog\",\n      \"compareVersions\",\n      \"getNewEntries\"\n    ],\n    \"classes\": [],\n    \"components\": []\n  }\n}"
+},
+{
+"h": "T28-010",
+"text": "[memory note, 2026-10-09]\n{\"source\":\"TaskManage\",\"taskId\":\"5\",\"subject\":\"Investigate and fix test/CI failures on PR #188\",\"description\":\"\",\"status\":\"in_progress\",\"parentTaskId\":\"\",\"dependsOn\":[],\"category\":\"debugging\",\"priority\":\"high\",\"notes\":[\"Blocker: git commit of packages/context/prompt/test/index.test.ts is rejected with 'upstream/ is read-only; make changes in a local path instead.' No hook, hooksPath, or repo source emits this. Change is staged, uncommitted. Branch fix/headless-subagent-temperature is at 59cb9ef on origin. CI at 59cb9ef still fails 'rewrite-imports --check' (vendor/swarm-sdk removed) and the prompt test; the prompt-test fix is not yet pushed.\",\"Retry of commit also rejected with the same read"
+},
+{
+"h": "T28-011",
+"text": "docs/parity/parity-plan.md#L159-L170\nnge.\n- All affected package builds and tests.\n- Root `npm run dogfood`.\n- Fresh isolated parity capture against the installed Pi and Swarm binaries.\n- Independent review of the final tool manifest, prompt hashes, skill hashes,\n  action traces, and any adapter exceptions.\n- Completion requires an empty mismatch ledger. Any upstream impossibility must\n  be demonstrated by a minimal probe and surfaced as a blocker rather than\n  silently accepted.\n\n## Change safety and ripples\n\n- Preserve the existi"
+},
+{
+"h": "T28-012",
+"text": "docs/architecture/independent-extensions.md#L146-L153\nttings.json>`.\n  It reports exact filter replacements without writing settings or printing\n  unrelated fields. Legacy wildcard/directory filters require manual review.\n- Fixed two platform-sensitive test assertions without changing their contracts:\n  prompt golden now validates then masks the OS; skill body sentinel no longer\n  accidentally matches macOS `/private` paths in valid skill locations.\n- Latest build and surface parity pass; actual-session toggle/reload passes.\n  Full suite with TMPDI"
+},
+{
+"h": "T28-013",
+"text": "vendor/pi-mono/packages/coding-agent/docs/settings.md#L51-L56\n` | Theme name (`\"dark\"`, `\"light\"`, or custom) |\n| `quietStartup` | boolean | `false` | Hide startup header |\n| `collapseChangelog` | boolean | `false` | Show condensed changelog after updates |\n| `enableInstallTelemetry` | boolean | `true` | Send an anonymous install/update version ping after first install or changelog-detected updates. This does not control update checks |\n| `doubleEscapeAction` | string | `\"tree\"` | Action for double-escape: `\"tree\"`, `\"fork\"`, or `\"none\"` |\n| `treeFilterMod"
+},
+{
+"h": "T28-014",
+"text": "CHANGELOG.md#L140-L150\nsetup/start locking. Add focused\n  regression tests and document installation prerequisites and limitations.\n\n- Harden tool reliability, history argument normalization, and TaskManage validation.\n\n- Add optional `/mem on|off|status` bootstrap memory enforcement with prompt and tool-call safeguards.\n\n- Align HistorySearch field normalization and segment filtering with case, runtime, sorting, and ordering options.\n\n- Add the paseo tool extension and register it in the 30-tools layer.\n- Auto-start"
+},
+{
+"h": "T28-015",
+"text": "README.md#L400-L411\nthen the broader validation relevant to the\n   change.\n\nPlease include a clear description of the behavior changed, the commands run,\nand any known validation gaps in pull requests.\n\n## License and upstream references\n\nThis repository includes vendored upstream projects for reference and\nintegration. See the relevant license files and submodule metadata before\nredistributing any upstream material. The repository's release metadata is\nmaintained in `package.json`, `CHANGELOG.md`, and `update-mani"
+},
+{
+"h": "T28-016",
+"text": "CHANGELOG.md#L149-L157\nd register it in the 30-tools layer.\n- Auto-start Paseo sessions with Tailscale-aware listening and add mobile relay pairing.\n- Add a bootstrap-settings adapter that augments the native /settings panel.\n- Mark the paseo vendor submodule as shallow.\n\n- Add a repository-backed update checker with hourly checks (exposed as\n  `/trebol-update` in v0.4.0).\n- Allow overriding the update manifest URL with `PI_SWARM_UPDATE_URL` for testing.\n- Add CI: mandatory changelog gate, release-metadata consistency"
+},
+{
+"h": "T28-017",
+"text": "CHANGELOG.md#L188-L193\narm extension pack release.\n\nTo publish a release, update the root package version, this changelog, and\n`update-manifest.json` in one commit, then tag the commit. The checker only\nnotifies; `/trebol-update install` delegates installation to Pi with\n`pi update --extensions`."
+},
+{
+"h": "T28-018",
+"text": "AGENTS.md\ndate this file's index, inventory, package boundaries, or flow whenever\n   files, ownership, commands, extension registration, or architecture change.\n5. Add focused tests for behavior changes where practical, and document any\n   intentional test gap.\n6. Report files changed, validation run, and known limitations.\n\nWhen adding a new top-level package, extension, persistent entry type, hook\ngroup, or user-facing command, add it to the relevant tables above in the same\npatch. This is a contract, n"
+},
+{
+"h": "T28-019",
+"text": "CHANGELOG.md#L118-L128\nand review limitations.\n- Read the installed package version for update checks instead of a stale\n  hard-coded value; keep release metadata, tests, and import checks consistent.\n\n## [0.3.0] - 2026-09-17\n\n- Add a provider-neutral long-running monitor agent with bounded retries,\n  persisted observations, and pause/resume/cancel controls.\n\n- Use Tailscale LocalAPI ETag/If-Match conditional writes to reject concurrent\n  Serve changes, preserve JSON responses up to an explicit 8 MiB bound, and\n  reva"
+},
+{
+"h": "T28-020",
+"text": "vendor/pi-mono/packages/coding-agent/src/config.ts#L413-L426\nexport function getExamplesPath(): string {\n\treturn resolve(join(getPackageDir(), \"examples\"));\n}\n\n/** Get path to CHANGELOG.md */\nexport function getChangelogPath(): string {\n\treturn resolve(join(getPackageDir(), \"CHANGELOG.md\"));\n}\n\n/**\n * Get path to built-in interactive assets directory.\n * - For Bun binary: assets/ next to executable\n * - For Node.js (dist/): dist/modes/interactive/assets/\n * - For tsx (src/): src/modes/interactive/assets/\n */"
+},
+{
+"h": "T28-021",
+"text": "CHANGELOG.md#L113-L119\nl and\n  skill-curation tooling for manual review rather than automatic promotion.\n- Add Clover startup notices and improve TUI tool renderers, hook lifecycle,\n  agent settling, and prompt reassembly across workspaces and settings.\n- Surface Paseo auto-start failures in startup notices without changing the\n  explicit `/paseo setup apply` authorization introduced in v0.3.0. Retire the obsolete\n  Swarm parity probes and fixtures; document retrieval and review limitations.\n- Read the installed packa"
+},
+{
+"h": "T28-022",
+"text": "vendor/pi-mono/packages/coding-agent/test/sdk-codex-cache-probe-tool-loop.ts#L248-L268\nfunction deterministicProbeTool(): ToolDefinition<typeof deterministicProbeParameters> {\n\treturn {\n\t\tname: \"deterministic_probe\",\n\t\tlabel: \"Deterministic Probe\",\n\t\tdescription:\n\t\t\t\"Mandatory cache-benchmark tool. Call it exactly once when the user asks for a cache benchmark turn, then use its result to produce the final one-line answer.\",\n\t\tpromptSnippet:\n\t\t\t\"deterministic_probe(turn, marker): mandatory for cache benchmark turns. Call exactly once before the final answer.\",\n\t\tpromptGuidelines: [\n\t\t\t\"When the user asks for the cache benchmark turn, call deterministic_probe exactly once with the requested turn and marker before responding.\",\n\t\t\t\"After the tool result arrives, reply with the exact final line requested by the user.\",\n\t\t],\n\t\tparameters: deterministicProbeParameters,\n\t\texecute: async (_toolCallId, params) => ({\n\t\t\tcontent: [\n\t\t\t\t{\n\t\t\t\t\ttype: \"text\",\n\t\t\t\t\ttext: `deterministic_probe_result turn=${params.turn} marker=${params.marker} fixed=OK`,\n\t\t\t\t},\n\t\t\t],\n\t\t\tdetails: { turn: params.turn, marker: params.marker, fixed: \"OK\" },\n\t\t}),\n\t};\n}"
+},
+{
+"h": "T28-023",
+"text": "CHANGELOG.md#L170-L177\nt as an expected cleanup race: fall back to\n  buffered output instead of surfacing a raw filesystem path, and catch rejected\n  editor promises so a closing child view cannot raise an uncaught rejection.\n- Add an optional per-user systemd unit installer for reboot-safe Paseo startup\n  on Linux.\n- Write goal-evaluation transcripts with 0600 permissions and a bounded size, and\n  reject model-supplied regexes that can backtrack catastrophically.\n- Treat combining marks and ZWJ sequences as zero-widt"
+},
+{
+"h": "T28-024",
+"text": "README.md#L411-L411\nn `package.json`, `CHANGELOG.md`, and `update-manifest.json`."
+},
+{
+"h": "T28-025",
+"text": "CHANGELOG.md#L70-L77\nage evidence headings with punctuation (?, parentheses, commas)\n  punctuation-insensitively on both sides, while exact and dash-slug matches\n  keep working (cloverinternational/trebol#36).\n- Repair bootstrap planner replies automatically: fenced JSON with trailing\n  prose, unwrapped JSON followed by commentary, and payloads with trailing\n  text no longer degrade bootstrap; truncated JSON still fails with a clear\n  error.\n- Split TaskManage evidence reference lists on `;` and `,` even when no\n  w"
+},
+{
+"h": "T28-026",
+"text": "CHANGELOG.md#L3-L9\n# Changelog\n\nRelease metadata is kept in `package.json`, `update-manifest.json`, and this file together.\n\n## [Unreleased]\n\n### Added\n\n- OSC 7501 program-status reporting: Trebol now tells the terminal what it is doing (`idle`/`working`/`blocked`/`done`/`error`/`clear`) via terminal-native escape sequences, so terminals, multiplexers, and agentic inboxes can show session state without screen scraping. New `swarm-program-status` extension with a TTY gate and `TREBOL_PROGRAM_STATUS=0|1` override."
+},
+{
+"h": "T28-027",
+"text": ".pi/lib/policy/project-scaffold.ts#L112-L118\nconst changelog = (a: ProjectAnswers) => `# Changelog\\n\\nAll notable changes to ${a.name} are recorded here. This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).\\n\\n## [Unreleased]\\n\\n### Added\\n\\n- Project initialised with an enforced structure policy.\\n`;\n\nconst contributing = (a: ProjectAnswers) => [\n  heading(\"Contributing\", `How to make a change to ${a.name} that will be accepted.`),\n  \"## Before you write code\\n\\n1. Read `AGENTS.md` and `.project/structure.json`.\\n2. Confirm the change has a home in the existing layout. If it does not, propose a structure policy change first.\\n\",\n  \"## Every change\\n\\n- Add or update tests alongside the code.\\n- Add a `CHANGELOG.md` entry under Unreleased.\\n- Update `docs/index.md` if you added a document.\\n- Record an ADR under `docs/decisions/` for architecturally significant choices.\\n\",\n].join(\"\\n\");"
+},
+{
+"h": "T28-028",
+"text": "AGENTS.md#L724-L731\ntly passes its first write.\nReviewed, citable project facts promoted from memory candidates live in\n`docs/reference/project-findings.md` under stable `F-NNNN` headings.\n\nSupervisor operational-review settings now also control reviewed parent task\napplication; the hidden PI_SWARM_SUPERVISOR_TASK_APPLY flag is no longer required.\nIndependent confirmation, live snapshot checks and owning TaskManage hooks remain\nmandatory. Project `enabled:false` still disables audit/worker, not the normal\ntask-enfo"
+}
+]
+},
+{
+"qid": "T34",
+"query": "ask:payload",
+"need": "look at how the regular ask user tool in pi works and make it more like that the flow please but its working looks good",
+"next_files": [
+"extensions/ask-user/src/remote-ask.ts"
+],
+"edited_or_committed": [
+".pi/lib/runtime/swarm-tool-gating.ts",
+".pi/lib/tern/ask-dialog.ts",
+".pi/lib/tern/bridge.ts",
+".pi/lib/tern/keys.ts",
+".pi/lib/tern/run.ts",
+".pi/test/runtime/swarm-extra-tool-gating.test.ts",
+".pi/test/tern/ask-dialog.test.ts",
+".pi/test/tern/keys.test.ts",
+"extensions/swarm-transport-parity/extension.ts"
+],
+"items": [
+{
+"h": "T34-000",
+"text": "packages/context/skills/builtins/swarm-workflow/references/EXECUTION-STRATEGIES.md\n```"
+},
+{
+"h": "T34-001",
+"text": "[memory note, 2026-10-12]\n{\"source\":\"TaskManage\",\"taskId\":\"6\",\"subject\":\"Add freeform answers to the Tern ask dialog\",\"description\":\"\",\"status\":\"completed\",\"parentTaskId\":\"\",\"dependsOn\":[],\"category\":\"researching\",\"priority\":\"medium\",\"notes\":[],\"questions\":[{\"id\":\"freeform\",\"question\":\"How does the native flow model and submit freeform answers, and what does the remote payload carry?\",\"answer\":\"Implemented native model in the Tern dialog: a lone freeform option opens the editor; choice questions get a trailing Type something row. Enter saves, Esc closes keeping the draft, single-choice save replaces the choice and advances, multi-choice keeps the tab. Live run returned Q1: live.\",\"evidence\":\".pi/lib/tern/ask-dialog.t"
+},
+{
+"h": "T34-002",
+"text": "docs/reference/tern-site/guides/layout.md#L260-L261\nme shells.\n- [Events](../reference/events.md): every event and payload in both halves.\n- [Project Workspaces](../examples/workspaces.md): a complete workspace\n  plugin."
+},
+{
+"h": "T34-003",
+"text": "extensions/ask-user/docs/architecture.md#L82-L85\nabsent\n- replay payload lookup scans only the current session branch and revalidates payloads before use\n- interrupted-ask recovery selects only the newest unresolved `ask_user_question` call on the active branch, prefers its valid persisted payload, and validates original arguments as fallback\n- recovered forms open only for TUI `startup`, `resume`, and `fork` events; the flow stays detached from the lifecycle handler\n- recovered submit and cancel both persist dismissal before the same call ca"
+},
+{
+"h": "T34-004",
+"text": "extensions/ask-user/docs/architecture.md#L17-L22\n, ask payload capture\n- `src/answer-commands.ts` \u2014 `/answer`, `/answer:again`, and `/ask:replay` command wiring\n- `src/answer-extraction.ts` \u2014 configured, session-scope-aware extraction model selection, synthetic `ask_user_question` tool-call extraction, and tolerant text fallback\n- `src/ask-payload-store.ts` \u2014 branch-aware persisted ask payload lookup\n- `src/pending-ask.ts` \u2014 active-branch unresolved tool-call detection and recovery dismissal persistence\n- `src/resume-pending-ask.ts` \u2014 detached"
+},
+{
+"h": "T34-005",
+"text": "extensions/ask-user/tests/ask-tool.test.ts#L118-L134\nconst params = sampleParams();\n\n\tawait tool.execute(\"call-1\", params, undefined, noop, makeCtx(false));\n\n\tassert.equal(entries.length, 1);\n\tassert.equal(entries[0].customType, \"ask:payload\");\n\tassert.deepEqual(entries[0].data, {\n\t\tversion: 1,\n\t\tsource: \"tool\",\n\t\tparams,\n\t\tsourceEntryId: \"call-1\",\n\t\ttimestamp: (entries[0].data as { timestamp: number }).timestamp,\n\t});\n});\n\ntest(\"ask tool returns pending questions in non-interactive mode\", async () => {\n\tconst { tool } = registerMockTool();"
+},
+{
+"h": "T34-006",
+"text": "extensions/ask-user/src/ask-payload-store.ts#L75-L84\nfunction isAskPayloadEntry(entry: unknown): entry is {\n\tcustomType: string;\n\tdata?: Partial<AskPayloadEntryData>;\n\ttype: \"custom\";\n} {\n\treturn (\n\t\t!!entry &&\n\t\ttypeof entry === \"object\" &&\n\t\t(entry as { type?: unknown }).type === \"custom\" &&\n\t\t(entry as { customType?: unknown }).customType === ASK_PAYLOAD_ENTRY_TYPE\n\t);\n}"
+},
+{
+"h": "T34-007",
+"text": "extensions/ask-user/tests/ask-payload-store.test.ts#L38-L62\nconst result = findLatestPayloadInCurrentBranch(\n\t\tctx([custom(older), custom(newer)]),\n\t\t\"tool\"\n\t);\n\n\tassert.equal(result.data, newer);\n\tassert.equal(result.invalidMatchFound, false);\n});\n\ntest(\"branch payload lookup allows freeform only for answer extraction payloads\", () => {\n\tconst freeformParams: AskParams = {\n\t\tquestions: [\n\t\t\t{\n\t\t\t\tid: \"language\",\n\t\t\t\tprompt: \"Which language?\",\n\t\t\t\toptions: [{ value: \"freeform\", label: \"Type answer\", freeform: true }],\n\t\t\t},\n\t\t],\n\t};\n\n\tconst answerPayload = {\n\t\tversion: 1,\n\t\tsource: \"answer-extraction\",\n\t\tparams: freeformParams,\n\t\ttimestamp: 1,\n\t};"
+},
+{
+"h": "T34-008",
+"text": "extensions/ask-user/docs/contract.md#L309-L312\nn `startup`, `resume`, or `fork`, pi-ask finds the newest `ask_user_question` tool call on the active branch that has neither a tool result nor an `ask:pending-dismissed` entry\n- recovery does not run for `new`, `reload`, or non-TUI sessions\n- the matching valid `ask:payload` supplies the form; if it is missing or invalid, pi-ask validates and uses the original tool call arguments instead\n- the recovery flow is detached from `session_start`, so an open form does not block other lifecycle handler"
+},
+{
+"h": "T34-009",
+"text": "extensions/ask-user/src/ask-payload-store.ts#L88-L107\nfunction isValidAskPayloadData(data: unknown): data is AskPayloadEntryData {\n\tif (!(data && typeof data === \"object\")) {\n\t\treturn false;\n\t}\n\tconst payload = data as Partial<AskPayloadEntryData>;\n\tif (payload.version !== ASK_PAYLOAD_ENTRY_VERSION) {\n\t\treturn false;\n\t}\n\tif (payload.source !== \"tool\" && payload.source !== \"answer-extraction\") {\n\t\treturn false;\n\t}\n\tif (\n\t\t!Value.Check(AskParamsSchema, payload.params) ||\n\t\tvalidateParams(payload.params, {\n\t\t\tallowFreeform: payload.source === \"answer-extraction\",\n\t\t}).ok === false\n\t) {\n\t\treturn false;\n\t}\n\treturn true;\n}"
+},
+{
+"h": "T34-010",
+"text": "extensions/ask-user/docs/contract.md#L292-L299\nd values, recomputes labels/indices, and does not infer approval semantics from labels.\n\nSee [`remote-events.md`](remote-events.md) for payload shapes, examples, and a local smoke test.\n\n## Slash command replay/extraction\n\n- valid `ask_user_question` payloads are persisted as branch custom entries before the UI opens, so `/ask:replay` can reopen them after cancel, `/resume`, or `/tree`\n- `/answer` scans the current branch for the latest assistant message; if that message did not finish with `sto"
+},
+{
+"h": "T34-011",
+"text": "extensions/ask-user/tests/notifications.test.ts\nFile: extensions/ask-user/tests/notifications.test.ts\n{\n  \"document_type\": \"file_summary\",\n  \"file_path\": \"/home/swarm/trebol-corpus-v2/extensions/ask-user/tests/notifications.test.ts\",\n  \"language\": \"javascript\",\n  \"total_lines\": 69,\n  \"imports\": [\n    \"../src/config/defaults.ts\",\n    \"node:assert/strict\",\n    \"node:test\"\n  ],\n  \"entities\": [\n    {\n      \"type\": \"function\",\n      \"name\": \"payload\",\n      \"start_line\": 10,\n      \"end_line\": 10\n    },\n    {\n      \"type\": \"function\",\n      \"name\": \"payload\",\n      \"start_line\": 23,\n      \"end_line\": 23\n    },\n    {\n      \"type\": \"function\",\n      \"name\": \"attempts\",\n      \"start_line\": 32,\n      \"end_line\": 32\n    }\n  ],\n  \"entity_count\": {\n    \"functions\": 3,\n    \"classes\": 0,\n    \"methods\": 0,\n    \"components\": 0\n  },\n  \"entity_names\": {\n    \"functions\": [\n      \"payload\",\n      \"payload\",\n      \"attempts\"\n    ],\n    \"classes\": [],\n    \"components\": []\n  }\n}"
+},
+{
+"h": "T34-012",
+"text": "docs/reference/tern-site/scripts/harness.md#L137-L143\npeat;\ntext and operation may occur only once. Payload options, operation and\n`hold` may appear in any order. The selector is one argument. The default\noperation allows the target to choose; specifying one limits the source to\nit. A rejecting target gets no drop and the command fails. The reply reports\n`at` and the chosen `op`; `hold` also reports `held: true` and keeps the drag\nhovering. The next `drop` moves it on. `drag-end` defaults to `none` (cancel)\nand fails unless an outgoing drag is in p"
+},
+{
+"h": "T34-013",
+"text": "extensions/ask-user/tests/ask-payload-store.test.ts#L16-L35\nfunction custom(data: unknown) {\n\treturn { type: \"custom\", customType: \"ask:payload\", data };\n}\n\nfunction ctx(branch: unknown[]) {\n\treturn { sessionManager: { getBranch: () => branch } } as never;\n}\n\ntest(\"branch payload lookup returns the latest valid matching source\", () => {\n\tconst older = {\n\t\tversion: 1,\n\t\tsource: \"tool\",\n\t\tparams,\n\t\ttimestamp: 1,\n\t};\n\tconst newer = {\n\t\tversion: 1,\n\t\tsource: \"tool\",\n\t\tparams: { ...params, title: \"Newer\" },\n\t\ttimestamp: 2,\n\t};"
+},
+{
+"h": "T34-014",
+"text": "extensions/ask-user/tests/notifications.test.ts#L10-L22\nconst payload = createQuestionWaitingNotification({\n\t\tlabel: \"Scope\",\n\t\tprompt: \"What should we change?\",\n\t});\n\n\tassert.deepEqual(payload, {\n\t\tevent: \"question.waiting\",\n\t\ttitle: \"pi ask\",\n\t\tmessage: \"Question waiting: Scope\",\n\t});\n});\n\ntest(\"notification payload falls back to prompt and compacts whitespace\", () => {"
+},
+{
+"h": "T34-015",
+"text": "docs/reference/tern-site/reference/api-window.md#L1417-L1417\n.\n- [Events](events.md) for window event payloads and ordering."
+},
+{
+"h": "T34-016",
+"text": "extensions/ask-user/docs/contract.md#L44-L65\nand invalid preview payloads report a fix hint to add preview text or switch to `type: \"single\"`\n- all questions get an internal `Type your own` option\n\n## Output\n\n```ts\n{\n  content: [{ type: \"text\"; text: string }];\n  details: {\n    title?: string;\n    cancelled: boolean;\n    error?: {\n      kind: \"invalid_input\";\n      issues: Array<{\n        path: string;\n        message: string;\n      }>;\n    };\n    mode: \"submit\" | \"elaborate\";\n    questions: Array<{\n      id: string;\n      label: string;"
+},
+{
+"h": "T34-017",
+"text": "extensions/ask-user/src/ask-tool-helpers.ts#L54-L73\nexport function invalidPayloadResponse(\n\tparams: AskParams,\n\tissues: AskValidationIssue[]\n) {\n\treturn {\n\t\tcontent: [{ type: \"text\" as const, text: formatValidationError(issues) }],\n\t\tdetails: errorResultDetails(params, issues),\n\t};\n}\n\nexport function nonInteractiveResponse(\n\tstate: ReturnType<typeof createInitialState>\n) {\n\treturn {\n\t\tcontent: [\n\t\t\t{ type: \"text\" as const, text: formatNonInteractiveMessage(state) },\n\t\t],\n\t\tdetails: {\n\t\t\t...toAskResult(state),\n\t\t\tcancelled: true,\n\t\t},\n\t};\n}"
+},
+{
+"h": "T34-018",
+"text": "extensions/ask-user/src/ask-payload-store.ts#L1-L20\nimport type {\n\tExtensionAPI,\n\tExtensionContext,\n} from \"@earendil-works/pi-coding-agent\";\nimport { Value } from \"typebox/value\";\nimport { validateParams } from \"./ask-tool-helpers.ts\";\nimport { AskParamsSchema } from \"./schema.ts\";\nimport type { AskParams } from \"./types.ts\";\n\nexport const ASK_PAYLOAD_ENTRY_TYPE = \"ask:payload\";\nexport const ASK_PAYLOAD_ENTRY_VERSION = 1;\n\nexport type AskPayloadSource = \"answer-extraction\" | \"tool\";\n\nexport interface AskPayloadEntryData {\n\tparams: AskParams;\n\tsource: AskPayloadSource;\n\tsourceEntryId?: string;\n\ttimestamp: number;\n\tversion: typeof ASK_PAYLOAD_ENTRY_VERSION;\n}"
+},
+{
+"h": "T34-019",
+"text": "docs/reference/tern-site/protocol/surfaces.md#L200-L207\n\",\"s1\",null,{\"id\":\"dock\",\"k\":\"col\",\"c\":[\n    {\"id\":\"ed\",\"k\":\"editor\",\"p\":{\"placeholder\":\"Ask anything\"}},\n    {\"id\":\"bar\",\"k\":\"status\",\"c\":[\n      {\"id\":\"br\",\"k\":\"seg\",\"p\":{\"icon\":\"branch\",\"text\":\"main\"}},\n      {\"id\":\"st\",\"k\":\"seg\",\"p\":{\"side\":\"right\",\"text\":\"ready\"}}]}]}],\n  [\"add\",\"layer\",\"s1\",null,{\"id\":\"layer\",\"k\":\"col\",\"c\":[\n    {\"id\":\"ask\",\"k\":\"overlay\",\"p\":{\"anchor\":\"top\",\"size\":\"sm\",\"head\":[{\"t\":\"Update serde\"}]},\"c\":[\n      {\"id\":\"ask.t\",\"k\":\"text\",\"p\":{\"text\":\"1.0.219 \u2192 1.0.228\"}}]}]}"
+},
+{
+"h": "T34-020",
+"text": "docs/reference/tern-sdk/pages/go/tern/README.md\n`"
+},
+{
+"h": "T34-021",
+"text": "extensions/ask-user/tests/ask-payload-store.test.ts#L64-L95\nconst toolPayload = {\n\t\tversion: 1,\n\t\tsource: \"tool\",\n\t\tparams: freeformParams,\n\t\ttimestamp: 2,\n\t};\n\n\tassert.equal(\n\t\tfindLatestPayloadInCurrentBranch(\n\t\t\tctx([custom(answerPayload)]),\n\t\t\t\"answer-extraction\"\n\t\t).data,\n\t\tanswerPayload\n\t);\n\tassert.equal(\n\t\tfindLatestPayloadInCurrentBranch(ctx([custom(toolPayload)]), \"tool\").data,\n\t\tundefined\n\t);\n});\n\ntest(\"branch payload lookup ignores invalid stored payloads\", () => {\n\tconst result = findLatestPayloadInCurrentBranch(\n\t\tctx([\n\t\t\tcustom({ version: 1, source: \"tool\", params: { questions: [] } }),\n\t\t\tcustom({ version: 1, source: \"tool\", params: {} }),\n\t\t\tcustom({ version: 1, source: \"answer-extraction\", params }),\n\t\t]),\n\t\t\"tool\"\n\t);\n\n\tassert.equal(result.data, undefined);\n\tassert.equal(result.invalidMatchFound, true);\n});"
+},
+{
+"h": "T34-022",
+"text": "extensions/ask-user/docs/contract.md#L302-L309\nfound and is not treated as an invalid ask payload\n- command-flow cancellation closes with a notification and does not send a message to the agent\n- submitted or elaborated command-flow results are sent back with user-message semantics\n- replay commands scan only `ctx.sessionManager.getBranch()`, ignore sibling/future branch payloads, and revalidate stored payloads before opening the UI\n\n## Interrupted ask resume\n\n- on `session_start` with reason `startup`, `resume`, or `fork`, pi-ask finds the"
+},
+{
+"h": "T34-023",
+"text": "extensions/ask-user/src/ask-payload-store.ts#L55-L69\nexport function findPayloadForSourceEntry(\n\tctx: Pick<ExtensionContext, \"sessionManager\">,\n\tsourceEntryId: string,\n\tsource: AskPayloadSource\n): AskPayloadEntryData | undefined {\n\tfor (const entry of [...ctx.sessionManager.getBranch()].reverse()) {\n\t\tif (!isAskPayloadEntry(entry)) {\n\t\t\tcontinue;\n\t\t}\n\t\tconst data = entry.data;\n\t\tif (data?.source !== source || data.sourceEntryId !== sourceEntryId) {\n\t\t\tcontinue;\n\t\t}\n\t\tif (isValidAskPayloadData(data)) {\n\t\t\treturn data;\n\t\t}\n\t}\n\treturn;\n}"
+},
+{
+"h": "T34-024",
+"text": "extensions/ask-user/skills/ask-user/SKILL.md#L85-L92\n`ambiguous` only: if user delegates (\"your call\"), proceed with the most reversible default and state assumptions\n\n## ask_user_question payload quality\n\n- Ask one concrete decision at a time.\n- Provide clear, distinct options. Do not add filler options.\n- Choose question type from semantics: `single` means one answer is expected, `multi` means multiple answers could reasonably be selected, and `preview` means options need preview-pane detail with non-empty preview text.\n- Avoid defaulting mechan"
+},
+{
+"h": "T34-025",
+"text": "extensions/ask-user/src/ask-payload-store.ts\nFile: extensions/ask-user/src/ask-payload-store.ts\n{\n  \"document_type\": \"file_summary\",\n  \"file_path\": \"/home/swarm/trebol-corpus-v2/extensions/ask-user/src/ask-payload-store.ts\",\n  \"language\": \"javascript\",\n  \"total_lines\": 109,\n  \"imports\": [\n    \"typebox/value\",\n    \"./types.ts\",\n    \"./schema.ts\",\n    \"./ask-tool-helpers.ts\"\n  ],\n  \"entities\": [\n    {\n      \"type\": \"function\",\n      \"name\": \"appendAskPayload\",\n      \"start_line\": 23,\n      \"end_line\": 23\n    },\n    {\n      \"type\": \"function\",\n      \"name\": \"findLatestPayloadInCurrentBranch\",\n      \"start_line\": 34,\n      \"end_line\": 34\n    },\n    {\n      \"type\": \"function\",\n      \"name\": \"findPayloadForSourceEntry\",\n      \"start_line\": 55,\n      \"end_line\": 55\n    },\n    {\n      \"type\": \"function\",\n      \"name\": \"isAskPayloadEntry\",\n      \"start_line\": 75,\n      \"end_line\": 75\n    },\n    {\n      \"type\": \"function\",\n      \"name\": \"isValidAskPayloadData\",\n      \"start_line\": 88,\n      \"end_line\": 88\n    }\n  ],\n  \"entity_count\": {\n    \"functions\": 5,\n    \"classes\": 0,\n    \"methods\": 0,\n    \"components\": 0\n  },\n  \"entity_names\": {\n    \"functions\": [\n      \"appendAskPayload\",\n      \"findLatestPayloadInCurrentBranch\",\n      \"findPayl"
+},
+{
+"h": "T34-026",
+"text": "extensions/ask-user/tests/ask-payload-store.test.ts#L1-L11\nimport assert from \"node:assert/strict\";\nimport test from \"node:test\";\nimport { findLatestPayloadInCurrentBranch } from \"../src/ask-payload-store.ts\";\nimport type { AskParams } from \"../src/types.ts\";\n\nconst params: AskParams = {\n\tquestions: [\n\t\t{\n\t\t\tid: \"goal\",\n\t\t\tprompt: \"Goal?\",\n\t\t\toptions: [{ value: \"a\", label: \"A\", recommended: true }],\n\t\t},\n\t],\n};"
+},
+{
+"h": "T34-027",
+"text": "docs/reference/persistence.md#L8-L18\nn for lightweight\ntelemetry.\n\nThe payload contains task state only. Audit events remain opt-in in the\n`get` DTO (`include_audit`) so routine RPC output stays compact and does not\nleak internal history. Secrets and provider payloads are not persisted by\nthis slice; provider/cache telemetry remains hash/header-only in the Pi\nextension.\n\nValidation and replay are offline-testable and do not require credentials or\nnetwork access. Run `cd taskmanage && npm test && npm run build`."
+},
+{
+"h": "T34-028",
+"text": "extensions/ask-user/tests/ask-payload-store.test.ts\nFile: extensions/ask-user/tests/ask-payload-store.test.ts\n{\n  \"document_type\": \"file_summary\",\n  \"file_path\": \"/home/swarm/trebol-corpus-v2/extensions/ask-user/tests/ask-payload-store.test.ts\",\n  \"language\": \"javascript\",\n  \"total_lines\": 97,\n  \"imports\": [\n    \"../src/types.ts\",\n    \"../src/ask-payload-store.ts\",\n    \"node:assert/strict\",\n    \"node:test\"\n  ],\n  \"entities\": [\n    {\n      \"type\": \"function\",\n      \"name\": \"custom\",\n      \"start_line\": 16,\n      \"end_line\": 16\n    },\n    {\n      \"type\": \"function\",\n      \"name\": \"ctx\",\n      \"start_line\": 20,\n      \"end_line\": 20\n    },\n    {\n      \"type\": \"function\",\n      \"name\": \"result\",\n      \"start_line\": 38,\n      \"end_line\": 38\n    },\n    {\n      \"type\": \"function\",\n      \"name\": \"toolPayload\",\n      \"start_line\": 64,\n      \"end_line\": 64\n    }\n  ],\n  \"entity_count\": {\n    \"functions\": 4,\n    \"classes\": 0,\n    \"methods\": 0,\n    \"components\": 0\n  },\n  \"entity_names\": {\n    \"functions\": [\n      \"custom\",\n      \"ctx\",\n      \"result\",\n      \"toolPayload\"\n    ],\n    \"classes\": [],\n    \"components\": []\n  }\n}"
+},
+{
+"h": "T34-029",
+"text": "extensions/ask-user/docs/contract.md#L75-L171\nindices: number[];\n              customText?: string;\n              note?: string;\n              optionNotes?: Record<string, string>;\n            };\n            note: string;\n          }\n      >;\n    };\n  };\n}\n```\n\n## Output rules\n\n- `cancelled: true` means the user dismissed the flow, UI was unavailable, or the payload was invalid before UI opened\n- semantically invalid payloads that reach tool execution return `error.kind === \"invalid_input\"` with structured `issues` and a transcr"
+},
+{
+"h": "T34-030",
+"text": "extensions/ask-user/tests/pending-ask.test.ts#L76-L96\nfunction toolResult(toolCallId: string) {\n\treturn {\n\t\ttype: \"message\",\n\t\tmessage: { role: \"toolResult\", toolCallId, toolName: \"ask_user_question\" },\n\t};\n}\n\nfunction storedPayload(\n\tsourceEntryId: string,\n\tstoredParams: unknown = params,\n\tversion = 1\n) {\n\treturn {\n\t\ttype: \"custom\",\n\t\tcustomType: \"ask:payload\",\n\t\tdata: {\n\t\t\tversion,\n\t\t\tsource: \"tool\",\n\t\t\tparams: storedParams,\n\t\t\tsourceEntryId,\n\t\t\ttimestamp: 1,\n\t\t},\n\t};\n}"
+},
+{
+"h": "T34-031",
+"text": "vendor/pi-mono/packages/coding-agent/docs/custom-provider.md#L114-L132\ntp://localhost:1234/v1\",\n    apiKey: \"$LOCAL_OPENAI_API_KEY\",\n    api: \"openai-completions\",\n    models: payload.data.map((model) => ({\n      id: model.id,\n      name: model.name ?? model.id,\n      reasoning: false,\n      input: [\"text\"],\n      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },\n      contextWindow: model.context_window ?? 128000,\n      maxTokens: model.max_tokens ?? 4096,\n    })),\n  });\n}\n```\n\nThis registers the fetched models before startup finishes.\n\n```typescript\npi."
+},
+{
+"h": "T34-032",
+"text": "extensions/ask-user/src/ask-payload-store.ts#L23-L52\nexport function appendAskPayload(\n\tpi: Pick<ExtensionAPI, \"appendEntry\">,\n\tdata: Omit<AskPayloadEntryData, \"timestamp\" | \"version\">\n): void {\n\tpi.appendEntry(ASK_PAYLOAD_ENTRY_TYPE, {\n\t\tversion: ASK_PAYLOAD_ENTRY_VERSION,\n\t\ttimestamp: Date.now(),\n\t\t...data,\n\t});\n}\n\nexport function findLatestPayloadInCurrentBranch(\n\tctx: Pick<ExtensionContext, \"sessionManager\">,\n\tsource: AskPayloadSource\n): { data?: AskPayloadEntryData; invalidMatchFound: boolean } {\n\tlet invalidMatchFound = false;\n\tfor (const entry of [...ctx.sessionManager.getBranch()].reverse()) {\n\t\tif (!isAskPayloadEntry(entry)) {\n\t\t\tcontinue;\n\t\t}\n\t\tconst data = entry.data;\n\t\tif (data?.source !== source) {\n\t\t\tcontinue;\n\t\t}\n\t\tif (isValidAskPayloadData(data)) {\n\t\t\treturn { data, invalidMatchFound };\n\t\t}\n\t\tinvalidMatchFound = true;\n\t}\n\treturn { invalidMatchFound };\n}"
+}
+]
+},
+{
+"qid": "T40",
+"query": "^## .badge",
+"need": "make the thing go to the left the trebol and make it cleaner dont render it inside of the tui and make it cliockable it looks a bit rough use customer rendering from https://docs.stencil.so/tern/index.md",
+"next_files": [
+"docs/reference/tern-site/elements/chrome.md"
+],
+"edited_or_committed": [],
+"items": [
+{
+"h": "T40-000",
+"text": ".pi/lib/tools/swarm-read-image.ts\n}"
+},
+{
+"h": "T40-001",
+"text": "extensions/swarm-background-bash/extension.ts\n}"
+},
+{
+"h": "T40-002",
+"text": ".pi/lib/state/knowledge-promotion.ts\n}"
+},
+{
+"h": "T40-003",
+"text": "docs/reference/tern-site/elements/data.md#L377-L392\nev.ev == \"toggle\" then\n\t\tstate.open[ev.key] = not ev.collapsed\n\tend\nend,\n```\n\n## `badge`\n\nA small rounded pill with plain text, tinted by its tone: text in the tone color, a 10% tone background and a 22%\ntone ring. Without a tone (or with `neutral`) it is a gray chip. It never wraps or shrinks.\n\n**Build it:** `tern.ui.badge(text, tone)` (see [UI Builders](../reference/ui.md#badge)), or\n`tern.ui.node(\"badge\", { text = \u2026, tone = \u2026 })`.\n\n| Prop | Type | Default | Meaning |\n| --- | --- | --- | ---"
+},
+{
+"h": "T40-004",
+"text": "docs/reference/tern-site/elements/data.md#L418-L433\ny\"), ui.badge(ok and \"passed\" or \"failed\", ok and \"success\" or \"error\") })\n```\n\nEvery tone, after a badge with none:\n\n```lua\nlocal tones = { \"neutral\", \"accent\", \"info\", \"success\", \"warning\", \"error\", \"pending\", \"muted\", \"user\" }\nlocal badges = { ui.node(\"badge\", { text = \"untoned\" }) }\nfor _, tone in tones do\n\ttable.insert(badges, ui.badge(tone, tone))\nend\nreturn ui.node(\"row\", { gap = \"sm\", wrap = true }, badges)\n```\n\n<figure class=\"tn-figure\">\n<img class=\"tn-light\" loading=\"lazy\" decoding=\"as"
+},
+{
+"h": "T40-005",
+"text": "docs/reference/tern-site/elements/index.md#L71-L77\nd#badge) | `badge` | none | A pill chip |\n| `kbd` | [Data](data.md#kbd) | `node` | none | Keycaps |\n| `icon` | [Data](data.md#icon) | `node` | none | A named icon |\n| `image` | [Data](data.md#image) | `node` | over the picture | An image from a blob (animations play) |\n| `list` | [Lists, Tabs and Pickers](lists.md#list) | `list` | its `item`s | A selectable list |\n| `item` | [Lists, Tabs and Pickers](lists.md#item) | `list` | none | One list row |\n| `tabs` | [Lists, Tabs and Pickers](lists.md#ta"
+},
+{
+"h": "T40-006",
+"text": "packages/context/skills/builtins/swarm-workflow/references/EXECUTION-STRATEGIES.md\n```"
+},
+{
+"h": "T40-007",
+"text": "docs/reference/tern-site/reference/actions.md\ned."
+},
+{
+"h": "T40-008",
+"text": ".pi/lib/tools/swarm-bgprocess.ts\n};"
+},
+{
+"h": "T40-009",
+"text": ".pi/lib/tern/startup-card.ts#L106-L128\nfunction counts(snapshot: GitSnapshot) {\n\treturn {\n\t\tconflicts: snapshot.entries.filter((e) => e.conflict).length,\n\t\tchanged: snapshot.entries.filter((e) => !e.untracked && !e.conflict).length,\n\t\tuntracked: snapshot.entries.filter((e) => e.untracked).length,\n\t};\n}\n\nfunction headerRow(repo: Extract<RepoStatus, { git: true }>): TspNode {\n\tconst { snapshot } = repo;\n\tconst c = counts(snapshot);\n\tconst badges: TspNode[] = [\n\t\t{ id: \"tern-startup-branch\", k: \"badge\", p: { text: snapshot.detached ? `detached at ${snapshot.oid.slice(0, 7)}` : snapshot.branch, tone: snapshot.detached ? \"warning\" : \"accent\", role: \"pi.startup.branch\" } },\n\t];\n\tlet state: { text: string; tone: string };\n\tif (c.conflicts) state = { text: `${c.conflicts} conflicts`, tone: \"error\" };\n\telse if (c.changed + c.untracked === 0) state = { text: \"clean\", tone: \"success\" };\n\telse state = { text: [c.changed ? `${c.changed} changed` : \"\", c.untracked ? `${c.untracked} untracked` : \"\"].filter(Boolean).join(\" \u00b7 \"), tone: \"warning\" };\n\tbadges.push({ id: \"tern-startup-state\", k: \"badge\", p: { text: state.text, tone: state.tone, role: \"pi.startup.state\", actions: { click: \"git.open\" }, title: \"Open git status\" } });\n\tif (sna"
+},
+{
+"h": "T40-010",
+"text": "docs/reference/tern-site/styles/index.md#L497-L507\nsame pair in teal on the right\">\n<img class=\"tn-dark\" loading=\"lazy\" decoding=\"async\" src=\"../figures/styles-index-tone.dark.png\" srcset=\"../figures/styles-index-tone.dark.png 2x\" alt=\"A pending badge and progress bar in Tern's purple on the left, and the same pair in teal on the right\">\n<figcaption>Left, <code>pending</code> nodes without a <code>ci.</code> role; right, with one.</figcaption>\n</figure>\n\n### A custom badge look\n\n```lua\nlocal ui = tern.ui\n\nlocal badge = ui.node(\"badge\", { text ="
+},
+{
+"h": "T40-011",
+"text": "docs/reference/tern-site/elements/data.md#L433-L434\n<img class=\"tn-light\" loading=\"lazy\" decoding=\"async\" src=\"../figures/elements-data-badges.light.png\" srcset=\"../figures/elements-data-badges.light.png 2x\" alt=\"Ten badges: untoned and neutral in gray, then accent, info, success, warning, error, pending, muted and user each tinted in its tone color\">\n<img class=\"tn-dark\" loading=\"lazy\" decoding=\"async\" src=\"../figures/elements-data-badges.dark.png\" srcset=\"../figures/elements-data-badges.dark.png 2x\" alt=\"Ten badges: untoned and neutral in gray"
+},
+{
+"h": "T40-012",
+"text": "docs/reference/tern-site/elements/lists.md#L416-L421\n`bar` column a number 0\u20131 is a meter |\n| `badges` | `{ {text, tone?, title?} }` | Up to 3 badges after the label, then a `+N` badge whose tooltip lists the rest |\n| `chips` | `{ {text, on?, auto?, dot?} }` | Role chips after the badges; `dot` is a palette name drawn with `--sf-p-<dot>` |\n| `tone` | tone name | `data-tone` on the row |\n| `disabled` | `true` \\| `string` | Dims the row (`.off`); a string is its tooltip reason. A disabled row still selects but never activates |\n| `hits` | `{ {from,"
+},
+{
+"h": "T40-013",
+"text": "extensions/swarm-program-status/extension.ts\n}"
+},
+{
+"h": "T40-014",
+"text": "docs/reference/tern-site/styles/index.md#L524-L526\ng\" srcset=\"../figures/styles-index-badge.light.png 2x\" alt=\"An accent badge reading beta, and the todo.flag badge: a square, filled blue tag reading BETA in white\">\n<img class=\"tn-dark\" loading=\"lazy\" decoding=\"async\" src=\"../figures/styles-index-badge.dark.png\" srcset=\"../figures/styles-index-badge.dark.png 2x\" alt=\"An accent badge reading beta, and the todo.flag badge: a square, filled blue tag reading BETA in white\">\n<figcaption>Left, <code>ui.badge(\"beta\", \"accent\")</code>; right, the <code>"
+},
+{
+"h": "T40-015",
+"text": "docs/reference/upstream-snapshot.md\nblished."
+},
+{
+"h": "T40-016",
+"text": "docs/reference/tern-site/elements/work.md#L348-L354\nagent` | string | none | Type shown as the first `.sf-badge` (no tone). |\n| `badges` | array of `{ text, tone? }` | `[]` | More `.sf-badge` chips. |\n| `task` | text | none | One-line task; ellipsized, full text as tooltip. |\n| `status` | see above | `\"pending\"` | Class `st-<status>`, glyph, timer mode. |\n| `model` | string | none | Model chip. |\n| `thinking` | string | none | Palette token for the model chip's dot. |\n| `stats` | `{ tools?, requests?, done?, context?, contextLabel?, tokens?, cost"
+},
+{
+"h": "T40-017",
+"text": "docs/reference/tern-site/examples/terraform.md#L451-L468\n,\n\t\t\t\t{ \"forget\", \"to forget\", \"muted\" },\n\t\t\t}\n\t\tdo\n\t\t\tlocal n = summary[b[1]] or 0\n\t\t\tif n > 0 then\n\t\t\t\tany = true\n\t\t\t\ttable.insert(out, ui.badge(n .. \" \" .. b[2], b[3]))\n\t\t\tend\n\t\tend\n\t\tif not any then\n\t\t\ttable.insert(out, ui.badge(\"No resource changes\", \"muted\"))\n\t\tend\n\telseif state.nochanges then\n\t\ttable.insert(out, ui.badge(\"No changes\", \"success\"))\n\telseif state.status == nil then\n\t\ttable.insert(out, ui.badge(\"Planning\", \"pending\"))\n\t\tlocal n = counts(state)\n\t\tfor _, g in GROUPS do\n\t\t\tif n["
+},
+{
+"h": "T40-018",
+"text": "extensions/swarm-websearch/extension.ts\n}"
+},
+{
+"h": "T40-019",
+"text": "docs/reference/tern-site/styles/index.md#L507-L524\ntern.ui\n\nlocal badge = ui.node(\"badge\", { text = \"beta\", tone = \"accent\", role = \"todo.flag\" })\n```\n\n```css\n.sf-badge[data-role='todo.flag'] {\n\theight: 16px;\n\tpadding: 0 5px;\n\tborder-radius: 4px;\n\tfont-family: var(--mono);\n\ttext-transform: uppercase;\n\tcolor: white;\n\tbackground: var(--accent-fill);\n\tbox-shadow: none;\n}\n```\n\n<figure class=\"tn-figure\">\n<img class=\"tn-light\" loading=\"lazy\" decoding=\"async\" src=\"../figures/styles-index-badge.light.png\" srcset=\"../figures/styles-index-badge.light.png"
+},
+{
+"h": "T40-020",
+"text": ".pi/lib/tools/swarm-apply-patch.ts\n}"
+},
+{
+"h": "T40-021",
+"text": "docs/reference/tern-sdk/pages/go/tern/README.md\n`"
+},
+{
+"h": "T40-022",
+"text": "docs/reference/tern-site/elements/data.md#L403-L418\ncess\">ok</span>\n```\n\n| Target | Selector |\n| --- | --- |\n| The node | `.sf-badge` |\n| A tone | `.sf-badge[data-tone='error']` |\n| No tone | `.sf-badge:not([data-tone])` |\n\nThe badge is 18px tall, `padding: 0 7px`, `500 11px` sans, colored from `--tc` (the tone color the `[data-tone]`\nrules set; see [Variables](../styles/variables.md)). The neutral look uses `--t2`, `--chip-bg` and `--l2`.\n\n```lua\nlocal ui = tern.ui\n\nreturn ui.row({ ui.text(\"deploy\"), ui.badge(ok and \"passed\" or \"failed\", ok and"
+},
+{
+"h": "T40-023",
+"text": ".pi/lib/context/swarm-skill-registry.ts\n}"
+}
+]
+}
+]

@@ -50,7 +50,6 @@ describe("TaskManage hooks coordinator", () => {
     const p = pi(), m = new TaskManager(), h = new TaskHooksCoordinator(m, p, { enforcementMode: "block" });
     expect(h.on(event("tool_call", { toolName: "write", input: {} }), {})).toMatchObject({ block: true });
     expect(h.on(event("tool_call", { toolName: "read", input: {} }), {})).toBeUndefined();
-    expect(h.on(event("tool_call", { toolName: "bootstrap", input: { task: "work" } }), {})).toBeUndefined();
     expect(h.on(event("tool_call", { toolName: "write", input: {} }), { isSubagent: true })).toBeUndefined();
     m.execute({ operations: [{ key: "a", op: "create", subject: "work", questions: [{ id: "accept", text: "Is this verified?" }], status: "in_progress" }] });
     expect(h.on(event("tool_call", { toolName: "write", input: {} }), {})).toBeUndefined();

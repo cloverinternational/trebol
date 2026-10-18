@@ -1,0 +1,14 @@
+runs 225 invalid 0
+M pass 0.800 | fix 0.848 q 0.762
+F pass 0.573 | fix 0.818 q 0.381
+Fnb pass 0.627 | fix 0.758 q 0.524
+M-F +0.227 [+0.107,+0.360] CLAIM
+Fnb-F +0.053 [-0.080,+0.187] n.s.
+M-Fnb +0.173 [+0.053,+0.293] CLAIM
+  median toolCalls M:4 F:6 Fnb:6
+  median errors M:0 F:0 Fnb:0
+  median blocked M:0 F:0 Fnb:0
+  median memoryCalls M:1 F:1 Fnb:1
+  median modelCalls M:4 F:6 Fnb:5
+  median seconds M:16.675 F:35.329 Fnb:20.73
+  median modeLines M:0 F:0 Fnb:0

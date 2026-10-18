@@ -1,0 +1,11 @@
+{
+ "task": "A TaskManage completion was rejected with `tool_result_unavailable` for the evidence ref `tool:mcp__Bash#3`. Explain the exact cause and give the correct reference form, citing the code. Do not modify any files.",
+ "commit": "218ba134462b8447cd352272189863c8e66fa38a",
+ "model": "default",
+ "memory": "/Users/swarm/Work/Clover/trebol/artifacts/memory-pilot/runs/pair-01-218ba13/mem-A-2",
+ "workspace": "/private/tmp/trebol-pilot-ws/218ba134462b-f3b0a6d2",
+ "exit": 0,
+ "seconds": 58.671,
+ "sessions": 1,
+ "taskSha": "943bb94a65d4046f"
+}

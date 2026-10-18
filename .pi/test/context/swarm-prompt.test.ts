@@ -43,7 +43,7 @@ describe("Forge prompt assembly", () => {
     expect(result.prompt).toContain("put source-only optional segments in a clearly conditional branch");
     expect(result.prompt).toContain("add the diagram to that same response rather than relying on a later hook");
     expect(result.prompt).toContain("Simple factual answers or questions lacking evidence need no diagram");
-    expect(result.prompt).toContain("# Conversation startup\nWhen starting a conversation, call bootstrap first, then use TaskManage.");
+    expect(result.prompt).toContain("# Conversation startup\nWhen starting a conversation, use TaskManage.");
     expect(result.prompt.indexOf(MAIN_REPORTING_DIRECTIVE)).toBeLessThan(result.prompt.indexOf("# Delegation (the Task tool)"));
     expect(result.prompt).toContain("<swarmos_cached_context>\nAs you answer the user's questions, you can use the following context:\n<context name=\"agentsMd\">\nworkspace instructions\n</context>");
     expect(result.prompt).toContain("stay in workspace");

@@ -2,6 +2,7 @@ import { openKnowledgeStore, type KnowledgeRecord } from "../state/knowledge-sto
 import { type SharedScope } from "../state/shared-memory.ts";
 import { ContextIndex } from "./page-index-memory.ts";
 import { RetrievalSession } from "./context-retrieval.ts";
+import { ANSWER_SOURCE, recheckAnswerEvidence } from "../state/answer-evidence.ts";
 
 /** A request-local projection. Durable records remain authoritative; the tree is
  * rebuilt from verified revisions and cannot resurrect deleted/candidate facts.
@@ -15,6 +16,7 @@ export function recallKnowledge(cwd: string, query: string, options: {
   const index = new ContextIndex();
   const origins = new Map<string, KnowledgeRecord>();
   let candidatesExcluded = 0;
+  let staleExcluded = 0;
   let scannedRecords = 0;
   const scannedScopes: SharedScope[] = [];
   try {
@@ -25,6 +27,9 @@ export function recallKnowledge(cwd: string, query: string, options: {
         scannedRecords++;
         if (record.deleted) continue;
         if (record.status !== "verified") { candidatesExcluded++; continue; }
+        // TaskManage answers are auto-verified by evidence anchoring, so their
+        // cited spans are re-checked on every read; changed evidence is stale.
+        if (record.source.startsWith(`${ANSWER_SOURCE}:`) && !recheckAnswerEvidence(cwd, record.evidence).ok) { staleExcluded++; continue; }
         const source = index.index(`${selected}/${record.id}`, `# ${record.kind}\n${record.text}`, scope);
         origins.set(source.data.id, record);
       }
@@ -43,10 +48,10 @@ export function recallKnowledge(cwd: string, query: string, options: {
       };
     }));
     return { status: origins.size === 0 ? "empty" as const : memories.length ? "ok" as const : "no-match" as const,
-      memories, candidatesExcluded, scannedScopes, scannedRecords, scanned: scannedRecords, sourceLimitPerScope: null, untrusted: true };
+      memories, candidatesExcluded, staleExcluded, scannedScopes, scannedRecords, scanned: scannedRecords, sourceLimitPerScope: null, untrusted: true };
   } catch {
     // Do not turn a corrupt/unreadable store into an apparently empty index, or
     // expose arbitrary persisted contents through a parse error message.
-    return { status: "unavailable" as const, memories: [], candidatesExcluded, scannedScopes, scannedRecords, scanned: scannedRecords, sourceLimitPerScope: null, untrusted: true };
+    return { status: "unavailable" as const, memories: [], candidatesExcluded, staleExcluded, scannedScopes, scannedRecords, scanned: scannedRecords, sourceLimitPerScope: null, untrusted: true };
   }
 }

@@ -80,8 +80,8 @@ path, and preserve native tools and unrelated extensions while disabled.
 | `.pi/config/` | Project configuration: `prompt-context.json`, `swarm-settings.json`, and the ignored `api-keys.json`. |
 | `.pi/themes/` | Local Pi theme definitions. |
 | `packages/<layer>/<name>/` | npm workspaces (`packages/*/*`). Directory name equals the npm name suffix: `packages/runtime/core` is `@pi-swarm/core`. |
-| `packages/runtime/` | `core` (session identity, event journal), `contract` (immutable profile/capability contracts), `runtime-contracts` (control-plane, daemon, goal-loop, task interfaces), `bootstrap` (bounded combined/parallel selector orchestration and settings persistence). |
-| `packages/context/` | `prompt` (canonical prompt assets and provenance), `skills` (loader, registry, builtins), `autogenskills` (generated-skill lifecycle). |
+| `packages/runtime/` | `core` (session identity, event journal), `contract` (immutable profile/capability contracts), `runtime-contracts` (control-plane, daemon, goal-loop, task interfaces). |
+| `packages/context/` | `prompt` (canonical prompt markdown and provenance), `skills` (loader, registry, builtins), `autogenskills` (generated-skill lifecycle). |
 | `packages/policy/` | `policy` (capability, workspace, mutation, network, approval). |
 | `packages/tools/` | `agents`, `taskmanage`, `mcp`, `schedule`. |
 | `tools/experiments/bootstrap-agent/` | Opt-in bootstrap experiments; `planning-contract.mjs` provides experimental prompt variants and strict plan validation. Private history replays stay in ignored artifacts; planning scores do not prove execution or memory retrieval. |
@@ -197,10 +197,10 @@ When changing discovery, preserve these invariants:
 
 | Layer (load order) | Entrypoints |
 | --- | --- |
-| `00-runtime` | `cache-telemetry`, `swarm-update`, `bootstrap`, `hooks`, `swarm-runtime`, `swarm-transport-parity` |
+| `00-runtime` | `cache-telemetry`, `swarm-update`, `hooks`, `swarm-runtime`, `swarm-transport-parity` |
 | `10-context` | `autogenskills`, `prompt-context-configure`, `swarm-plan-mode`, `swarm-prompt`, `swarm-auto`, `swarm-skills`, `swarm-thinking`, `system-inspector`, `system-prompts` |
 | `20-policy` | `swarm-disk-hooks`, `project-init` |
-| `30-tools` | `annoyed/`, `control-task-tools`, `history-search`, `ask-user/`, `paseo`, `research-tools`, `swarm-goal`, `swarm-agent-tools`, `swarm-background-bash`, `swarm-bash`, `swarm-fs-tools`, `swarm-history-vault-tools`, `taskmanage`, `vault` |
+| `30-tools` | `annoyed/`, `control-task-tools`, `history-search`, `ask-user/`, `paseo`, `project-context`, `research-tools`, `swarm-goal`, `swarm-agent-tools`, `swarm-background-bash`, `swarm-bash`, `swarm-fs-tools`, `swarm-history-vault-tools`, `taskmanage`, `vault` |
 | `40-state` | `memory-history`, `task-candidate-capture`, `knowledge-enrichment`, `candidate-memory-review`, `jev-knowledge-audit`, `memory-maintenance`, `swarm-conversation-metadata` |
 | `50-ui` | `control-panel`, `supervisor`, `conversation-metrics`, `swarm-themes`, `swarm-tools-status`, `swarm-btw`, `swarm-image-paste`, `swarm-program-status` (through `.trebol-guards/` wrappers) |
 
@@ -227,12 +227,12 @@ belongs in `packages/policy/policy`, and rendering belongs in the extension/rend
 | `task_create`, `task_update`, `task_get`, `task_list`, `task_delete`, `task_claim`, `task_note`, `task_plan`, `task_complete`, `task_reopen`, `task_block`, `task_unblock`, `task_focus`, `task_unfocus`, `task_status`, `run_status` | `extensions/taskmanage/extension.ts`, `extensions/control-task-tools/extension.ts` | `packages/tools/taskmanage/src/task-manage.ts`, `packages/tools/taskmanage/src/workflow.ts`, `packages/tools/taskmanage/src/persistence.ts`, `packages/runtime/runtime-contracts/src/control-task.ts`; do not duplicate task state in extensions. |
 | `HistorySearch`, `HistoryGet` | `extensions/swarm-history-vault-tools/extension.ts` and `extensions/history-search/extension.ts` | `.pi/lib/tools/swarm-history-tools.ts` with shared `history-reader.ts`, `history-matching.ts`, and `history-admission.ts`; streaming history is read-only, resource-budgeted, redacted, and reports incomplete scans. See `docs/reference/history-search.md`. |
 | `memory_history` | `extensions/memory-history/extension.ts` | `.pi/lib/state/shared-memory.ts`: repository-default immutable records under `~/.swarm/memory` (override `PI_SWARM_MEMORY_DIR`), Git-common-dir repository identity, worktree overlay and explicit global scope. Legacy session scope remains readable. Redact before writes. |
+| `project_context` | `extensions/project-context/extension.ts` | Read-only hybrid (dense + BM25, RRF k=60) search over repo markdown and `.ts`/`.mjs` source including `.pi/`: legacy-SSE MCP client for Agent-MCP `ask_project_rag` on spark (`PROJECT_CONTEXT_URL`, default `http://100.84.178.124:8090`; token from `PROJECT_CONTEXT_TOKEN` or `~/.config/agent-mcp/spark-token`). Spark runs systemd user units `embeddinggemma` (`google/embeddinggemma-2`, 768d, `127.0.0.1:8200`) and `agent-mcp` (patched branch `embeddinggemma`, `AGENT_MCP_CHAT_MODEL=none` returns ranked chunks; `AGENT_MCP_ADVANCED=1` enables code indexing, `AGENT_MCP_INDEX_DOTDIRS=.pi`, `AGENT_MCP_DOC_TITLE=path`, `AGENT_MCP_HYBRID=1`; the embedding server serialises encodes because 25 concurrent requests OOM-killed it). Keyword-only hits show `keyword match`; Agent-MCP per-file code summaries cite the bare path. Chunks map to local `path#Lx-Ly`; a mismatch is flagged stale. The spark corpus is a copy (`~/trebol-corpus-v2`) and must be re-synced after doc changes. E2E: `node tools/e2e/project-context.mjs`. Not task-gate exempt. Sealed evaluation (`artifacts/memory-audit/h2h-results.md#project_context-eval`, local artifact; reproduce with `node tools/e2e/project-context-eval.mjs`): hybrid beats dense-only, nDCG@10 +0.144 [95% CI +0.077, +0.214]; beats rg by +0.396. The downstream agent benefit over ripgrep is not established: A−B pass rate −0.067 [−0.333, +0.200], and the agent never chose the tool unprompted. Regex-gold hit rates are not a valid retrieval metric. |
 | `memory_history recall` | `extensions/memory-history/extension.ts` | `.pi/lib/context/knowledge-pageindex.ts` projects scoped records into read-only PageIndex sections; `.pi/lib/context/memory-agent.ts` calls an isolated Pi model whose only tools are `memory_browse`, `memory_read`, and `memory_select` from `.pi/lib/state/memory-retrieval-worker.ts`. The parent validates selected IDs against its snapshot. Candidate results are leads, never verified recall; writes still use explicit store operations. |
 | `memory_history offer` | `extensions/memory-history/extension.ts` | `.pi/lib/context/memory-handoff.ts` accepts bounded explicit text, source and evidence; tool-less Pi consultation judges durable project knowledge, then the parent writes only a candidate through `KnowledgeStore`. A content/source-derived ID deduplicates retries. A read-only PageIndex projection acknowledges the exact saved revision as `stored-indexed`, otherwise `stored-index-pending` with a retry hint. No global or verified write. |
 | `project_init`, `/init` | `extensions/project-init/extension.ts` | `.pi/lib/policy/project-scaffold.ts`, `.pi/lib/policy/project-structure.ts`. `/init` injects an interview brief via `sendUserMessage`; the agent interviews with `ask_user_question` and calls `project_init` (`inspect`/`plan`/`apply`). There is no modal wizard. `apply` never clobbers existing files. Like `memory_history`, this is an intentional model-facing extension tool, so `swarmSurfaceFor` must keep `project_init` on the surface — otherwise it registers but is gated out and the agent reports it as missing. |
-| `bootstrap` tool, `/bootstrap`, native `/settings` → Bootstrap model | `extensions/bootstrap/extension.ts` | `packages/runtime/bootstrap/src/`; parallel/combined/off strategies, read-only model consultations, streaming tool renderer and startup guidance. Model inherits the current session unless overridden. Settings use Git common dir with non-Git `.swarm` fallback. Handoff invokes active Skill/TaskManage definitions through the registered policy hooks; both modes propose task reconciliation and load selected skills through the registered handoff; task changes require `commitTasks=true`, with `pi-swarm-bootstrap-task` recording retry dedup. Returned `loadedSkills` contains the instructions; `next.loadedSkillNames` identifies already-loaded skills, not work to invoke again. Plans remain proposals requiring repository verification. `.pi/lib/ui/bootstrap-settings.ts` augments the native SettingsList through an isolated, shape-checked compatibility adapter; no replacement `/settings` command or host-file edits. Recheck this adapter against Pi UI upgrades. |
 | `skills_list`, `skill_view` | `extensions/swarm-skills/extension.ts` | `packages/context/skills/src/index.ts` and `.pi/lib/context/swarm-skill-registry.ts`; skill bodies/support files stay on disk. |
-| Final Mermaid response repair and follow-up | `extensions/mermaid-response/extension.ts` | `.pi/lib/context/mermaid-response.ts` and `mermaid-followup.ts`; `message_end` replaces only successful finalized assistant text before persistence/final redraw. The streaming preview may already have shown the original. Mermaid fences are processed independently (up to 16); only one narrowly recognized flowchart arrow or sequence-message colon per diagram is changed after successful revalidation. Other syntax and validator failures preserve the original. For conceptual/explicit-diagram user requests, `turn_end` queues one model-visible `followUp` if a substantial final explanation lacks a Mermaid fence; it does not replace the previous response, and a second omission does not loop. Pi's terminal Markdown renderer displays Mermaid as code, not SVG connectors; connector color belongs in the actual diagram-rendering client. |
+| Final Mermaid response repair and follow-up | `extensions/mermaid-response/extension.ts` | `.pi/lib/context/mermaid-response.ts` and `mermaid-followup.ts`; `message_end` replaces only successful finalized assistant text before persistence/final redraw. The streaming preview may already have shown the original. Mermaid fences are processed independently (up to 16); only one narrowly recognized flowchart arrow or sequence-message colon per diagram is changed after successful revalidation. Other syntax and validator failures preserve the original. For conceptual/explicit-diagram user requests, `turn_end` queues one model-visible `followUp` if a substantial final explanation lacks a Mermaid fence; it does not replace the previous response, and a second omission does not loop. The follow-up text tells the model to stay on the original request and names the hook's own source files only when the prompt is about the Mermaid hook; it is never sent in subagents (`PI_SWARM_SUBAGENT=1`), whose final text is the deliverable (#299; e2e `node tools/e2e/mermaid-followup-stays-on-task.mjs`). Pi's terminal Markdown renderer displays Mermaid as code, not SVG connectors; connector color belongs in the actual diagram-rendering client. |
 | `Skill`, `SkillManage` | skill/autogen integration via `extensions/swarm-skills/extension.ts`, `extensions/autogenskills/extension.ts` | `packages/context/autogenskills/src/index.ts`; mutate skills only through the vault/revision API. |
 | `web_fetch`, `deepwiki`, `browser_get_page` | `extensions/research-tools/extension.ts` | Extension-local bounded evidence fetcher; provenance and network policy are coupled requirements. |
 | `enter_plan_mode`, `exit_plan_mode` | `extensions/swarm-plan-mode/extension.ts` | `.pi/lib/context/swarm-plan-mode.ts`; plan approval is separate from implementation. |
@@ -248,10 +248,9 @@ belongs in `packages/policy/policy`, and rendering belongs in the extension/rend
 | `mcp__<server>__<tool>` | `extensions/mcp-fallback/extension.ts`, `extensions/swarm-websearch/extension.ts` / `packages/tools/mcp/src/index.ts` | Provider-neutral declared MCP bridge; manifests, allowlists, transport, and auth are the seam. |
 | `annoyed` | `extensions/annoyed/extension.ts` | `extensions/annoyed/store.ts`, `.pi/lib/tools/swarm-annoyed-routing.ts`, and `swarm-annoyed-publish.ts`; a tool-less ownership judge routes project reports only to a verified active-workspace GitHub remote and Trebol triages upstream/non-actionable/uncertain/judge-failure/missing-remote cases. Publication receipts are SQLite metadata with a stable remote marker; ambiguous results are never blindly retried and SQLite/GitHub is not exactly-once. Transcript stays local; nudge behavior remains separate. |
 
-Model-facing workflow wording is adapted by
-`packages/context/prompt/src/workflow-guidance.ts` in prompt presets, Forge
-assembly, and tool-description loading. Upstream prompt assets and tool captures
-remain reference snapshots; local wording intentionally differs where blanket
+Model-facing Swarm prompt text lives in `prompts/swarm-system-prompt.md`, the
+single editable source for the Forge text, runtime directives, and section
+order. Tool captures remain reference snapshots; local wording intentionally differs where blanket
 workflow restrictions would prevent useful work. Preserve tool limits, approval
 requirements, and data-integrity rules when changing this adapter.
 
@@ -289,8 +288,8 @@ parent. `context-consult.ts` limits elapsed time and accepted output, but Pi's
 exec API buffers child output internally (peak memory is not streaming-bounded).
 The context index still has session scope; cross-session knowledge integration
 is unfinished. `.pi/lib/state/knowledge-store.ts` and
-`.pi/lib/context/knowledge-capture.ts` are tested integration components. Bootstrap now uses
-`knowledge-recall.ts` to project verified durable records into cited PageIndex
+`.pi/lib/context/knowledge-capture.ts` are tested integration components. `knowledge-recall.ts`
+(used by `memory_history`) projects verified durable records into cited PageIndex
 reads; candidate records are excluded, storage failure is distinct from no match,
 and recall now ranks all current scoped records from a single event-log projection before applying the response cap. `memory_history` supports `get` by scoped ID and status-filtered search for
 candidate review. Review instructions require source evidence and later
@@ -314,9 +313,24 @@ it candidate. This is a model judgment, not independent proof, and it never
 writes global scope. `task-candidate-capture.ts` projects TaskManage's current
 task snapshot into worktree-scoped candidates: each record includes every task
 question, answered or unanswered, plus answer/evidence when present. Repeated
-snapshots are idempotent and changed answers create revisions; neither capture
-nor a task's completion verifies a memory. Unverified candidates remain excluded
-from bootstrap recall. `context_search` can report candidate-leads on a session
+snapshots are idempotent and changed answers create revisions; the per-task
+record is never verified. In addition, each answer of a *completed* task becomes
+its own `kind: fact` record (source `taskmanage-answer:<session>:<task>:<question>`,
+text `Q:/A:/Task:`). `.pi/lib/state/answer-evidence.ts` anchors its evidence at
+capture: `path#Lx-Ly` stores the redacted span text, `file.md#Heading` the
+heading line, `tool:Name#n` the cited session entry (`<session>.jsonl#<id>`) and
+a result excerpt, and a bare path is existence-only. The record is `verified`
+iff at least one anchored ref exists and every ref resolved; otherwise it stays
+candidate with the unresolved refs and reasons in its text. Anchors are frozen at
+first capture. Paths are stored relative to, and bounded by, the git worktree
+root (the same identity that keys the worktree store), so recall from any
+subdirectory re-checks the same file; other worktrees do not see these records.
+`recallKnowledge` re-checks file spans/headings of
+answer records on every read and drops changed ones as `staleExcluded`.
+"Verified" here means the cited evidence is unchanged, not that the answer is
+correct. E2E: `node tools/e2e/taskmanage-answer-memory.mjs` (real Pi, scripted
+provider; 9 steps including subdirectory recall, uncited-edit near miss and cited-edit stale).
+Unverified candidates remain excluded from `recallKnowledge`. `context_search` can report candidate-leads on a session
 index miss, with Q&A projected as Markdown sections rather than raw JSON.
 `memory_history` operation `recall` invokes a bounded read-only memory agent
 using `PI_SWARM_MEMORY_RETRIEVAL_MODEL` or the session model (Luna fallback),
@@ -327,7 +341,7 @@ answer citing its read/selected card keys. The parent validates the receipt
 and returns the answer alongside original record IDs, revisions, statuses and
 citations. An empty index or unsupported answer returns no answer; a failed or
 malformed child is reported distinctly. Candidate cards remain unverified
-leads; `ask` neither writes nor changes bootstrap's verified-only recall.
+leads; `ask` neither writes nor changes `recallKnowledge`'s verified-only recall.
 When the isolated child submits a receipt but later exits nonzero or times out,
 the parent still validates that committed receipt; without one, it returns
 `unavailable`. Abort and session-generation checks still reject stale results.
@@ -344,10 +358,14 @@ browse/read/select events, receipt, exit and final tool response under ignored
 does not emit these traces; they are not added to model-visible results.
 `offer` lets the main agent hand explicit “remember that” content to a
 tool-less reviewer for a durable candidate and indexed acknowledgment. Existing
-`get` and other write operations retain their contracts. `search` now accepts
-reordered queries when every distinctive term occurs in the same record (as
-well as exact phrase matches); it does not synonym-expand or automatically
-include another scope. `recall` ranks strict PageIndex section matches first
+`get` and other write operations retain their contracts. `search` with a query is ranked
+(`.pi/lib/state/fact-index.ts`): exact phrase matches first, then BM25 over
+any query term fused (RRF k=60) with dense embeddings when
+`PI_SWARM_MEMORY_EMBED_URL` points at an OpenAI-compatible embeddings server
+(e.g. a tunnel to spark embeddinggemma; vectors cached per revision in the
+store's `embeddings.jsonl`; failure degrades to BM25 and is reported as
+`embedError`). It does not automatically include another scope. Benchmark:
+`artifacts/memory-bench/PREREG.md`, `tools/bench/retrieval-bench.mjs`. `recall` ranks strict PageIndex section matches first
 and fills unused candidate slots with partial matches containing at least two
 distinctive terms; the read-only agent still decides whether they support the
 query. A typo or synonym without lexical overlap may still return no result.
@@ -364,26 +382,9 @@ holds local context, and global requires explicitly shareable cross-project
 knowledge. Do not automatically duplicate facts across scopes. The PageIndex-style
 context extension currently retains its namespace/workspace/session boundary.
 
-Bootstrap selects at most two distinct skills (preferring one), enforces the cap
-in selector validation and orchestration, and invokes them before task drafting.
-The planner receives bounded, explicitly truncated instruction excerpts; the
-main agent receives up to 12,000 characters per skill with explicit truncation
-and an exact full-output spill file for further reads, without another invocation.
-This preview limit does not cap orchestrator tool calls or continued investigation.
-
-Bootstrap shared-memory recall uses task-token ranking across text and tags before
-its candidate cap (`recallShared`); explicit memory search retains substring
-semantics. Bootstrap handoff asks for evidence-backed knowledge enrichment after
-verification, not automatic transcript ingestion. No new learning is a valid
-outcome. Historical backfills must be reviewed, scoped, and redacted before
+Knowledge enrichment is explicit and evidence-backed after verification, not
+automatic transcript ingestion. No new learning is a valid outcome. Historical backfills must be reviewed, scoped, and redacted before
 promotion; experimental stores use `PI_SWARM_MEMORY_DIR`.
-
-`/mem on|off|status` persists bootstrap enforcement per repository. On adds a
-memory ceremony to the final assembled system prompt and blocks ordinary tool
-calls until bootstrap succeeds in the current session. Bootstrap and user/plan
-interaction remain available; `/mem off` is the recovery escape. Bootstrap is
-exempt from skill-budget gates, but selected skills still require real invocation
-to activate the working budget. Reload resets readiness, not the persisted mode.
 
 ### Skills and their locations
 
@@ -407,7 +408,7 @@ the Pi adapter only for registration/presentation concerns.
 | --- | --- | --- |
 | Central hook state and ordering | `.pi/lib/runtime/hook-state.ts` | Registration, enablement, persistence, and visibility. |
 | Same-session hook correction | `.pi/lib/runtime/hook-correction.ts` | Authoritative tool_call denial with same-step feedback and bounded repeat escalation. No speculative abort or settlement wake. |
-| Prompt hook `packages/context/prompt` | `extensions/swarm-prompt/extension.ts` | `before_agent_start`; prompt/context assembly in `packages/context/prompt/src/index.ts` and `.pi/lib/context/swarm-context.ts`. |
+| Prompt hook `packages/context/prompt` | `extensions/swarm-prompt/extension.ts` | `before_agent_start`; prompt/context assembly in `packages/context/prompt/src/index.ts` and `.pi/lib/context/swarm-context.ts`. Default base prompt is **Modes Agent** (`prompts/modes-system-prompt.md`, byte-identical to the benchmarked `artifacts/prompt-bench/arms/M.md`; `{{workspace}}` rendered per cwd, sudo section removed); it beat Forge in the sealed confirmatory run (M−F +0.227 [+0.107, +0.360], `artifacts/prompt-bench/confirm/FINDINGS.md`). `/system-prompt` still selects Forge Swarm Agent, Pi base, or saved prompts; a stored `activePrompt` wins. Footer explanation guidance is Forge-only. E2E: `node tools/e2e/modes-default-prompt.mjs`. |
 | Disk hooks `disk-hooks` | `extensions/swarm-disk-hooks/extension.ts` | Loads project/user hook config, executes bounded commands; maps tool/session/prompt/compact events. |
 | Structure guard `structure-guard` | `extensions/project-init/extension.ts` | `tool_call`; denies `write`/`edit`/`apply_patch` *creations* that violate `.project/structure.json` before the tool runs. Policy and classification in `.pi/lib/policy/project-structure.ts`, tool-argument extraction in `structure-guard.ts`. Existing paths are never blocked; `PI_SWARM_NO_STRUCTURE_GUARD=1` disables it like `PI_SWARM_NO_HOOKS`. |
 | Inline hook presentation | `extensions/hooks/extension.ts`, `.pi/lib/runtime/hook-render-bridge.ts`, `.pi/lib/runtime/hook-presenter.ts` | UI only; never make governance depend on rendering. |
@@ -416,14 +417,6 @@ the Pi adapter only for registration/presentation concerns.
 | Task enforcement | `extensions/taskmanage/extension.ts` | `packages/tools/taskmanage/src/task-hooks.ts`, `swarm-hook-runtime.ts`; task state is authoritative in taskmanage. |
 | Metrics/cache telemetry | `extensions/conversation-metrics/extension.ts`, `cache-telemetry.ts` | Agent/message/provider lifecycle; persisted telemetry is non-secret. |
 | Theme/thinking/UI lifecycle | `extensions/swarm-themes/extension.ts`, `swarm-thinking.ts` | Presentation/config only. |
-
-Task stop-time reconciliation lives in `.pi/lib/runtime/swarm-builtin-hooks-runtime.ts`.
-After observed work and a normal stop, it may request one follow-up per external
-input for an unowned, focused, dependency-ready task. Errors, questions, interaction
-tools, observed background dispatch, queued messages, plan mode, subagents, and
-shutdown suppress the wake. It never completes or deletes tasks automatically;
-pending/backlog work is not a reason to restart. The allowance resets on session
-start or interactive/RPC input, not on automatic continuations.
 
 For a hook bug, first identify the Pi event (`before_agent_start`, `tool_call`,
 `tool_result`, `turn_start/end`, `session_start/shutdown`, or compaction), then
@@ -443,7 +436,7 @@ are separate seams and should remain decoupled.
 | `packages/context/skills` | `packages/context/skills/src/index.ts`, `packages/context/skills/builtins/**` | Skill loading, precedence, builtins, metadata, or disclosure changes. |
 | `packages/runtime/contract` | `packages/runtime/contract/src/index.ts` | Immutable profile, capability IDs, digest, or provenance contracts change. |
 | `packages/runtime/core` | `packages/runtime/core/src/index.ts` | Session identity, event journal, or runtime replacement semantics change. |
-| `packages/context/prompt` | `packages/context/prompt/src/index.ts`, `assets/*.txt`, `scripts/sync.mjs` | Canonical prompt assets or prompt provenance changes. |
+| `packages/context/prompt` | `packages/context/prompt/src/index.ts`, `prompts/swarm-system-prompt.md` | Canonical prompt text, section order, or prompt provenance changes. |
 | `packages/tools/taskmanage` | `packages/tools/taskmanage/src/*.ts` | Task persistence, hooks, workflows, interaction, or authoritative task lifecycle changes. |
 
 Tests live beside each package in its `test/` directory and under
@@ -492,6 +485,13 @@ Every agent must:
 When adding a new top-level package, extension, persistent entry type, hook
 group, or user-facing command, add it to the relevant tables above in the same
 patch. This is a contract, not optional documentation.
+
+## Tern work
+
+Whenever work touches or adds a Tern-related feature (for example
+`.pi/lib/tern/`, `tern-plugins/`, `extensions/tern-resume/`, or
+`tools/e2e/tern-*.mjs`), fetch and read
+https://docs.stencil.so/tern/index.md first, before planning or editing.
 
 ## Validation
 
@@ -568,9 +568,15 @@ Complete them with `answers: [{question,answer,evidence}]` in the same update;
 answers are ≤240 characters, evidence references ≤512. Use workspace-local
 `file.md#heading` or `file#Lx-Ly` references for detailed proof. Missing answers,
 unknown IDs and unavailable evidence reject completion. Reference availability
-is not semantic verification. Legacy questionless tasks remain compatible.
-Bootstrap carries questions into task proposals and committed operations. No
+is not semantic verification. Legacy questionless tasks remain compatible. No
 separate question lifecycle or follow-up tool-call limit is introduced.
+
+`create` operation keys are idempotency keys (#298). A replayed key succeeds
+only when the request is identical: each task stores `createFingerprint`, a
+SHA-256 of its create op. A different payload fails with non-retryable
+`idempotency_conflict` naming the existing task. Tasks persisted before the
+fingerprint fall back to comparing subject and questions. Update keys stay
+reusable per-call aliases. E2E: `node tools/e2e/taskmanage-create-key-conflict.mjs`.
 
 ## Jev first-finder knowledge audit (opt-in)
 
@@ -653,7 +659,7 @@ repository/worktree identity; missing workspaces remain unresolved. Explicit ali
 files are reviewable mapping evidence, never guessed from names. `review_staged.py`
 uses the restricted memory worker with an explicit staging store, fixed six-turn/
 90-second limits, and durable max-ten-job reservation ledger. No live promotion.
-Memory maintenance uses namespace `default` only so bootstrap can discover results;
+Memory maintenance uses namespace `default` only so recall can discover results;
 project isolation is provided by repository/worktree identity, not model-invented
 namespaces. See `docs/reference/jev-backfill-project-review.md` for references,
 current pilot counts, provenance, and unresolved coverage limits.
@@ -725,6 +731,15 @@ skill and read-only recovery paths remain available. The secondary coordinator
 stays silent to avoid duplicate hooks. Explicit hook-off policy remains honored.
 `node tools/experiments/jev-audit/task-enforcement-smoke.mjs` proves actual Pi
 blocked write -> TaskManage create -> successful write in a temporary workspace.
+`memory_history` `search`/`get` are exempt from this gate (`isReadOnlyMemoryCall`
+in `.pi/lib/runtime/swarm-toolclass.ts`); its write operations stay gated. All
+hooks are dormant for the first 5 turns (`HOOK_WARMUP_TURNS`), except composition
+hooks registered with `{ warmup: false }` (swarm-prompt, so the selected prompt reaches the first
+request; e2e `node tools/e2e/forge-prompt-first-turn.mjs`), so gate smokes
+must pad warm-up turns: `node tools/e2e/memory-gate.mjs` does, while the
+task-enforcement smoke above does not and currently passes its first write.
+Reviewed, citable project facts promoted from memory candidates live in
+`docs/reference/project-findings.md` under stable `F-NNNN` headings.
 
 Supervisor operational-review settings now also control reviewed parent task
 application; the hidden PI_SWARM_SUPERVISOR_TASK_APPLY flag is no longer required.
@@ -762,25 +777,9 @@ allowance, abort/error/user-interaction/background-work/shutdown and plan/child
 suppression remain. No auto-completion, deletion, or infinite continuation.
 Headless unavailable interaction must be reported with pending tasks retained.
 
-### Bootstrap task-first recovery
-
-Bootstrap now establishes an active task before fallible model consultation, or
-reuses the existing active task. It commits validated task reconciliation by default;
-legacy commitTasks is accepted but no longer disables task creation. Deterministic
-request keys avoid duplicate seed tasks on retry. Model failure does not prove
-bootstrap readiness; it leaves the created task and a visible error for recovery.
-
-The memory ceremony exempts TaskManage and normalized ask_user_question/ask_user
-interaction names, plus bootstrap and plan controls. Other gates still apply.
-Bootstrap renderer falls back for empty details rather than printing undefined.
-This renderer fix alone does not diagnose why a particular provider consultation
-failed. Reload required; inspect the returned explicit bootstrap failure if it persists.
-
 ### Temporary runtime review logs
-Bootstrap and Jev write bounded metadata under the active Git worktree root's
-`.swarmpi/execution/` and `.swarmpi/jev/` (cwd for non-Git projects). Bootstrap
-records correlated starts/stages/results/failure stage, selected memory IDs and
-skills/task mappings. Jev records attempt/outcome counts, not raw evidence or
+Jev writes bounded metadata under the active Git worktree root's
+`.swarmpi/jev/` (cwd for non-Git projects). Jev records attempt/outcome counts, not raw evidence or
 credentials. Best-effort writes must never break execution. Seven-day retention
 on next write, 500 files/category, 32KiB/file. Gitignored, safe to delete; logs are
 not memory and do not backfill earlier runs. Reload required for instrumentation.
@@ -856,8 +855,9 @@ scripted provider; requires no provider credentials).
 
 Native settlement now owns final notification: `.pi/lib/runtime/agent-settled.ts`
 retains the last attempt payload but schedules no timers. Do not reintroduce a
-quiet-period completion heuristic. Bootstrap tool calls prefer ctx.executeTool;
-lifecycle supervisor dispatch retains the compatibility path explicitly.
+quiet-period completion heuristic. Lifecycle supervisor dispatch of TaskManage
+(`.pi/lib/runtime/session-handoff.ts`) prefers ctx.executeTool and retains the
+registered-definition compatibility path explicitly.
 macOS background-shell streaming uses `.pi/lib/tools/pty-runner.py` with optional
 Python3 and a stdbuf/direct fallback; Linux uses util-linux script. Test the real
 shell suite after any runner change. Local complete-suite validation on macOS
@@ -870,11 +870,10 @@ Real-host check: `node tools/e2e/auto-boundary.mjs` (loopback scripted provider,
 isolated settings, no paid API). Scheduler timers still use session wakeup.
 
 Correction now uses authoritative tool_call rejection in every mode; speculative
-streaming abort previews and settled wakeups are removed. Bootstrap handoff
+streaming abort previews and settled wakeups are removed. Session handoff
 compatibility registrations are session-scoped and disposed on shutdown; native
 tool-context calls use Pi executeTool. Supervisor's non-tool-context fallback
 still sees only Trebol-registered hooks and remains explicit compatibility debt.
-Bootstrap settings patch disposal restores owned render methods and injected rows.
 
 Fallback hook dispatch is session-scoped, preserves multiple handlers per group,
 and removes owner registrations on shutdown. It rejects missing session identity.

@@ -122,7 +122,7 @@ state; it must not become the source of truth for that state.
 | `.pi/test/` | Tests for Pi-specific code |
 | `.pi/config/` | Project prompt and Swarm settings; credentials stay ignored |
 | `.pi/themes/` | Local Pi themes |
-| `packages/runtime/` | Core identity, contracts, runtime control, and bootstrap |
+| `packages/runtime/` | Core identity, contracts, and runtime control |
 | `packages/context/` | Prompt assets, skills, and generated-skill lifecycle |
 | `packages/policy/` | Capability and execution policy |
 | `packages/tools/` | Agents, MCP, scheduling, and task management |
@@ -216,14 +216,10 @@ The shortcut adapter is verified on Pi 0.99.2; rerun
 ### First task and memory
 
 1. Describe your task normally, e.g. “Inspect the auth flow and plan a safe fix.”
-   The agent's `bootstrap` tool selects relevant memory and up to two skills,
-   then creates or reconciles tasks. Inspect its evidence before acting.
-2. `/bootstrap status` reports strategy, model and readiness;
-   `/bootstrap parallel|combined|off|reset` changes strategy and
-   `/bootstrap model` opens a model selector. `/mem status|on|off` controls
-   bootstrap enforcement. While enforcement is on, ordinary tool calls before
-   bootstrap are blocked; `/mem off` is the recovery option if bootstrap fails.
-   `Ctrl+D` toggles the session-only bootstrap requirement (shown in the footer).
+   The default **Modes** system prompt has the agent search `memory_history`,
+   create a `TaskManage` task and declare its mode (PLAN/ACT/AUTO/DEBUG).
+   `/system-prompt` switches to the Forge prompt, Pi's base prompt or a saved one.
+2. Inspect the evidence the agent cites before trusting a plan.
 3. `/tasks` opens the **read-only** task browser (interactive TUI). Ask the
    agent to use `TaskManage` for edits, dependencies and evidence-backed
    completion. `/memory-capture status|on|off` reports or changes session
@@ -240,7 +236,7 @@ The shortcut adapter is verified on Pi 0.99.2; rerun
 
 ```mermaid
 flowchart LR
-  U[Describe task] --> B[bootstrap: recall skills and reconcile tasks]
+  U[Describe task] --> B[memory_history search + TaskManage task]
   B --> V[Check evidence and implement]
   V --> C[Candidate capture / memory_history offer]
   C --> R[Review candidate against source]
