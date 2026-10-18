@@ -10,6 +10,7 @@ Release metadata is kept in `package.json`, `update-manifest.json`, and this fil
 
 ### Fixed
 
+- Tern runner no longer crashes at startup on fresh checkouts: `prepare` now builds `packages/tools/taskmanage/dist` (imported by `.pi/lib/tern/task-view.ts`), and `doctor` checks for it.
 - Tern groups consecutive tool steps into a turn summary (live view shows active steps; finished runs collapse to done/failed/interrupted) and restores persisted tool calls on reload.
 - Ctrl+B moves the running foreground Bash command to the background.
 - `/goal` verdict judging uses an answer-only prompt (MET / NOT_MET / IMPOSSIBLE).
