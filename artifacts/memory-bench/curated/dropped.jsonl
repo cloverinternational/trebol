@@ -1,0 +1,80 @@
+{"id":"d11ea438-6768-407a-b8bc-f16a81c11fbb","reason":"stale: the hardcoded `/opt/homebrew/bin/","batch":0}
+{"id":"1d336412-8170-438b-bda2-c18523c1033a","reason":"merged into fact on bindCurrentSessionEx","batch":2}
+{"id":"4cb93c20-bc3f-4506-8395-87499d9e635d","reason":"stale: the repo now implements the doubl","batch":3}
+{"id":"632a5e38-9404-49cf-8c48-dd529cdf7d37","reason":"stale: the repo now implements the doubl","batch":3}
+{"id":"c3e112a0-b7b1-405c-bae3-179fa899d8ec","reason":"transient: a one-off GitHub release even","batch":4}
+{"id":"dedf14f3-f1df-45ed-88df-3e2e7aecfcb9","reason":"unsupported: the tool-node schema exists","batch":6}
+{"id":"2664e48a-d3ea-4275-9cb3-1fff71ff3ae2","reason":"stale: the repo keeps the Code Puppy lan","batch":6}
+{"id":"9e039dc3-bc7b-415a-9744-dbbb8c70c712","reason":"unsupported: the `tern.on(\"spawn\")` host","batch":8}
+{"id":"51eaed86-a758-4371-bb9e-e558f4cdc84e","reason":"unsupported: no shell-function route or ","batch":8}
+{"id":"72fb6082-d373-4fed-a71a-f0e70c06b46d","reason":"transient: a one-off user request for a ","batch":8}
+{"id":"8981346e-eb54-4023-8b3f-b2c11fa3d434","reason":"transient: a one-off live test observati","batch":8}
+{"id":"2ebab5dc-1e56-4746-ae58-006ec9b03bb2","reason":"transient: a task request to add message","batch":8}
+{"id":"3ae605cd-ac99-4450-8055-92fdf9f68fb3","reason":"unsupported: no `outside_allowed_roots` ","batch":8}
+{"id":"b4d16640-be0b-4f27-bb49-d5a280feb800","reason":"transient: point-in-time theme collision","batch":7}
+{"id":"d007c904-d5d7-4c66-b798-17e368770a46","reason":"unsupported: `tuiMode` and `--tui-mode` ","batch":7}
+{"id":"493ccb8b-a2c0-4c89-917d-34e1e4806956","reason":"stale: no `.trebol-guards/11-mandatory-c","batch":10}
+{"id":"0da0c4de-4eb7-4319-bceb-9a02f02b7a10","reason":"unsupported: the MCP config is in the gl","batch":10}
+{"id":"ff74b2d0-3809-4463-8fd7-0c6c686f5cbf","reason":"stale: docs/reference/pi-tern-extension-","batch":9}
+{"id":"0a2ec49a-a9da-4cb8-8228-46ef6816cc39","reason":"transient","batch":13}
+{"id":"712f8146-6847-4213-a1ab-69881696fffe","reason":"stale: extensions/swarm-btw/extension.ts","batch":13}
+{"id":"8fccf161-c27e-4f6e-98e1-18c245967955","reason":"transient","batch":13}
+{"id":"d39d34f9-b3e3-46c0-b6db-6a69c1539996","reason":"transient","batch":13}
+{"id":"260e1ca9-d1ad-4cbc-8aca-65dd20befd26","reason":"stale: `.pi/extensions/10-context/mandat","batch":11}
+{"id":"0a78c5cf-029e-4880-b7d8-67a03b5f652a","reason":"stale: `.pi/extensions/30-tools/ask-user","batch":11}
+{"id":"d16cfbfa-86d6-4620-a4e6-810e2e28dde5","reason":"stale: `extensions/ask-user/src/ask-tool","batch":11}
+{"id":"6c606533-a371-4f78-aafc-e5bd67a54333","reason":"transient: one-off record of a user's ho","batch":11}
+{"id":"85f035c4-7041-4aa9-91f1-109ad506c37f","reason":"stale: AGENTS.md#L240 states the former ","batch":11}
+{"id":"30bfb79c-ad6e-4c92-873b-5f9ee48cf247","reason":"stale: `handleRunningWorkInput` no longe","batch":12}
+{"id":"fa1280d5-9a96-4d7a-963a-54c8a73dc271","reason":"transient","batch":14}
+{"id":"72437f27-87e9-4a1a-b2ae-2b7e62615c50","reason":"transient","batch":14}
+{"id":"dd1f7aba-2832-4048-b869-af09ae78dcea","reason":"stale: the git index lists `.pi/lib/tern","batch":16}
+{"id":"0d23b8f0-bd42-499c-b1ce-f22915e5b761","reason":"stale: the repo now implements a Python ","batch":17}
+{"id":"d97529f7-6fb1-4e0f-b43b-ded43eaba64d","reason":"transient: one-off live run results and ","batch":17}
+{"id":"21560bad-6de8-47b1-8f43-7a9ae5264135","reason":"transient: point-in-time shell observati","batch":19}
+{"id":"f3414304-f272-41a7-8260-063d97ae4f09","reason":"transient: point-in-time shell observati","batch":19}
+{"id":"da44f662-ba09-4892-8163-8e59e6b44e15","reason":"stale: direct coupling from cli_runner.p","batch":18}
+{"id":"6e56bc5f-ed6c-4705-af0f-419101d91d79","reason":"transient: one-off live smoke-test run o","batch":18}
+{"id":"5c2b5c09-654b-4473-840d-e9f60ab72c7d","reason":"transient","batch":20}
+{"id":"5f42722b-0a90-4a35-877c-879953ae3506","reason":"unsupported","batch":20}
+{"id":"88442499-8e9d-476b-baa2-9d720f35c6b3","reason":"unsupported: no Jev subagent invocation ","batch":22}
+{"id":"824cc870-aaa2-4b3c-8dbe-1c863e8e40ea","reason":"transient: one-off patch and test run re","batch":22}
+{"id":"d30f1c5b-0548-494c-9258-f9052dcd415d","reason":"transient: a verification-run snapshot (","batch":21}
+{"id":"53ce931f5dd97fdf119a6df4e53c88a7","reason":"stale: `memory_history` search/get is no","batch":24}
+{"id":"248ad5ef938b6cb4fdd1285f1e3923af","reason":"transient: one-off counterfactual failur","batch":24}
+{"id":"b5ebfc8981bf1d251e102b16755e02b9","reason":"transient: one-off labeling of a 40-reco","batch":24}
+{"id":"3ba2f449c32fc62fa0898dc0ff1d34cd","reason":"transient: one-off duplicate count from ","batch":24}
+{"id":"b2af45409ab1693a1b549e194172070b","reason":"transient: one-off session-search tally;","batch":24}
+{"id":"a04f0929f3e4f8f7668d09d280efcb25","reason":"transient: one-off citation-type tally; ","batch":24}
+{"id":"1a571d3248cd17f1d975796568ef97b6","reason":"procedural: benchmark question-set const","batch":25}
+{"id":"f01c3e3123a7ca9ac87d2402338ae079","reason":"transient: one-off head-to-head scores f","batch":25}
+{"id":"76f6ff7381ee532a6190198b1a376bf1","reason":"unsupported: cited artifacts/memory-audi","batch":28}
+{"id":"9c0120782b10aef14682589db3624715","reason":"unsupported: SEAL-qrels.txt and score-po","batch":28}
+{"id":"e9d11dfb5ca4825421222b8baad4e25e","reason":"unsupported: scoring/regex-vs-qrels.txt ","batch":28}
+{"id":"867151606af8ab220472db49f8efb9f7","reason":"unsupported: scoring/regex-vs-qrels.txt ","batch":28}
+{"id":"26ba81cee1d816818fe926fdf2e2d94c","reason":"unsupported: scoring/scores.txt is absen","batch":28}
+{"id":"cbceb212c097a623d797f7fc170fe40d","reason":"unsupported: scoring/score.py and eval/P","batch":28}
+{"id":"8b254a910bd247cdac6db982ddb800dd","reason":"unsupported: scoring/taxonomy.md and fai","batch":28}
+{"id":"d3696dbdb6e1b96d813f28b71682684e","reason":"transient: the PASS/EXIT=0 result and th","batch":28}
+{"id":"c21d1c8c6f79fe98ff54c9fb28f18395","reason":"transient","batch":27}
+{"id":"edd5a401dd47861f83070c605cdf3169","reason":"transient: task bookkeeping for complete","batch":30}
+{"id":"89f9beb67a394399dd0f0e7e0d26b63b","reason":"unsupported: cited artifacts/memory-audi","batch":30}
+{"id":"efe37489017c4b37128e84fd72bb23c2","reason":"unsupported: cited artifacts/memory-audi","batch":30}
+{"id":"fde8b3b24ac0d47cd7e43674506c46b7","reason":"unsupported: cited labels.md and sample.","batch":30}
+{"id":"45fafd987ddbfb234653ccc08378524a","reason":"unsupported: cited artifacts/memory-audi","batch":30}
+{"id":"53d6e8893fb13f9a23e8cc0c0ec2295a","reason":"stale: the script defines 9 steps, not 8","batch":30}
+{"id":"642cb704b70aeece072fae00301411fd","reason":"unsupported: cited artifacts/memory-audi","batch":29}
+{"id":"cb54e873f51a0b420b1b98f3b9928401","reason":"transient: one-off run log and scorer-bu","batch":29}
+{"id":"80439c4c303f5331ecd547e8721dd5ac","reason":"transient: one-off number-matching check","batch":29}
+{"id":"bd53b43317ef65b895b8bef32e6051dd","reason":"transient","batch":23}
+{"id":"01ce3d25c5ff5e571e03d6dbc1c3f434","reason":"transient","batch":31}
+{"id":"595e9b0fa58ef17067d2ce797bbf19f8","reason":"transient","batch":31}
+{"id":"9144728ac90f556b62833d276a7b0411","reason":"transient","batch":31}
+{"id":"1b370ad04c556d2f39b60e33b8f1e045","reason":"transient: one-off census of the live st","batch":32}
+{"id":"34ca047aa4c6d10e4344946331c03f00","reason":"transient: one-off recall output for liv","batch":32}
+{"id":"d9ec8bfa2432ef1fcf7dd4a5e9032130","reason":"unsupported: 'not established' status wi","batch":32}
+{"id":"61951f1d72630c3109bcad1375432e09","reason":"unsupported: cited artifacts/memory-pilo","batch":34}
+{"id":"244bbc128124195a050db23174728498","reason":"unsupported: the cited System-Prompt clo","batch":34}
+{"id":"1446a806590aa0e3a210a30cc278e52c","reason":"transient: task framing and bookkeeping;","batch":34}
+{"id":"c7ebed3f4c5e1653017b41c5d31a3a8a","reason":"unsupported: artifacts/prompt-bench/CONF","batch":34}
+{"id":"c342a8df8681dd50ede864e9503de08f","reason":"unsupported: the claims concern Agent-MC","batch":33}

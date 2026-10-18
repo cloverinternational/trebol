@@ -1,0 +1,3 @@
+hybrid raw 5 curated 6 of 25 delta 0.040 CI95 [-0.080, 0.200] flips +2 -1
+bm25 raw 2 curated 2 of 25 delta 0.000 CI95 [-0.120, 0.120] flips +1 -1
+dense raw 4 curated 5 of 25 delta 0.040 CI95 [0.000, 0.120] flips +1 -0

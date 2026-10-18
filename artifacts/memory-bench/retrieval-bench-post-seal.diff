@@ -1,0 +1,25 @@
+diff --git a/tools/bench/retrieval-bench.mjs b/tools/bench/retrieval-bench.mjs
+index 984f555..65b6b3c 100644
+--- a/tools/bench/retrieval-bench.mjs
++++ b/tools/bench/retrieval-bench.mjs
+@@ -12,6 +12,9 @@ const jiti=createJiti(import.meta.url);const FI=await jiti.import('../../.pi/lib
+ const [,,snap,outF]=process.argv;const A='artifacts/memory-audit/eval/';
+ let R=readFileSync(snap,'utf8').trim().split('\n').map(JSON.parse);
+ if(process.env.CORPUS==='facts')R=R.filter(r=>r.kind!=='context');
++// Addendum (PREREG-addendum-curated.md): replace kind=fact records with curated facts; gold maps through sources.
++let srcOf=null;if(process.env.CURATED){const raw=R;srcOf=new Map();const C=readFileSync(process.env.CURATED,'utf8').trim().split('\n').map(JSON.parse).map((f,i)=>{const id='cf'+i;srcOf.set(id,f.sources);return {id,text:f.text,tags:f.tags??[],kind:'fact',createdAt:f.createdAt,evidence:f.anchored??[]};});
++  R=[...raw.filter(r=>r.kind!=='fact'),...C];globalThis.__rawById=new Map(raw.map(r=>[r.id,r]));}
+ const byId=new Map(R.map(r=>[r.id,r]));
+ const Q=[];
+ for(const q of JSON.parse(readFileSync('artifacts/memory-bench/qrels.json','utf8')).queries)Q.push({qid:q.qid,set:'mined-'+q.kind,text:q.text,ts:q.ts,gold:q.gold});
+@@ -20,8 +23,9 @@ const G={};for(const l of readFileSync(A+'qrels.jsonl','utf8').split('\n').filte
+ const SP=/([\w./@-]+\.\w+)#L(\d+)(?:-L?(\d+))?/g;
+ const spans=r=>(r.evidence||[]).flatMap(e=>[...e.ref.matchAll(SP)].map(m=>[m[1].startsWith('./')?m[1].slice(2):m[1],+m[2],+(m[3]??m[2])]));
+ for(const l of readFileSync(A+'test-queries.jsonl','utf8').split('\n').filter(Boolean)){const q=JSON.parse(l);const gold={};
+-  for(const r of R)if(spans(r).some(([p,a,b])=>(G[q.qid]||[]).some(([ref,x,y])=>p===ref&&a<=y&&b>=x)))gold[r.id]=2;
++  for(const r of (globalThis.__rawById?[...globalThis.__rawById.values()]:R))if(spans(r).some(([p,a,b])=>(G[q.qid]||[]).some(([ref,x,y])=>p===ref&&a<=y&&b>=x)))gold[r.id]=2;
+   if(Object.keys(gold).length)Q.push({qid:q.qid,set:'span',text:q.text,ts:'9999',gold});}
++if(srcOf){const rawSpanGold=q=>q.gold;for(const q of Q){const g={};for(const [id,v] of Object.entries(q.gold))if(byId.has(id))g[id]=v;for(const [cid,src] of srcOf){const v=Math.max(0,...src.map(s=>q.gold[s]??0));if(v)g[cid]=v;}q.gold=g;}}
+ // current rule: extensions/memory-history/extension.ts (b4dc9bc) L215-222
+ function current(recs,query){const q=query.trim().toLocaleLowerCase();const terms=[...new Set(q.match(/[\p{L}\p{N}_.-]{3,}/gu)??[])];
+   return recs.filter(r=>{const h=`${r.text} ${r.tags.join(' ')}`.toLocaleLowerCase();const rt=new Set(h.match(/[\p{L}\p{N}_.-]+/gu)??[]);return h.includes(q)||(terms.length>=2&&terms.every(t=>rt.has(t)));}).map(r=>r.id);}
