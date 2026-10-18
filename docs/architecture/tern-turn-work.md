@@ -63,3 +63,22 @@ Each piece of work is announced by exactly one indicator while it runs.
 - `.pi/test/tern/live/turn-work-live.py SOCK OUTDIR` drives a real Tern window over its control socket.
   It checks widths 40, 65, 100 (resized to 65 mid-run) and 140 (Escape mid-run), with a wide-Unicode
   goal, and asserts that every turn-work and user row fits the main region.
+
+## Streaming and flicker
+
+While a run is busy, an assistant message that is still streaming stays with the turn's work (under the live
+line) until `message_end`, because it may yet call a tool. On `message_end` it becomes narration inside the card
+if it called tools, otherwise the turn's top-level reply. Showing it as a reply first and folding it into the
+card at `toolcall_start` made each narration sentence appear and vanish. A plain reply therefore appears whole
+when its message ends; the live line covers it while it streams. A turn's work node is keyed by its first member,
+so its id does not change when the first tool starts.
+
+## UI trace (dogfooding)
+
+`run.ts` writes `~/.pi/agent/tern-trace/<time>-<pid>.ui.jsonl` (newest 20 kept; off with `PI_TERN_UI_TRACE=0`):
+`{k:"ev"}` lines with each Pi event's type and ids (no payload text, no text deltas), and `{k:"frame"}` lines
+with the top-level transcript rows `[id, role, state, text≤80]`, the render trigger, and `busy`, written only when
+they change. `node --experimental-strip-types .pi/lib/tern/ui-trace-report.ts [file]` lists flicker in the newest
+trace: a row that vanishes or comes back while busy, a row whose state returns to an earlier one, a live line
+replaced by work with a new id, and a settled card in a still-running turn. The replay corpus keeps text and
+tool-call-start deltas so these streams are replayed too, and `ui-trace.test.ts` asserts the corpus has none.

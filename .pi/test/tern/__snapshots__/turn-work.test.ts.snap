@@ -3,6 +3,8 @@
 exports[`replay through the bridge: emitted TSP frames > 2026-10-18T19-18-23-235Z: the visible work rows after every event match the snapshot 1`] = `
 [
   "",
+  "LIVE working · x",
+  "",
   "LIVE working · 修復ログイン 🚀 テスト修復ログイン 🚀 テスト確認 — run two bash commands in parallel: \`sleep 6; echo a\` and \`sleep 8; echo b\`, then reply ok",
   "LIVE 1 running · 修復ログイン 🚀 テスト修復ログイン 🚀 テスト確認 — run two bash commands in parallel: \`sleep 6; echo a\` and \`sleep 8; echo b\`, then reply ok",
   "LIVE 2 running · 修復ログイン 🚀 テスト修復ログイン 🚀 テスト確認 — run two bash commands in parallel: \`sleep 6; echo a\` and \`sleep 8; echo b\`, then reply ok",
@@ -54,6 +56,13 @@ LIVE 1 running · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: run th
   "SUMMARY Done · 修復ログイン 🚀 テスト修復ログイン 🚀 テスト確認 — run two bash commands in parallel: \`sleep 6; echo a\` and \`sleep 8; echo b\`, then reply ok · 2 steps
 SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 2 steps
 LIVE working · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok.",
+  "SUMMARY Done · 修復ログイン 🚀 テスト修復ログイン 🚀 テスト確認 — run two bash commands in parallel: \`sleep 6; echo a\` and \`sleep 8; echo b\`, then reply ok · 2 steps
+SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 2 steps
+SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok. · 5 steps · 4 failed",
+  "SUMMARY Done · 修復ログイン 🚀 テスト修復ログイン 🚀 テスト確認 — run two bash commands in parallel: \`sleep 6; echo a\` and \`sleep 8; echo b\`, then reply ok · 2 steps
+SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 2 steps
+SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok. · 5 steps · 4 failed
+LIVE working · 復ログイン 🚀 テスト確認 ✅ 文字幅 w100: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a100\` and \`sleep 9; echo b100\`. Then reply with the single word ok.",
   "SUMMARY Done · 修復ログイン 🚀 テスト修復ログイン 🚀 テスト確認 — run two bash commands in parallel: \`sleep 6; echo a\` and \`sleep 8; echo b\`, then reply ok · 2 steps
 SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 2 steps
 SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok. · 5 steps · 4 failed",

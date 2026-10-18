@@ -7,6 +7,7 @@ import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { readFile } from "node:fs/promises";
 import { appendFileSync } from "node:fs";
+import { join } from "node:path";
 import {
 	createAgentSessionFromServices,
 	createAgentSessionRuntime,
@@ -19,6 +20,7 @@ import {
 import { StdinBuffer } from "@earendil-works/pi-tui";
 import { sessionCommandSource, type CommandSessionLike } from "./commands.ts";
 import { PiTernBridge, type PiSessionLike } from "./bridge.ts";
+import { createUiTrace } from "./ui-trace.ts";
 import { keyEffect } from "./keys.ts";
 import { detectTern, helloQuery, shouldProbe, splitInput } from "./tsp.ts";
 
@@ -148,6 +150,7 @@ function startTsp(): void {
 			}, ESC_FLUSH_MS);
 	};
 
+	const uiTrace = process.env.PI_TERN_UI_TRACE === "0" ? undefined : createUiTrace(join(getAgentDir(), "tern-trace"));
 	const connect = async (credits: number, apc: number, kinds: string[]): Promise<void> => {
 		// One bus shared by extensions (ask-user's remote-ask runtime) and the bridge's ask dialog.
 		const events = createEventBus();
@@ -175,13 +178,18 @@ function startTsp(): void {
 			kinds,
 			onClose: restore,
 			// Records the raw Pi event stream (one {at, event} JSON line each) for replay tests; off unless set.
-			...(process.env.PI_TERN_EVENT_LOG ? { onEvent: (event: unknown) => {
+			// Dogfooding UI trace (on unless PI_TERN_UI_TRACE=0): event types and per-render rows in ~/.pi/agent/tern-trace/.
+			// Full event payloads for replay fixtures are recorded only when PI_TERN_EVENT_LOG is set.
+			onEvent: (event) => {
+				uiTrace?.event(event);
+				if (!process.env.PI_TERN_EVENT_LOG) return;
 				try {
-					appendFileSync(process.env.PI_TERN_EVENT_LOG!, `${JSON.stringify({ at: Date.now(), sessionFile: runtime.session.sessionManager?.getSessionFile?.(), event })}\n`);
+					appendFileSync(process.env.PI_TERN_EVENT_LOG, `${JSON.stringify({ at: Date.now(), sessionFile: runtime.session.sessionManager?.getSessionFile?.(), event })}\n`);
 				} catch {
 					// A recorder failure must never affect the session.
 				}
-			} } : {}),
+			},
+			onRender: (nodes, trigger, busy) => uiTrace?.render(nodes, trigger, busy),
 			commands: sessionCommandSource(commandSession),
 			events,
 			reload: async () => {

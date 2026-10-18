@@ -35,7 +35,7 @@ export function isTurnBoundary(item: { role: string; turnStart?: boolean }): boo
  * and the assistant narration written before its last tool call (or in a message that calls tools), form one group placed where the first of
  * them appeared. Everything else (the boundary, notices, the answer after the last tool call) stays a message.
  */
-export function segmentTranscript<T extends { role: string; turnStart?: boolean; callsTools?: boolean }>(items: readonly T[]): Segment<T>[] {
+export function segmentTranscript<T extends { role: string; turnStart?: boolean; callsTools?: boolean; streaming?: boolean }>(items: readonly T[]): Segment<T>[] {
 	const out: Segment<T>[] = [];
 	const flush = (start: number, end: number) => {
 		let lastTool = -1;
@@ -43,7 +43,9 @@ export function segmentTranscript<T extends { role: string; turnStart?: boolean;
 		let group: { kind: "tools"; items: T[] } | null = null;
 		for (let k = start; k < end; k++) {
 			const item = items[k]!;
-			const inWork = !isTurnBoundary(item) && (item.role === "tool" || (item.role === "assistant" && (k < lastTool || item.callsTools === true)));
+			// A message still streaming may yet call a tool, so it stays with the turn's work until it ends;
+			// showing it as a reply first and folding it later is the flicker the UI trace caught.
+			const inWork = !isTurnBoundary(item) && (item.role === "tool" || (item.role === "assistant" && (k < lastTool || item.callsTools === true || item.streaming === true)));
 			if (!inWork) {
 				out.push({ kind: "message", item });
 				continue;

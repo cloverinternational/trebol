@@ -111,6 +111,8 @@ interface Item {
 	turnStart?: boolean;
 	// An assistant message that calls tools: its text is narration of the work, folded with the steps.
 	callsTools?: boolean;
+	// Live only: an assistant message between message_start and message_end.
+	streaming?: boolean;
 	// The error text of a failed result, kept to tell an abort's "context canceled" from a real failure.
 	errorText?: string;
 	// TaskManage's structured batch from the final result, rendered as task rows (never as JSON).
@@ -343,7 +345,7 @@ export class TranscriptProjector {
 					this.#localUserPending = false;
 					return false;
 				}
-				const item: Item = { id: `m${++this.#seq}`, role, text: messageText(event.message), ...(shown.turnStart ? { turnStart: true } : {}), ...(toolCallsOf(event.message).length > 0 ? { callsTools: true } : {}) };
+				const item: Item = { id: `m${++this.#seq}`, role, text: messageText(event.message), ...(shown.turnStart ? { turnStart: true } : {}), ...(toolCallsOf(event.message).length > 0 ? { callsTools: true } : {}), ...(role === "assistant" ? { streaming: true } : {}) };
 				this.#items.push(item);
 				this.#current = item;
 				return true;
@@ -368,6 +370,7 @@ export class TranscriptProjector {
 				const target = this.#current && this.#current.role === shown.role ? this.#current : null;
 				if (target && text) target.text = text;
 				if (target && toolCallsOf(event.message).length > 0) target.callsTools = true;
+				if (target) delete target.streaming;
 				this.#current = null;
 				if (isAbortedAssistant(event.message)) this.#markTurnAborted();
 				if (isFailedAssistant(event.message)) this.#markTurn("turnFailed");
@@ -424,6 +427,8 @@ export class TranscriptProjector {
 				let changed = this.#turnOpen;
 				this.#turnOpen = false;
 				for (const item of this.#items) {
+					// An aborted run can end without message_end; its partial text then settles like any other.
+					if (item.streaming) { delete item.streaming; changed = true; }
 				if (item.role !== "tool" || item.status !== "running") continue;
 					// Pi's aborted turn can omit tool_execution_end; never leave a live spinner.
 					item.cancelled = true;
@@ -502,7 +507,9 @@ function toolCallsOf(message: unknown): Array<{ id: string; name: string; argume
 // ctrl+o (outputExpanded) unfolds every card, a head click folds one card locally in Tern.
 function toolGroupNode(items: Item[], goal: string, outputExpanded: boolean, turnOpen: boolean): TspNode | TspNode[] {
 	const tools = items.filter((item) => item.role === "tool");
-	const id = `g-${tools[0]?.id ?? items[0]?.id ?? "empty"}`;
+	// Keyed by the group's first member, so the node keeps its id when the first tool starts after narration
+	// (a changed id is a remove plus insert in Tern, which flickers).
+	const id = `g-${items[0]?.id ?? "empty"}`;
 	const summary = summarizeToolGroup(tools);
 	if (summary.status === "running" || turnOpen) {
 		return { id, k: "text", p: { role: "tern.work-live", tone: "pending", wrap: "none", truncate: "end", text: liveLineText(goal, summary.active) } };
@@ -664,6 +671,8 @@ export interface BridgeOptions {
 	onClose?: () => void;
 	// Observes every Pi session event before projection (run.ts records them when PI_TERN_EVENT_LOG is set).
 	onEvent?: (event: PiEventLike) => void;
+	// Observes every render: the transcript nodes, what triggered it (an event type or "ui"), and whether the agent is busy.
+	onRender?: (nodes: readonly TspNode[], trigger: string, busy: boolean) => void;
 	// Live slash-command sources (extensions, templates, skills). Defaults to none: every `/x` is refused.
 	commands?: CommandSource;
 	// Pi event bus shared with the ask extension. Omitted: ask_user_question stays headless-denied.
@@ -707,6 +716,8 @@ export class PiTernBridge {
 	#gitRefs: GitFileRef[] = [];
 	readonly #onClose?: () => void;
 	readonly #onEventTap?: (event: PiEventLike) => void;
+	readonly #onRenderTap?: (nodes: readonly TspNode[], trigger: string, busy: boolean) => void;
+	#trigger = "ui";
 	readonly #commands: CommandSource;
 	readonly #complete: SlashAutocomplete;
 	#sessionId: string | undefined;
@@ -762,6 +773,7 @@ export class PiTernBridge {
 		this.#surface = new TernInlineSurface(options.write, options.surfaceId, options.credits, options.apc);
 		this.#onClose = options.onClose;
 		this.#onEventTap = options.onEvent;
+		this.#onRenderTap = options.onRender;
 		this.#commands = options.commands ?? EMPTY_COMMAND_SOURCE;
 		this.#events = options.events;
 		this.#reload = options.reload;
@@ -912,7 +924,11 @@ export class PiTernBridge {
 			this.#modelCatalog = this.#session.modelRuntime?.getAvailableSnapshot() ?? this.#modelCatalog;
 		}
 		if (event.type === "tool_execution_end" && event.isError !== true) void this.#previewArtifacts(event);
-		if (this.#projector.apply(event) || event.type.startsWith("agent_") || event.type === "model_select" || event.type === "thinking_level_changed" || event.type === "queue_update" || event.type === "session_tree") this.#render();
+		if (this.#projector.apply(event) || event.type.startsWith("agent_") || event.type === "model_select" || event.type === "thinking_level_changed" || event.type === "queue_update" || event.type === "session_tree") {
+			this.#trigger = event.type;
+			this.#render();
+			this.#trigger = "ui";
+		}
 	}
 
 	// OMP's composer (composer-view.ts) fed by Pi: context window and compaction point, model, thinking
@@ -1271,7 +1287,9 @@ export class PiTernBridge {
 		if (this.#closed) return;
 		this.#syncSession();
 		const focus = this.#ui.focusId ?? (this.#treePickerOpen ? "session-tree-picker" : this.#modelPickerOpen ? "model-picker-sheet" : "composer");
-		this.#surface.render([...startupNodes(this.#logo, this.#version, this.#repo), ...this.#projector.nodes(this.#toolOutputExpanded)], this.#dock(), focus, this.#layer(), this.#complete.selectedId);
+		const transcript = this.#projector.nodes(this.#toolOutputExpanded);
+		this.#surface.render([...startupNodes(this.#logo, this.#version, this.#repo), ...transcript], this.#dock(), focus, this.#layer(), this.#complete.selectedId);
+		try { this.#onRenderTap?.(transcript, this.#trigger, this.#busy); } catch { /* tracing never affects the UI */ }
 	}
 
 	// ctrl+o folds or unfolds all tool output; each tool's head click still toggles just that tool.

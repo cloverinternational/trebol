@@ -1,0 +1,3 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`UI trace > reports what the recorded corpus runs show while busy 1`] = `[]`;

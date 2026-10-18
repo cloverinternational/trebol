@@ -5,7 +5,8 @@ Usage: extract-corpus.py EVENT_LOG OUT_DIR
 EVENT_LOG is the file run.ts writes with PI_TERN_EVENT_LOG set: one {at, sessionFile, event} line per Pi event.
 For each session file seen in it, writes OUT_DIR/<name>.events.jsonl (the events the projector consumes) and
 OUT_DIR/<name>.session.jsonl (Pi's persisted branch for the same session). Streaming deltas and bookkeeping
-entries are dropped; every other event is kept in order. Long strings are cut to 300 characters so the
+entries are dropped, except text and tool-call-start deltas, which are kept as {type, delta} only (narration
+streams before its tool call, so the corpus must stream too); every other event is kept in order. Long strings are cut to 300 characters so the
 fixtures stay small; the projector's behaviour under test does not depend on long payloads.
 """
 import json, os, sys
@@ -29,7 +30,12 @@ last_update = {}
 for line in open(SRC, encoding="utf-8"):
     rec = json.loads(line)
     ev = rec["event"]
-    if ev.get("type") not in KEEP:
+    if ev.get("type") == "message_update":
+        d = ev.get("assistantMessageEvent") or {}
+        if d.get("type") not in ("text_delta", "toolcall_start"):
+            continue
+        ev = {"type": "message_update", "assistantMessageEvent": {"type": d["type"], **({"delta": d["delta"]} if d["type"] == "text_delta" else {})}}
+    elif ev.get("type") not in KEEP:
         continue
     if ev["type"] == "tool_execution_update":
         # Keep only the first and the latest update per call; intermediate snapshots repeat the same prefix.
