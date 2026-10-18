@@ -4,3 +4,6 @@
 e0fb2c129b80ffdbc469cc384be9ab5c008bb0acccb290e0d3a68025b452e132  tools/bench/retrieval-bench.mjs
 53f01766443c86d953c99f1c5d0e9506db7338e13ccb574f5f453548ea4fb3ae  tools/bench/mine-retrieval-qrels.py
 f0e6bb63e8624caf719b695b3cdc091003c215210c6c1b4f3e0e5406fb61235e  .pi/lib/state/fact-index.ts
+9dd8f3a98f1aba5cab9899b683dccacff0e7751be02e1cb5c7a2010b56c270c2  artifacts/memory-bench/PREREG-addendum-curated.md
+667f34be65ecd298e04e02b049d044f8cee856bb8247643b9e3f2387efc0604f  .pi/lib/state/fact-curator.ts
+7435ab6e042ed503e5eb4a9a75edecceb88c558ba0928e8a93cb622ca7f0f71e  tools/memory/curate-facts.mjs
