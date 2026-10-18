@@ -52,17 +52,6 @@ describe("TaskManage", () => {
     expect(m.snapshot().nextId).toBe(2);
   });
 
-  it("rejects a reused create key with a different payload instead of replaying the old task", () => {
-    const m = new TaskManager();
-    m.execute({ operations: [create("stable", "Stable")] });
-    const second = m.execute({ operations: [create("stable", "Changed")] });
-    expect(second.status).toBe("failed");
-    expect(second.results[0].error).toMatchObject({ code: "idempotency_conflict", retryable: false });
-    expect(second.results[0].error?.message).toContain("task 1");
-    expect(m.snapshot().tasks).toHaveLength(1);
-    expect(m.snapshot().nextId).toBe(2);
-  });
-
   it("resolves committed cross-call references and rejects cycles", () => {
     const m=new TaskManager(); m.execute({operations:[create("a"),create("b")]});
     expect(m.execute({operations:[{key:"link",op:"update",taskId:{ref:"b"},addBlockedBy:[{ref:"a"}]}]}).status).toBe("succeeded");

@@ -579,6 +579,13 @@ is not semantic verification. Legacy questionless tasks remain compatible.
 Bootstrap carries questions into task proposals and committed operations. No
 separate question lifecycle or follow-up tool-call limit is introduced.
 
+`create` operation keys are idempotency keys (#298). A replayed key succeeds
+only when the request is identical: each task stores `createFingerprint`, a
+SHA-256 of its create op. A different payload fails with non-retryable
+`idempotency_conflict` naming the existing task. Tasks persisted before the
+fingerprint fall back to comparing subject and questions. Update keys stay
+reusable per-call aliases. E2E: `node tools/e2e/taskmanage-create-key-conflict.mjs`.
+
 ## Jev first-finder knowledge audit (opt-in)
 
 `/jev-audit on|off|status|now` controls the session audit; environment
