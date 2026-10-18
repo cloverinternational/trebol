@@ -60,6 +60,8 @@ export interface Task {
   typed_notes?: TaskNote[]; audit_events?: AuditEvent[];
   /** Swarm TodoManager per-owner sequence counter (shared_state.go AddTodo). */
   sequence?: number;
+  /** SHA-256 of the create request (key included) that made this task; absent on tasks persisted before fingerprints. */
+  createFingerprint?: string;
 }
 export interface Operation {
   key: string; op: "create" | "update" | "get" | "list"; taskId?: Ref; subject?: string;
@@ -86,7 +88,7 @@ import { ALLOWED, goNow, normalizeTaskManageParams, swarmValidateTaskManageParam
  */
 export const OPERATION_FIELDS: Record<string, string[]> =
   Object.fromEntries(Object.entries(ALLOWED).map(([op, fields]) => [op, ["key", "op", ...fields]]));
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, statSync, realpathSync } from "node:fs";
 import { resolve as resolvePath, relative as relativePath, isAbsolute } from "node:path";
@@ -798,17 +800,17 @@ export class TaskManager {
       const operationBefore = this.snapshot(), localBefore = { ...local };
       // Create keys are idempotency keys for retries. Update keys are ordinary
       // per-call aliases and may intentionally be reused as work progresses.
-      const existingMutation = op.op === "create" ? this.state.keys[op.key] : undefined;
+      const existingId = op.op === "create" ? this.state.keys[op.key] : undefined;
       let result: Result;
       try {
-        result = existingMutation ? this.replayedMutation(op, existingMutation) : this.run(op, local);
+        result = existingId ? this.replayedCreate(op, existingId) : this.run(op, local);
       } catch {
         // Host callbacks are fallible. Roll back through the normal failure path
         // and never expose callback exception text (which may contain secrets).
         result = { key: op.key, op: op.op, status: "failed", error: fail("validation_failed", "operation validation failed unexpectedly; inspect host evidence configuration") };
       }
       results.push(result);
-      if (result.status === "succeeded" && !existingMutation &&
+      if (result.status === "succeeded" && !existingId &&
         (op.op === "create" || (op.op === "update" && op.status !== "deleted"))) {
         const produced = result.data as any;
         if (produced?.task?.id) { this.state.keys[op.key] = produced.task.id; local[op.key] = produced.task.id; }
@@ -844,10 +846,20 @@ export class TaskManager {
     } });
     return batch;
   }
-  private replayedMutation(op: Operation, id: string): Result {
+  /** Identifies a create request; the same key with a different request is a conflict, not a retry. */
+  private createFingerprint(op: Operation): string {
+    return createHash("sha256").update(JSON.stringify(sortKeysDeep({ ...op, subject: op.subject?.trim() }))).digest("hex");
+  }
+  private replayedCreate(op: Operation, id: string): Result {
     const task = this.find(id);
     if (!task) return { key: op.key, op: op.op, status: "failed", error: fail("reference_failed", `operation key ${op.key} points to missing task ${id}`) };
-    return { key: op.key, op: op.op, status: "succeeded", data: { task: op.op === "create" ? this.createAck(task) : this.updateAck(op, task) } };
+    // Tasks persisted before fingerprints carry no payload hash; compare the
+    // subject and questions they still store (fail closed on any mismatch).
+    const same = task.createFingerprint !== undefined
+      ? task.createFingerprint === this.createFingerprint(op)
+      : task.subject === op.subject?.trim() && JSON.stringify(sortKeysDeep(task.questions ?? [])) === JSON.stringify(sortKeysDeep(op.questions ?? []));
+    if (!same) return { key: op.key, op: op.op, status: "failed", error: fail("idempotency_conflict", `create key ${op.key} already created task ${id} with a different payload; use a fresh key for a new task`) };
+    return { key: op.key, op: op.op, status: "succeeded", data: { task: this.createAck(task) } };
   }
   private run(op: Operation, local: Record<string,string>): Result {
     const target = (r?: Ref) => this.resolve(r, local);
@@ -872,7 +884,7 @@ export class TaskManager {
       for (const d of blocks as string[]) if (!this.find(d)) return {key:op.key,op:op.op,status:"failed",error:fail("not_found",`task ${d} not found`)};
       const owner = op.owner_id ?? "";
       const sequence = this.state.tasks.filter(t => (t.owner_id ?? "") === owner).reduce((max, t) => Math.max(max, t.sequence ?? 0), 0) + 1;
-      const now = goNow(), task: Task = { id:String(this.state.nextId++), subject:op.subject!.trim(), description:op.description, activeForm:op.activeForm, category:op.category ?? this.inferCategory(`${op.subject} ${op.description ?? ""}`), priority:op.priority ?? "medium", metadata:op.metadata&&clone(op.metadata), parentTaskId:parentId, owner_id:op.owner_id, questions: op.questions ? clone(op.questions) : undefined, answers: undefined, status:op.status === "in_progress" || op.status === "completed" ? op.status : "pending", active:op.status === "in_progress" || op.active === true, dependsOn:[...new Set(deps as string[])], notes:op.addNote ? [op.addNote] : [], typed_notes: op.addNote && op.noteType ? [{text:op.addNote,type:op.noteType,at:now}] : undefined, audit_events:[{action:"created",at:now}], createdAt:now, updatedAt:now, sequence };
+      const now = goNow(), task: Task = { id:String(this.state.nextId++), subject:op.subject!.trim(), description:op.description, activeForm:op.activeForm, category:op.category ?? this.inferCategory(`${op.subject} ${op.description ?? ""}`), priority:op.priority ?? "medium", metadata:op.metadata&&clone(op.metadata), parentTaskId:parentId, owner_id:op.owner_id, questions: op.questions ? clone(op.questions) : undefined, answers: undefined, status:op.status === "in_progress" || op.status === "completed" ? op.status : "pending", active:op.status === "in_progress" || op.active === true, dependsOn:[...new Set(deps as string[])], notes:op.addNote ? [op.addNote] : [], typed_notes: op.addNote && op.noteType ? [{text:op.addNote,type:op.noteType,at:now}] : undefined, audit_events:[{action:"created",at:now}], createdAt:now, updatedAt:now, sequence, createFingerprint:this.createFingerprint(op) };
       this.state.tasks.push(task);
       if (task.status === "in_progress") for (const other of this.state.tasks) if (other.id !== task.id) other.active = false;
       for (const d of blocks as string[]) {
