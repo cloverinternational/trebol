@@ -45,6 +45,7 @@ function metrics(dir){const m={tools:[],errors:0,memory:0,blocked:0,modelCalls:0
 async function one(job){const {t,a,r,run}=job;if(done.has(run))return;const dir=join(out,'runs',run);
   const s=await sh('node',[join(repo,'tools/pilot/run-session.mjs'),'--out',dir,'--memory',join(out,'mem',run),'--commit',t.commit,'--product',product,'--prompt',join(repo,'artifacts/prompt-bench/arms',`${a}.md`),'--task',t.task,'--timeout-s','600'],repo,700000);
   let meta={};try{meta=JSON.parse(readFileSync(join(dir,'meta.json'),'utf8'))}catch{}
+  if(!meta.workspace){mkdirSync(dir,{recursive:true});writeFileSync(join(dir,'runner-error.txt'),`exit ${s.code}\n${s.o.slice(-8000)}`);}
   const g=meta.workspace?await grade(t,meta.workspace,dir).catch(e=>({pass:0,gradeError:String(e).slice(0,300)})):{pass:0,gradeError:'no-run'};
   const m=metrics(dir);const row={run,task:t.id,kind:t.kind,arm:a,rep:r,exit:meta.exit,seconds:meta.seconds,promptSha:meta.promptSha,product,...g,toolCalls:m.tools.length,errors:m.errors,blocked:m.blocked,memoryCalls:m.memory,modelCalls:m.modelCalls,modeLines:m.modeLines,tools:m.tools};
   appendFileSync(resF,JSON.stringify(row)+'\n');console.log(run,'pass',row.pass,'calls',row.toolCalls,'s',row.seconds,g.detail??'',g.gradeError??'');}
