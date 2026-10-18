@@ -13,7 +13,14 @@ for(const e of S){if(e.type!=='message')continue;const m=e.message;
 const fileOf=c=>{const a=c.args??{};if(c.name==='read')return a.path;const cmd=String(a.command??'');const m=cmd.match(/(?:cat|sed -n [^ ]+|nl -ba|head -n \d+|tail -n \d+)\s+([\w./-]+\.\w+)/);return m?.[1];};
 const reads=calls.map(fileOf).filter(Boolean),readCount={};for(const f of reads)readCount[f]=(readCount[f]??0)+1;
 const boot=calls.find(c=>c.name==='bootstrap'),bootRes=boot&&results.get(boot.id)?.text;
-let surfaced=[];try{const j=JSON.parse(bootRes);surfaced=(j.memories??j.memory??[]).map(m=>({id:m.id,source:String(m.source??'').split(':')[0],text:String(m.text??'').slice(0,100)}));}catch{}
+// surfaced = seed-store records (--seed DIR, e.g. the T1 store) whose id appears in ANY memory tool result
+// (bootstrap brief or memory_history/context results). The earlier version parsed only bootstrap JSON,
+// which became a text brief, so it always reported 0.
+const seedI=process.argv.indexOf('--seed'),seed=new Map();
+const walk=d=>{for(const f of readdirSync(d,{withFileTypes:true})){const q=join(d,f.name);if(f.isDirectory())walk(q);else if(/^\d{16}-.+\.json$/.test(f.name)){try{const r=JSON.parse(readFileSync(q,'utf8'));const x=r.record??r;if(x.id)seed.set(x.id,x);}catch{}}}};
+if(seedI>0&&existsSync(process.argv[seedI+1]))walk(process.argv[seedI+1]);
+const memText=calls.filter(c=>/^(bootstrap|memory_history|context_search|project_context)$/.test(c.name)).map(c=>results.get(c.id)?.text??'').join('\n');
+const surfaced=[...seed.values()].filter(x=>memText.includes(x.id)).map(x=>({id:x.id,source:String(x.source??'').split(':')[0],text:String(x.text??'').slice(0,100)}));
 const traces=[];for(const p of existsSync(join(dir,'trace'))?readdirSync(join(dir,'trace')):[])for(const f of readdirSync(join(dir,'trace',p)).filter(f=>f.endsWith('.req.json'))){const b=JSON.parse(readFileSync(join(dir,'trace',p,f),'utf8')).body;const sys=typeof b.system==='string'?b.system:(b.system??[]).map(x=>x.text??'').join('');traces.push({f:`${p}/${f}`,model:b.model,sys:sys.length||JSON.stringify((b.messages??[]).filter(m=>m.role==='system')).length,tools:(b.tools??[]).length,toolChars:JSON.stringify(b.tools??[]).length,msgs:(b.messages??[]).length,msgChars:JSON.stringify(b.messages??[]).length});}
 const lastAssistant=[...S].reverse().find(e=>e.type==='message'&&e.message.role==='assistant');
 const r={run:dir,exit:meta.exit,seconds:meta.seconds,toolCalls:calls.length,errors:calls.filter(c=>results.get(c.id)?.isError).length,

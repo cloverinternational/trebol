@@ -38,3 +38,5 @@ Interpretation: the prompt changes increased recall attempts (0/4 -> 6/6 runs) a
 queries, but no record reached the model in T2. The remaining blocker is retrieval (vocabulary mismatch, all-terms
 search, bootstrap selection), not prompting. More tool calls after the change are not established as a cost of
 memory: the arms differ by base prompt, n is tiny, and context_search plus re-reads account for most of the increase.
+
+**Correction (see memory-bench/FINDINGS-autonomy.md):** the "verified records surfaced in T2: 0" figure above used a broken metric (analyze.mjs parsed only bootstrap JSON). With the fixed metric the T1 record reached T2 in 2/3 B reps via context_search; the vocabulary-mismatch explanation is withdrawn.
