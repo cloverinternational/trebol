@@ -27,7 +27,7 @@ try{
   await new Promise(r=>server.listen(0,'127.0.0.1',r));
   let r=await run();const s=systems[0]??'';
   step(1,r.code===0&&s.includes('# Delegation (the Task tool)')&&s.includes('<system_information>')&&!s.startsWith('You are an expert coding assistant operating inside pi'),`first request is Forge (${s.length} chars, exit ${r.code}) ${r.err.slice(-200)}`);
-  step(2,/project task or question/.test(s)&&/2-3 distinctive keywords/.test(s),'memory_workflow covers questions and keyword queries');
+  step(2,/project task or question/.test(s)&&/distinctive words of the task/.test(s)&&/results are ranked/.test(s),'memory_workflow covers questions and ranked keyword queries');
   r=await run(['--system-prompt','CUSTOM-BASE-PROMPT-MARKER']);const c=systems[0]??'';
   step(3,c.includes('CUSTOM-BASE-PROMPT-MARKER')&&!c.includes('# Delegation (the Task tool)'),'near miss: explicit --system-prompt base kept, Forge not forced');
   console.log('PASS');

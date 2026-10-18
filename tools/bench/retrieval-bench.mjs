@@ -28,7 +28,7 @@ function current(recs,query){const q=query.trim().toLocaleLowerCase();const term
 const cfg=FI.embedConfig();const cacheF=join(dirname(outF),'vec-cache.jsonl');const vc=new Map();
 if(existsSync(cacheF))for(const l of readFileSync(cacheF,'utf8').split('\n').filter(Boolean)){const x=JSON.parse(l);vc.set(x.k,x.v);}
 async function vec(model,texts){const miss=[...new Set(texts.filter(t=>!vc.has(model+'|'+t)))];
-  for(let i=0;i<miss.length;i+=32){const res=await fetch(cfg.url+'/v1/embeddings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({model,input:miss.slice(i,i+32).map(s=>s.slice(0,6000))})});const d=await res.json();
+  for(let i=0;i<miss.length;i+=8){let res;for(let t=0;t<3;t++){try{res=await fetch(cfg.url+'/v1/embeddings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({model,input:miss.slice(i,i+8).map(s=>s.slice(0,6000))})});break}catch(e){if(t===2)throw e}}const d=await res.json();
     d.data.forEach((e,j)=>{vc.set(model+'|'+miss[i+j],e.embedding);appendFileSync(cacheF,JSON.stringify({k:model+'|'+miss[i+j],v:e.embedding})+'\n');});}
   return texts.map(t=>vc.get(model+'|'+t));}
 const dv=cfg?await vec(cfg.model,R.map(r=>r.text)):null;const dmap=new Map(R.map((r,i)=>[r.id,dv?.[i]]));

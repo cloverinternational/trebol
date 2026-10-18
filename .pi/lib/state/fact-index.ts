@@ -36,8 +36,8 @@ export function embedConfig(env: NodeJS.ProcessEnv = process.env): EmbedConfig |
 }
 async function embed(cfg: EmbedConfig, model: string, input: string[], signal?: AbortSignal): Promise<number[][]> {
   const out: number[][] = [];
-  for (let i = 0; i < input.length; i += 32) {
-    const res = await fetch(`${cfg.url}/v1/embeddings`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ model, input: input.slice(i, i + 32).map(s => s.slice(0, 6000)) }), signal: signal ?? AbortSignal.timeout(cfg.timeoutMs) });
+  for (let i = 0; i < input.length; i += 8) {
+    const res = await fetch(`${cfg.url}/v1/embeddings`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ model, input: input.slice(i, i + 8).map(s => s.slice(0, 6000)) }), signal: signal ?? AbortSignal.timeout(cfg.timeoutMs) });
     if (!res.ok) throw new Error(`embeddings ${res.status}`);
     const body = await res.json() as { data: { embedding: number[] }[] }; out.push(...body.data.map(d => d.embedding));
   }

@@ -359,10 +359,14 @@ browse/read/select events, receipt, exit and final tool response under ignored
 does not emit these traces; they are not added to model-visible results.
 `offer` lets the main agent hand explicit “remember that” content to a
 tool-less reviewer for a durable candidate and indexed acknowledgment. Existing
-`get` and other write operations retain their contracts. `search` now accepts
-reordered queries when every distinctive term occurs in the same record (as
-well as exact phrase matches); it does not synonym-expand or automatically
-include another scope. `recall` ranks strict PageIndex section matches first
+`get` and other write operations retain their contracts. `search` with a query is ranked
+(`.pi/lib/state/fact-index.ts`): exact phrase matches first, then BM25 over
+any query term fused (RRF k=60) with dense embeddings when
+`PI_SWARM_MEMORY_EMBED_URL` points at an OpenAI-compatible embeddings server
+(e.g. a tunnel to spark embeddinggemma; vectors cached per revision in the
+store's `embeddings.jsonl`; failure degrades to BM25 and is reported as
+`embedError`). It does not automatically include another scope. Benchmark:
+`artifacts/memory-bench/PREREG.md`, `tools/bench/retrieval-bench.mjs`. `recall` ranks strict PageIndex section matches first
 and fills unused candidate slots with partial matches containing at least two
 distinctive terms; the read-only agent still decides whether they support the
 query. A typo or synonym without lexical overlap may still return no result.
