@@ -1,0 +1,1320 @@
+{
+ "T02|F": {
+  "invalid": false,
+  "file": "artifacts/memory-audit/ab/runs/T02-F-1.jsonl",
+  "attempts": 1,
+  "text": ".pi/lib/tern/autocomplete.ts#L1-L33\n.pi/lib/tern/mentions.ts#L1-L17\ndocs/reference/tern-integration-status.md#L135-L143",
+  "tools": [
+   "project_context",
+   "read",
+   "read",
+   "read"
+  ],
+  "tokens": 20660,
+  "cites": [
+   [
+    ".pi/lib/tern/autocomplete.ts",
+    1,
+    33
+   ],
+   [
+    ".pi/lib/tern/mentions.ts",
+    1,
+    17
+   ],
+   [
+    "docs/reference/tern-integration-status.md",
+    135,
+    143
+   ]
+  ],
+  "judged": [
+   [
+    true,
+    -1
+   ],
+   [
+    true,
+    -1
+   ],
+   [
+    true,
+    -1
+   ]
+  ],
+  "pass": 0,
+  "pass1": 0,
+  "pc_calls": 1
+ },
+ "T02|B": {
+  "invalid": false,
+  "file": "artifacts/memory-audit/ab/runs/T02-B-1.jsonl",
+  "attempts": 1,
+  "text": "tools/e2e/tern-mentions.mjs#L38-L54\n.pi/lib/tern/mentions.ts#L122-L154\n.pi/lib/tern/autocomplete.ts#L1-L6",
+  "tools": [
+   "find",
+   "grep",
+   "grep"
+  ],
+  "tokens": 16858,
+  "cites": [
+   [
+    "tools/e2e/tern-mentions.mjs",
+    38,
+    54
+   ],
+   [
+    ".pi/lib/tern/mentions.ts",
+    122,
+    154
+   ],
+   [
+    ".pi/lib/tern/autocomplete.ts",
+    1,
+    6
+   ]
+  ],
+  "judged": [
+   [
+    true,
+    2
+   ],
+   [
+    true,
+    -1
+   ],
+   [
+    true,
+    -1
+   ]
+  ],
+  "pass": 1,
+  "pass1": 1,
+  "pc_calls": 0
+ },
+ "T15|F": {
+  "invalid": false,
+  "file": "artifacts/memory-audit/ab/runs/T15-F-1.jsonl",
+  "attempts": 1,
+  "text": "prompts/swarm-system-prompt.md\npackages/context/prompt/src/index.ts#L1-L33\nextensions/system-prompts/extension.ts#L11-L11",
+  "tools": [
+   "project_context",
+   "find",
+   "find",
+   "read",
+   "find",
+   "grep",
+   "read",
+   "find"
+  ],
+  "tokens": 67475,
+  "cites": [
+   [
+    "packages/context/prompt/src/index.ts",
+    1,
+    33
+   ],
+   [
+    "extensions/system-prompts/extension.ts",
+    11,
+    11
+   ]
+  ],
+  "judged": [
+   [
+    true,
+    -1
+   ],
+   [
+    true,
+    -1
+   ]
+  ],
+  "pass": 0,
+  "pass1": 0,
+  "pc_calls": 1
+ },
+ "T15|B": {
+  "invalid": false,
+  "file": "artifacts/memory-audit/ab/runs/T15-B-1.jsonl",
+  "attempts": 1,
+  "text": "prompts/swarm-system-prompt.md:11-157\nAGENTS.md:252-253\n.pi/lib/state/swarm-conversation-metadata.ts:18-22",
+  "tools": [
+   "grep",
+   "grep",
+   "read",
+   "grep",
+   "read",
+   "grep"
+  ],
+  "tokens": 57048,
+  "cites": [],
+  "judged": [],
+  "pass": 0,
+  "pass1": 0,
+  "pc_calls": 0
+ },
+ "T08|F": {
+  "invalid": false,
+  "file": "artifacts/memory-audit/ab/runs/T08-F-1.jsonl",
+  "attempts": 1,
+  "text": "packages/context/prompt/src/index.ts#L1-L24\nextensions/swarm-prompt/extension.ts#L474-L509",
+  "tools": [
+   "project_context",
+   "read",
+   "read",
+   "find"
+  ],
+  "tokens": 23352,
+  "cites": [
+   [
+    "packages/context/prompt/src/index.ts",
+    1,
+    24
+   ],
+   [
+    "extensions/swarm-prompt/extension.ts",
+    474,
+    509
+   ]
+  ],
+  "judged": [
+   [
+    true,
+    -1
+   ],
+   [
+    true,
+    -1
+   ]
+  ],
+  "pass": 0,
+  "pass1": 0,
+  "pc_calls": 1
+ },
+ "T08|B": {
+  "invalid": false,
+  "file": "artifacts/memory-audit/ab/runs/T08-B-1.jsonl",
+  "attempts": 1,
+  "text": "extensions/swarm-prompt/extension.ts#L316-L321\nextensions/swarm-prompt/extension.ts#L84-L84\npackages/context/prompt/src/index.ts#L35-L35",
+  "tools": [
+   "grep",
+   "read"
+  ],
+  "tokens": 31137,
+  "cites": [
+   [
+    "extensions/swarm-prompt/extension.ts",
+    316,
+    321
+   ],
+   [
+    "extensions/swarm-prompt/extension.ts",
+    84,
+    84
+   ],
+   [
+    "packages/context/prompt/src/index.ts",
+    35,
+    35
+   ]
+  ],
+  "judged": [
+   [
+    true,
+    -1
+   ],
+   [
+    true,
+    2
+   ],
+   [
+    true,
+    -1
+   ]
+  ],
+  "pass": 1,
+  "pass1": 1,
+  "pc_calls": 0
+ },
+ "T01|F": {
+  "invalid": false,
+  "file": "artifacts/memory-audit/ab/runs/T01-F-1.jsonl",
+  "attempts": 1,
+  "text": "extensions/clover-startup/extension.ts#L62-L81\nextensions/clover-startup/extension.ts#L105-L116\n.pi/lib/ui/clover-layout.ts#L31-L35",
+  "tools": [
+   "grep",
+   "project_context",
+   "grep",
+   "find",
+   "read",
+   "read",
+   "grep",
+   "grep"
+  ],
+  "tokens": 75872,
+  "cites": [
+   [
+    "extensions/clover-startup/extension.ts",
+    62,
+    81
+   ],
+   [
+    "extensions/clover-startup/extension.ts",
+    105,
+    116
+   ],
+   [
+    ".pi/lib/ui/clover-layout.ts",
+    31,
+    35
+   ]
+  ],
+  "judged": [
+   [
+    true,
+    -1
+   ],
+   [
+    true,
+    -1
+   ],
+   [
+    true,
+    -1
+   ]
+  ],
+  "pass": 0,
+  "pass1": 0,
+  "pc_calls": 1
+ },
+ "T01|B": {
+  "invalid": false,
+  "file": "artifacts/memory-audit/ab/runs/T01-B-1.jsonl",
+  "attempts": 1,
+  "text": ".pi/lib/tern/composer-view.ts#L122-L132\n.pi/lib/tern/composer-view.ts#L128-L128\n.pi/lib/tern/bridge.ts#L1017-L1017",
+  "tools": [
+   "grep",
+   "read",
+   "read"
+  ],
+  "tokens": 34853,
+  "cites": [
+   [
+    ".pi/lib/tern/composer-view.ts",
+    122,
+    132
+   ],
+   [
+    ".pi/lib/tern/composer-view.ts",
+    128,
+    128
+   ],
+   [
+    ".pi/lib/tern/bridge.ts",
+    1017,
+    1017
+   ]
+  ],
+  "judged": [
+   [
+    true,
+    -1
+   ],
+   [
+    true,
+    -1
+   ],
+   [
+    true,
+    -1
+   ]
+  ],
+  "pass": 0,
+  "pass1": 0,
+  "pc_calls": 0
+ },
+ "T32|F": {
+  "invalid": false,
+  "file": "artifacts/memory-audit/ab/runs/T32-F-1.jsonl",
+  "attempts": 1,
+  "text": ".pi/lib/tern/composer-style.ts#L16-L16\n.pi/lib/tern/composer-style.ts#L29-L29\n.pi/lib/tern/composer-style.ts#L11-L27",
+  "tools": [
+   "project_context",
+   "grep"
+  ],
+  "tokens": 21753,
+  "cites": [
+   [
+    ".pi/lib/tern/composer-style.ts",
+    16,
+    16
+   ],
+   [
+    ".pi/lib/tern/composer-style.ts",
+    29,
+    29
+   ],
+   [
+    ".pi/lib/tern/composer-style.ts",
+    11,
+    27
+   ]
+  ],
+  "judged": [
+   [
+    true,
+    2
+   ],
+   [
+    true,
+    2
+   ],
+   [
+    true,
+    2
+   ]
+  ],
+  "pass": 1,
+  "pass1": 1,
+  "pc_calls": 1
+ },
+ "T32|B": {
+  "invalid": false,
+  "file": "artifacts/memory-audit/ab/runs/T32-B-1.jsonl",
+  "attempts": 1,
+  "text": ".pi/lib/tern/composer-style.ts#L11-L27\n.pi/lib/tern/composer-style.ts#L29-L29",
+  "tools": [
+   "grep",
+   "grep",
+   "grep"
+  ],
+  "tokens": 21933,
+  "cites": [
+   [
+    ".pi/lib/tern/composer-style.ts",
+    11,
+    27
+   ],
+   [
+    ".pi/lib/tern/composer-style.ts",
+    29,
+    29
+   ]
+  ],
+  "judged": [
+   [
+    true,
+    2
+   ],
+   [
+    true,
+    2
+   ]
+  ],
+  "pass": 1,
+  "pass1": 1,
+  "pc_calls": 0
+ },
+ "T34|F": {
+  "invalid": false,
+  "file": "artifacts/memory-audit/ab/runs/T34-F-1.jsonl",
+  "attempts": 1,
+  "text": "extensions/ask-user/src/ask-payload-store.ts#L13-L34\nextensions/ask-user/docs/architecture.md#L17-L22",
+  "tools": [
+   "project_context",
+   "find",
+   "find",
+   "read",
+   "read"
+  ],
+  "tokens": 28651,
+  "cites": [
+   [
+    "extensions/ask-user/src/ask-payload-store.ts",
+    13,
+    34
+   ],
+   [
+    "extensions/ask-user/docs/architecture.md",
+    17,
+    22
+   ]
+  ],
+  "judged": [
+   [
+    true,
+    2
+   ],
+   [
+    true,
+    1
+   ]
+  ],
+  "pass": 1,
+  "pass1": 1,
+  "pc_calls": 1
+ },
+ "T34|B": {
+  "invalid": false,
+  "file": "artifacts/memory-audit/ab/runs/T34-B-1.jsonl",
+  "attempts": 1,
+  "text": "extensions/ask-user/src/ask-payload-store.ts#L10-L11\nextensions/ask-user/docs/contract.md#L308-L313\nextensions/ask-user/tests/ask-tool.test.ts#L123-L123",
+  "tools": [
+   "grep"
+  ],
+  "tokens": 10480,
+  "cites": [
+   [
+    "extensions/ask-user/src/ask-payload-store.ts",
+    10,
+    11
+   ],
+   [
+    "extensions/ask-user/docs/contract.md",
+    308,
+    313
+   ],
+   [
+    "extensions/ask-user/tests/ask-tool.test.ts",
+    123,
+    123
+   ]
+  ],
+  "judged": [
+   [
+    true,
+    2
+   ],
+   [
+    true,
+    2
+   ],
+   [
+    true,
+    2
+   ]
+  ],
+  "pass": 1,
+  "pass1": 1,
+  "pc_calls": 0
+ },
+ "T33|F": {
+  "invalid": false,
+  "file": "artifacts/memory-audit/ab/runs/T33-F-1.jsonl",
+  "attempts": 1,
+  "text": ".pi/lib/tern/bridge.ts#L364-L364\n.pi/lib/tern/bridge.ts#L453-L453\n.pi/lib/tools/swarm-bash.ts#L479-L479",
+  "tools": [
+   "find",
+   "project_context",
+   "grep"
+  ],
+  "tokens": 18369,
+  "cites": [
+   [
+    ".pi/lib/tern/bridge.ts",
+    364,
+    364
+   ],
+   [
+    ".pi/lib/tern/bridge.ts",
+    453,
+    453
+   ],
+   [
+    ".pi/lib/tools/swarm-bash.ts",
+    479,
+    479
+   ]
+  ],
+  "judged": [
+   [
+    true,
+    -1
+   ],
+   [
+    true,
+    -1
+   ],
+   [
+    true,
+    -1
+   ]
+  ],
+  "pass": 0,
+  "pass1": 0,
+  "pc_calls": 1
+ },
+ "T33|B": {
+  "invalid": false,
+  "file": "artifacts/memory-audit/ab/runs/T33-B-1.jsonl",
+  "attempts": 1,
+  "text": "vendor/pi-mono/packages/coding-agent/src/core/tools/bash.ts#L405-L438\nvendor/pi-mono/packages/coding-agent/src/core/tools/bash.ts#L286-L334\ndocs/audits/omp-rich-tool-cards.md#L33-L33",
+  "tools": [
+   "find",
+   "grep",
+   "grep",
+   "read"
+  ],
+  "tokens": 28110,
+  "cites": [
+   [
+    "vendor/pi-mono/packages/coding-agent/src/core/tools/bash.ts",
+    405,
+    438
+   ],
+   [
+    "vendor/pi-mono/packages/coding-agent/src/core/tools/bash.ts",
+    286,
+    334
+   ],
+   [
+    "docs/audits/omp-rich-tool-cards.md",
+    33,
+    33
+   ]
+  ],
+  "judged": [
+   [
+    true,
+    -1
+   ],
+   [
+    true,
+    -1
+   ],
+   [
+    true,
+    1
+   ]
+  ],
+  "pass": 0,
+  "pass1": 1,
+  "pc_calls": 0
+ },
+ "T41|F": {
+  "invalid": false,
+  "file": "artifacts/memory-audit/ab/runs/T41-F-1.jsonl",
+  "attempts": 1,
+  "text": ".pi/lib/tools/swarm-read-image.ts#L20-L60\n.pi/lib/tools/swarm-fs-tools.contract.ts#L14-L22\n.pi/lib/tools/swarm-artifacts.ts#L73-L90",
+  "tools": [
+   "project_context"
+  ],
+  "tokens": 12027,
+  "cites": [
+   [
+    ".pi/lib/tools/swarm-read-image.ts",
+    20,
+    60
+   ],
+   [
+    ".pi/lib/tools/swarm-fs-tools.contract.ts",
+    14,
+    22
+   ],
+   [
+    ".pi/lib/tools/swarm-artifacts.ts",
+    73,
+    90
+   ]
+  ],
+  "judged": [
+   [
+    true,
+    2
+   ],
+   [
+    true,
+    2
+   ],
+   [
+    true,
+    2
+   ]
+  ],
+  "pass": 1,
+  "pass1": 1,
+  "pc_calls": 1
+ },
+ "T41|B": {
+  "invalid": false,
+  "file": "artifacts/memory-audit/ab/runs/T41-B-1.jsonl",
+  "attempts": 1,
+  "text": ".pi/lib/tools/swarm-artifacts.ts#L67-L70\n.pi/lib/tern/artifact-previews.ts#L40-L40\n.pi/lib/tools/swarm-fs-tools.contract.ts#L4-L7",
+  "tools": [
+   "grep",
+   "grep"
+  ],
+  "tokens": 23818,
+  "cites": [
+   [
+    ".pi/lib/tools/swarm-artifacts.ts",
+    67,
+    70
+   ],
+   [
+    ".pi/lib/tern/artifact-previews.ts",
+    40,
+    40
+   ],
+   [
+    ".pi/lib/tools/swarm-fs-tools.contract.ts",
+    4,
+    7
+   ]
+  ],
+  "judged": [
+   [
+    true,
+    2
+   ],
+   [
+    true,
+    2
+   ],
+   [
+    true,
+    -1
+   ]
+  ],
+  "pass": 1,
+  "pass1": 1,
+  "pc_calls": 0
+ },
+ "T19|F": {
+  "invalid": false,
+  "file": "artifacts/memory-audit/ab/runs/T19-F-1.jsonl",
+  "attempts": 1,
+  "text": ".pi/lib/runtime/bootstrap-dispatch.ts#L30-L30\n.pi/test/runtime/bootstrap-native-dispatch.test.ts#L1-L34\nextensions/bootstrap/extension.ts#L159-L159",
+  "tools": [
+   "grep",
+   "project_context"
+  ],
+  "tokens": 20435,
+  "cites": [
+   [
+    ".pi/lib/runtime/bootstrap-dispatch.ts",
+    30,
+    30
+   ],
+   [
+    ".pi/test/runtime/bootstrap-native-dispatch.test.ts",
+    1,
+    34
+   ],
+   [
+    "extensions/bootstrap/extension.ts",
+    159,
+    159
+   ]
+  ],
+  "judged": [
+   [
+    true,
+    2
+   ],
+   [
+    true,
+    2
+   ],
+   [
+    true,
+    1
+   ]
+  ],
+  "pass": 1,
+  "pass1": 1,
+  "pc_calls": 1
+ },
+ "T19|B": {
+  "invalid": false,
+  "file": "artifacts/memory-audit/ab/runs/T19-B-1.jsonl",
+  "attempts": 1,
+  "text": ".pi/lib/runtime/bootstrap-dispatch.ts#L30-L53\nextensions/bootstrap/extension.ts#L159-L159\n.pi/lib/context/supervisor-task-reconcile.ts#L22-L22",
+  "tools": [
+   "grep",
+   "read"
+  ],
+  "tokens": 19106,
+  "cites": [
+   [
+    ".pi/lib/runtime/bootstrap-dispatch.ts",
+    30,
+    53
+   ],
+   [
+    "extensions/bootstrap/extension.ts",
+    159,
+    159
+   ],
+   [
+    ".pi/lib/context/supervisor-task-reconcile.ts",
+    22,
+    22
+   ]
+  ],
+  "judged": [
+   [
+    true,
+    2
+   ],
+   [
+    true,
+    1
+   ],
+   [
+    true,
+    2
+   ]
+  ],
+  "pass": 1,
+  "pass1": 1,
+  "pc_calls": 0
+ },
+ "T38|F": {
+  "invalid": false,
+  "file": "artifacts/memory-audit/ab/runs/T38-F-1.jsonl",
+  "attempts": 1,
+  "text": ".pi/lib/tern/bridge.ts#L453-L490\n.pi/lib/tern/bridge.ts#L481-L481\n.pi/test/tern/bridge.test.ts#L282-L282",
+  "tools": [
+   "project_context",
+   "grep",
+   "read",
+   "grep"
+  ],
+  "tokens": 31796,
+  "cites": [
+   [
+    ".pi/lib/tern/bridge.ts",
+    453,
+    490
+   ],
+   [
+    ".pi/lib/tern/bridge.ts",
+    481,
+    481
+   ],
+   [
+    ".pi/test/tern/bridge.test.ts",
+    282,
+    282
+   ]
+  ],
+  "judged": [
+   [
+    true,
+    -1
+   ],
+   [
+    true,
+    -1
+   ],
+   [
+    true,
+    -1
+   ]
+  ],
+  "pass": 0,
+  "pass1": 0,
+  "pc_calls": 1
+ },
+ "T38|B": {
+  "invalid": false,
+  "file": "artifacts/memory-audit/ab/runs/T38-B-1.jsonl",
+  "attempts": 1,
+  "text": ".pi/lib/tern/bridge.ts#L481-L481\ndocs/reference/tern-integration-status.md#L17-L17\n.pi/test/tern/bridge.test.ts#L282-L282",
+  "tools": [
+   "grep"
+  ],
+  "tokens": 9100,
+  "cites": [
+   [
+    ".pi/lib/tern/bridge.ts",
+    481,
+    481
+   ],
+   [
+    "docs/reference/tern-integration-status.md",
+    17,
+    17
+   ],
+   [
+    ".pi/test/tern/bridge.test.ts",
+    282,
+    282
+   ]
+  ],
+  "judged": [
+   [
+    true,
+    -1
+   ],
+   [
+    true,
+    2
+   ],
+   [
+    true,
+    -1
+   ]
+  ],
+  "pass": 1,
+  "pass1": 1,
+  "pc_calls": 0
+ },
+ "T30|F": {
+  "invalid": false,
+  "file": "artifacts/memory-audit/ab/runs/T30-F-1.jsonl",
+  "attempts": 1,
+  "text": "extensions/ask-user/src/remote-ask.ts#L522-L531\n.pi/lib/tern/ask-dialog.ts#L262-L262\nextensions/ask-user/src/remote-ask.ts#L32-L32",
+  "tools": [
+   "project_context",
+   "grep",
+   "read",
+   "read"
+  ],
+  "tokens": 30068,
+  "cites": [
+   [
+    "extensions/ask-user/src/remote-ask.ts",
+    522,
+    531
+   ],
+   [
+    ".pi/lib/tern/ask-dialog.ts",
+    262,
+    262
+   ],
+   [
+    "extensions/ask-user/src/remote-ask.ts",
+    32,
+    32
+   ]
+  ],
+  "judged": [
+   [
+    true,
+    2
+   ],
+   [
+    true,
+    -1
+   ],
+   [
+    true,
+    1
+   ]
+  ],
+  "pass": 1,
+  "pass1": 1,
+  "pc_calls": 1
+ },
+ "T30|B": {
+  "invalid": false,
+  "file": "artifacts/memory-audit/ab/runs/T30-B-1.jsonl",
+  "attempts": 1,
+  "text": "extensions/ask-user/src/remote-ask.ts#L526-L526\nextensions/ask-user/src/remote-ask.ts#L32-L32\nextensions/ask-user/docs/contract.md#L292-L292",
+  "tools": [
+   "grep"
+  ],
+  "tokens": 10143,
+  "cites": [
+   [
+    "extensions/ask-user/src/remote-ask.ts",
+    526,
+    526
+   ],
+   [
+    "extensions/ask-user/src/remote-ask.ts",
+    32,
+    32
+   ],
+   [
+    "extensions/ask-user/docs/contract.md",
+    292,
+    292
+   ]
+  ],
+  "judged": [
+   [
+    true,
+    2
+   ],
+   [
+    true,
+    1
+   ],
+   [
+    true,
+    1
+   ]
+  ],
+  "pass": 1,
+  "pass1": 1,
+  "pc_calls": 0
+ },
+ "T14|F": {
+  "invalid": false,
+  "file": "artifacts/memory-audit/ab/runs/T14-F-1.jsonl",
+  "attempts": 1,
+  "text": "packages/tools/taskmanage/src/task-manage.ts#L113-L120\npackages/tools/taskmanage/test/questions.test.ts#L46-L51\ndocs/plans/active/taskmanage-evidence-regressions.md#L32-L38",
+  "tools": [
+   "grep",
+   "project_context",
+   "read",
+   "read",
+   "read"
+  ],
+  "tokens": 22252,
+  "cites": [
+   [
+    "packages/tools/taskmanage/src/task-manage.ts",
+    113,
+    120
+   ],
+   [
+    "packages/tools/taskmanage/test/questions.test.ts",
+    46,
+    51
+   ],
+   [
+    "docs/plans/active/taskmanage-evidence-regressions.md",
+    32,
+    38
+   ]
+  ],
+  "judged": [
+   [
+    true,
+    2
+   ],
+   [
+    true,
+    1
+   ],
+   [
+    true,
+    -1
+   ]
+  ],
+  "pass": 1,
+  "pass1": 1,
+  "pc_calls": 1
+ },
+ "T14|B": {
+  "invalid": false,
+  "file": "artifacts/memory-audit/ab/runs/T14-B-1.jsonl",
+  "attempts": 1,
+  "text": "packages/tools/taskmanage/src/task-manage.ts#L113-L120\npackages/tools/taskmanage/test/questions.test.ts#L47-L50\npackages/tools/taskmanage/src/task-manage.ts#L678-L678",
+  "tools": [
+   "grep",
+   "read"
+  ],
+  "tokens": 15849,
+  "cites": [
+   [
+    "packages/tools/taskmanage/src/task-manage.ts",
+    113,
+    120
+   ],
+   [
+    "packages/tools/taskmanage/test/questions.test.ts",
+    47,
+    50
+   ],
+   [
+    "packages/tools/taskmanage/src/task-manage.ts",
+    678,
+    678
+   ]
+  ],
+  "judged": [
+   [
+    true,
+    2
+   ],
+   [
+    true,
+    1
+   ],
+   [
+    true,
+    1
+   ]
+  ],
+  "pass": 1,
+  "pass1": 1,
+  "pc_calls": 0
+ },
+ "T07|F": {
+  "invalid": false,
+  "file": "artifacts/memory-audit/ab/runs/T07-F-1.jsonl",
+  "attempts": 1,
+  "text": ".pi/lib/tools/swarm-bash.ts#L411-L429\n.pi/lib/tools/swarm-apply-patch.ts#L257-L271\ndocs/audits/annoyed-issue-inventory.md#L702-L706",
+  "tools": [
+   "grep",
+   "project_context"
+  ],
+  "tokens": 14369,
+  "cites": [
+   [
+    ".pi/lib/tools/swarm-bash.ts",
+    411,
+    429
+   ],
+   [
+    ".pi/lib/tools/swarm-apply-patch.ts",
+    257,
+    271
+   ],
+   [
+    "docs/audits/annoyed-issue-inventory.md",
+    702,
+    706
+   ]
+  ],
+  "judged": [
+   [
+    true,
+    2
+   ],
+   [
+    true,
+    1
+   ],
+   [
+    true,
+    -1
+   ]
+  ],
+  "pass": 1,
+  "pass1": 1,
+  "pc_calls": 1
+ },
+ "T07|B": {
+  "invalid": false,
+  "file": "artifacts/memory-audit/ab/runs/T07-B-1.jsonl",
+  "attempts": 1,
+  "text": ".pi/lib/tools/swarm-bash.ts#L406-L427\n.pi/lib/tools/swarm-apply-patch.ts#L257-L269",
+  "tools": [
+   "grep",
+   "grep",
+   "grep",
+   "grep",
+   "read",
+   "read"
+  ],
+  "tokens": 57073,
+  "cites": [
+   [
+    ".pi/lib/tools/swarm-bash.ts",
+    406,
+    427
+   ],
+   [
+    ".pi/lib/tools/swarm-apply-patch.ts",
+    257,
+    269
+   ]
+  ],
+  "judged": [
+   [
+    true,
+    2
+   ],
+   [
+    true,
+    1
+   ]
+  ],
+  "pass": 1,
+  "pass1": 1,
+  "pc_calls": 0
+ },
+ "T25|F": {
+  "invalid": false,
+  "file": "artifacts/memory-audit/ab/runs/T25-F-1.jsonl",
+  "attempts": 1,
+  "text": ".pi/lib/tern/tsp.ts#L238-L316\n.pi/test/tern/tsp.test.ts#L134-L194\n.pi/lib/tern/bridge.ts#L523-L604",
+  "tools": [
+   "grep",
+   "project_context",
+   "read"
+  ],
+  "tokens": 30244,
+  "cites": [
+   [
+    ".pi/lib/tern/tsp.ts",
+    238,
+    316
+   ],
+   [
+    ".pi/test/tern/tsp.test.ts",
+    134,
+    194
+   ],
+   [
+    ".pi/lib/tern/bridge.ts",
+    523,
+    604
+   ]
+  ],
+  "judged": [
+   [
+    true,
+    2
+   ],
+   [
+    true,
+    1
+   ],
+   [
+    true,
+    1
+   ]
+  ],
+  "pass": 1,
+  "pass1": 1,
+  "pc_calls": 1
+ },
+ "T25|B": {
+  "invalid": false,
+  "file": "artifacts/memory-audit/ab/runs/T25-B-1.jsonl",
+  "attempts": 1,
+  "text": ".pi/lib/tern/tsp.ts#L238-L316\n.pi/lib/tern/bridge.ts#L590-L590\n.pi/test/tern/tsp.test.ts#L129-L129",
+  "tools": [
+   "grep",
+   "grep",
+   "read",
+   "read"
+  ],
+  "tokens": 43230,
+  "cites": [
+   [
+    ".pi/lib/tern/tsp.ts",
+    238,
+    316
+   ],
+   [
+    ".pi/lib/tern/bridge.ts",
+    590,
+    590
+   ],
+   [
+    ".pi/test/tern/tsp.test.ts",
+    129,
+    129
+   ]
+  ],
+  "judged": [
+   [
+    true,
+    2
+   ],
+   [
+    true,
+    1
+   ],
+   [
+    true,
+    1
+   ]
+  ],
+  "pass": 1,
+  "pass1": 1,
+  "pc_calls": 0
+ },
+ "T20|F": {
+  "invalid": false,
+  "file": "artifacts/memory-audit/ab/runs/T20-F-1.jsonl",
+  "attempts": 1,
+  "text": ".pi/lib/tern/bridge.ts#L1658-L1674\n.pi/lib/tern/autocomplete.ts#L1-L33\ndocs/reference/tern-integration-status.md#L120-L143",
+  "tools": [
+   "grep",
+   "project_context",
+   "read",
+   "read",
+   "read"
+  ],
+  "tokens": 28312,
+  "cites": [
+   [
+    ".pi/lib/tern/bridge.ts",
+    1658,
+    1674
+   ],
+   [
+    ".pi/lib/tern/autocomplete.ts",
+    1,
+    33
+   ],
+   [
+    "docs/reference/tern-integration-status.md",
+    120,
+    143
+   ]
+  ],
+  "judged": [
+   [
+    true,
+    0
+   ],
+   [
+    true,
+    -1
+   ],
+   [
+    true,
+    2
+   ]
+  ],
+  "pass": 1,
+  "pass1": 1,
+  "pc_calls": 1
+ },
+ "T20|B": {
+  "invalid": false,
+  "file": "artifacts/memory-audit/ab/runs/T20-B-1.jsonl",
+  "attempts": 1,
+  "text": "bridge.ts:1658-1670 is the definition; the call sites at 1622 and 1638 and the status doc at line 129 are the next most relevant.\n\n.pi/lib/tern/bridge.ts#L1658-L1671\n.pi/lib/tern/bridge.ts#L1622-L1622\ndocs/reference/tern-integration-status.md#L129-L129",
+  "tools": [
+   "grep",
+   "read"
+  ],
+  "tokens": 14266,
+  "cites": [
+   [
+    ".pi/lib/tern/bridge.ts",
+    1658,
+    1671
+   ],
+   [
+    ".pi/lib/tern/bridge.ts",
+    1622,
+    1622
+   ],
+   [
+    "docs/reference/tern-integration-status.md",
+    129,
+    129
+   ]
+  ],
+  "judged": [
+   [
+    true,
+    0
+   ],
+   [
+    true,
+    0
+   ],
+   [
+    true,
+    2
+   ]
+  ],
+  "pass": 1,
+  "pass1": 1,
+  "pc_calls": 0
+ }
+}

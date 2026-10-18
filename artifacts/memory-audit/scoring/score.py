@@ -1,10 +1,11 @@
 # Run from artifacts/memory-audit: .venv/bin/python scoring/score.py
 # Score sealed runs once against sealed qrels (ranx) + paired bootstrap. Usage: score.py > scores.txt
-import json, os, numpy as np, warnings; warnings.filterwarnings("ignore")
+import json, os, sys, numpy as np, warnings; warnings.filterwarnings("ignore")
 from ranx import Qrels, Run, evaluate
 os.chdir(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "eval"))  # sealed inputs; eval/select.py shadows stdlib select, so the script lives outside it
 qrels = {}
-for l in open("qrels.jsonl"):
+QF = sys.argv[1] if len(sys.argv) > 1 else "qrels.jsonl"; print("qrels:", QF)
+for l in open(QF):
     x = json.loads(l); qrels.setdefault(x["qid"], {})[x["doc"]] = x["grade"]
 judged = {q for q in qrels}
 rel = {q: {d: g for d, g in v.items() if g > 0} for q, v in qrels.items()}
@@ -39,4 +40,4 @@ best = max(["dense_v2", "bm25_v2", "rrf_v2"], key=lambda a: per[a]["ndcg@10"].me
 for a, b in [("rrf_v2", "dense_v2"), ("rrf_v2", "rrf_v1"), ("dense_v2", "dense_v1"), (best, "rg"), (best, "memory"), ("rrf_v2", "bm25_v2")]:
     print(boot(a, b))
 print(f"(best v2 arm by mean nDCG@10: {best})")
-json.dump({a: {m: per[a][m].tolist() for m in M} for a in per} | {"_queries": eval_q}, open("per-query-scores.json", "w"))
+json.dump({a: {m: per[a][m].tolist() for m in M} for a in per} | {"_queries": eval_q}, open(QF.replace("qrels", "per-query-scores").replace(".jsonl", ".json"), "w"))
