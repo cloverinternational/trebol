@@ -137,7 +137,6 @@ export class TaskEnforcementHook {
     if (this.mode === "off" || isSubAgent) return CONTINUE;
     const toolName = event.toolName;
     if (!toolName) return CONTINUE;
-    if (normalizeToolName(toolName) === "bootstrap") return CONTINUE;
     if (isPlanModeTool(toolName)) this.planModeUsed = true;
     if (isTaskManagementTool(toolName) || isPlanModeTool(toolName) || isSkillTool(toolName) || isUserInteractionTool(toolName) || isCodeModeTool(toolName)) return CONTINUE;
     if (isReadOnlyExplorationTool(toolName) || isReadOnlyMemoryCall(toolName, event.params)) return CONTINUE;
@@ -441,7 +440,6 @@ export class AutogenBudgetEnforcementHook {
   private source(): BudgetSource | undefined { return (globalThis as any)[AUTOGEN_BUDGET_SOURCE]; }
   private exempt(event: ToolCallEvent): boolean {
     const n = event.toolName;
-    if (n === "bootstrap") return true; // Recovery must work even at an exhausted skill budget.
     if (isSkillTool(n) || isTaskManagementTool(n) || isPlanModeTool(n) || isUserInteractionTool(n) || isCodeModeTool(n) || isReadOnlyExplorationTool(n)) return true;
     // Unlike task enforcement, skill budgeting charges even read-only Bash.
     return false;

@@ -1,6 +1,10 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import extension, { registerTaskManageExtension } from "../../../../extensions/taskmanage/extension.ts";
 import promptExtension from "../../../../extensions/swarm-prompt/extension.ts";
+import { FORGE_PROMPT, savePromptStore } from "../../../../extensions/system-prompts/extension.ts";
 import thinkingExtension from "../../../../extensions/swarm-thinking/extension.ts";
 import { taskManageSchema, InteractionBroker } from "../src/index.js";
 import { PERMISSIVE_PARAMETERS, loadSwarmToolSurface, overlaySwarmToolSchemas } from "../../../../.pi/lib/runtime/swarm-tool-surface.ts";
@@ -209,24 +213,27 @@ describe("root Pi TaskManage extension", () => {
   });
 
   it("overrides Pi's base prompt with the TUI-equivalent Forge prompt once", async () => {
+    // Modes is the default; this pins the Forge prompt explicitly.
+    const project = mkdtempSync(join(tmpdir(), "pi-forge-project-"));
+    savePromptStore(project, { prompts: [], active: FORGE_PROMPT });
     const runtime = fakePi();
     promptExtension(runtime.pi as any);
     const handler = runtime.handlers.get("before_agent_start")![0];
     const result: any = await handler({
       systemPrompt: "Pi's existing system instructions\n## Core Principles:\nhost-owned section",
-      systemPromptOptions: { cwd: "/workspace/project" },
+      systemPromptOptions: { cwd: project },
     }, { hasUI: true });
 
     expect(result.systemPrompt).not.toContain("Pi's existing system instructions");
     expect(result.systemPrompt).toContain("You are an expert software engineering assistant");
     expect(result.systemPrompt).toContain("# Delegation (the Task tool)");
     expect(result.systemPrompt.match(/You are an expert software engineering assistant/g)).toHaveLength(1);
-    expect(result.systemPrompt).toContain("<current_working_directory>/workspace/project</current_working_directory>");
+    expect(result.systemPrompt).toContain(`<current_working_directory>${project}</current_working_directory>`);
     // Re-processing an already assembled Forge prompt is idempotent.
     await expect(handler({ systemPrompt: result.systemPrompt }, { hasUI: true })).resolves.toBeUndefined();
     // Headless Pi (`pi -p`) now uses the same Forge/delegation prompt as the
     // TUI; it remains headless only by omitting interactive swarm-flow text.
-    const headless: any = await handler({ systemPrompt: "base", systemPromptOptions: { cwd: "/workspace/project" } }, { hasUI: false });
+    const headless: any = await handler({ systemPrompt: "base", systemPromptOptions: { cwd: project } }, { hasUI: false });
     expect(headless.systemPrompt).toContain("You are an expert software engineering assistant");
     expect(headless.systemPrompt).toContain("# Delegation (the Task tool)");
     expect(headless.systemPrompt).toContain("<system_information>");

@@ -433,8 +433,6 @@ export function cliIsolation(argv: readonly string[] = process.argv): { systemPr
   return { systemPrompt, noContextFiles: argv.includes("--no-context-files"), noSkills: argv.includes("--no-skills") };
 }
 
-import { memorySystemPrompt } from "../../.pi/lib/context/memory-ceremony.ts";
-
 export function registerSwarmPrompt(pi: PromptExtensionAPI): void {
   if (promptRegistrations.has(pi as object)) return;
   promptRegistrations.add(pi as object);
@@ -468,7 +466,9 @@ export function registerSwarmPrompt(pi: PromptExtensionAPI): void {
     // must still be upgraded when the real session is interactive.
     const promptModeMatches = forgePrompt && interactive === event.systemPrompt.includes("<swarm_flow_capability>");
     if (promptModeMatches) return undefined;
-    const selectedBase = selected.kind === "pi" ? event.systemPrompt : selected.kind === "custom" ? selected.content : undefined;
+    // Modes takes the custom-prompt path (as benchmarked) with its {{workspace}} block rendered here.
+    const selectedBase = selected.kind === "pi" ? event.systemPrompt : selected.kind === "custom" ? selected.content
+      : selected.kind === "modes" ? selected.content.replace("{{workspace}}", renderWorkspaceContext(resolveWorkspace(cwd))) : undefined;
     if (selectedBase !== undefined) {
       const enabled = isolation.noContextFiles ? Object.fromEntries(PROJECT_MEMORY_SOURCES.map((id) => [id, false])) : config.context?.enabledSources;
       const base = injectSwarmContext(selectedBase, { workDir: cwd, enabled, files: isolation.noContextFiles ? undefined : config.context?.files });
@@ -499,10 +499,9 @@ export function registerSwarmPrompt(pi: PromptExtensionAPI): void {
     const base = assembled?.systemPrompt && addendum && !assembled.systemPrompt.includes(addendum)
       ? `${assembled.systemPrompt}\n\n${addendum}`
       : assembled?.systemPrompt ?? event.systemPrompt;
-    const final = memorySystemPrompt(base, cwd);
-    if (assembled) assembled.systemPrompt = final;
-    if (assembled) assembledPromptKinds.set(hash(final), (ctx as { hasUI?: boolean }).hasUI === true ? "interactive" : "headless");
-    const result = assembled || final !== base ? { systemPrompt: final } : undefined;
+    if (assembled) assembled.systemPrompt = base;
+    if (assembled) assembledPromptKinds.set(hash(base), (ctx as { hasUI?: boolean }).hasUI === true ? "interactive" : "headless");
+    const result = assembled ? { systemPrompt: base } : undefined;
     if (footerExplanationRequested(String(event.prompt ?? "")) && selectedBaseIsForge(cwd)) {
       return { ...(result ?? {}), message: { customType: "pi-swarm-footer-explanation-guidance", content: FOOTER_EXPLANATION_PROMPT, display: false } };
     }

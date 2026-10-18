@@ -1,6 +1,6 @@
 /** Real Pi + TaskManage + task-candidate-capture: completed answers become
  * per-answer memory records; evidence-anchored ones are verified and returned by
- * recallKnowledge (the function bootstrap calls), go stale when a cited span is
+ * recallKnowledge, go stale when a cited span is
  * edited, and path-only evidence stays candidate.
  * Run: node tools/e2e/taskmanage-answer-memory.mjs */
 import {createJiti} from 'jiti';

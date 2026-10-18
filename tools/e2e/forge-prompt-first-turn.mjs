@@ -1,21 +1,22 @@
 /** The Forge system prompt must reach the model on the FIRST request of a
- * session (headless and the hook warm-up notwithstanding). Real Pi, repo cwd
- * (activePrompt = Forge), swarm-prompt + memory-history extensions, scripted
+ * session (headless and the hook warm-up notwithstanding). Real Pi, a workspace
+ * with activePrompt = Forge (Modes is the default), swarm-prompt + memory-history extensions, scripted
  * provider that records each request's system prompt.
  * 1. first request carries Forge (delegation heading + system_information),
  *    not Pi's base prompt;
  * 2. memory_workflow covers questions and asks for keyword queries;
  * 3. near miss: an explicit --system-prompt base is still kept (not replaced).
  * Run: node tools/e2e/forge-prompt-first-turn.mjs */
-import {createServer} from 'node:http';import {mkdtemp,mkdir,writeFile,rm,realpath} from 'node:fs/promises';import {tmpdir} from 'node:os';import {join,resolve} from 'node:path';import {spawn} from 'node:child_process';import {fileURLToPath} from 'node:url';
+import {createServer} from 'node:http';import {mkdtemp,mkdir,writeFile,rm,realpath} from 'node:fs/promises';import {tmpdir} from 'node:os';import {join,resolve} from 'node:path';import {spawn,execFileSync} from 'node:child_process';import {fileURLToPath} from 'node:url';
 const repo=resolve(fileURLToPath(new URL('../../',import.meta.url))),root=await realpath(await mkdtemp(join(tmpdir(),'forge-first-')));
 const step=(n,ok,d)=>{console.log(`${ok?'PASS':'FAIL'} step ${n}: ${d}`);if(!ok)throw new Error(`step ${n} failed`);};
 let systems=[],server;
+const ws=join(root,'ws');await mkdir(join(ws,'.pi','config'),{recursive:true});execFileSync('git',['init','-q',ws]);await writeFile(join(ws,'.pi','config','prompt-context.json'),JSON.stringify({version:1,prompts:[],activePrompt:'Forge Swarm Agent'}));
 async function run(extra=[]){
   systems=[];const agent=join(root,`agent-${systems.length}-${Date.now()}`);await mkdir(agent,{recursive:true});
   await writeFile(join(agent,'models.json'),JSON.stringify({providers:{local:{baseUrl:`http://127.0.0.1:${server.address().port}/v1`,api:'openai-completions',apiKey:'dummy',models:[{id:'script',contextWindow:200000,maxTokens:2048,reasoning:false}]}}}));
   const exts=['swarm-prompt','memory-history'].flatMap(e=>['--extension',join(repo,'extensions',e,'index.ts')]);
-  const c=spawn('pi',['--model','local/script','--no-extensions',...exts,'--no-skills','--no-session','--mode','json','--print',...extra,'--','Why was tool:mcp__Bash#3 rejected?'],{cwd:repo,env:{...process.env,PI_CODING_AGENT_DIR:agent,PI_SWARM_MEMORY_DIR:join(root,'mem')},stdio:['ignore','pipe','pipe']});
+  const c=spawn('pi',['--model','local/script','--no-extensions',...exts,'--no-skills','--no-session','--mode','json','--print',...extra,'--','Why was tool:mcp__Bash#3 rejected?'],{cwd:ws,env:{...process.env,PI_CODING_AGENT_DIR:agent,PI_SWARM_MEMORY_DIR:join(root,'mem')},stdio:['ignore','pipe','pipe']});
   let err='';c.stderr.on('data',b=>err+=b);c.stdout.resume();const t=setTimeout(()=>c.kill('SIGKILL'),90000);
   const code=await new Promise(r=>c.once('exit',r));clearTimeout(t);return {code,err};
 }

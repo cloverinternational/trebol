@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { swarmForgeSystemPrompt } from "../../packages/context/prompt/src/index.ts";
+import { modesSystemPrompt, swarmForgeSystemPrompt } from "../../packages/context/prompt/src/index.ts";
 import { loadPromptContextConfig, promptContextConfigPath, savePromptContextConfig } from "../../.pi/lib/context/swarm-prompt-context-config.ts";
 
 /**
@@ -23,6 +23,8 @@ export interface PromptStore {
 
 export const PI_DEFAULT_PROMPT = "Pi default / current base";
 export const FORGE_PROMPT = "Forge Swarm Agent";
+/** Default when no prompt is selected. */
+export const MODES_PROMPT = "Modes Agent";
 
 export interface SystemPromptUI {
   select(title: string, options: string[]): Promise<string | undefined>;
@@ -55,11 +57,12 @@ export function promptStorePath(cwd: string): string {
 
 export function loadPromptStore(cwd: string): PromptStore {
   const config = loadPromptContextConfig(cwd);
-  return { prompts: config.prompts, active: config.activePrompt ?? FORGE_PROMPT };
+  return { prompts: config.prompts, active: config.activePrompt ?? MODES_PROMPT };
 }
 
 export type ActiveSystemPrompt =
   | { kind: "forge"; content: string }
+  | { kind: "modes"; content: string }
   | { kind: "pi" }
   | { kind: "custom"; name: string; content: string };
 
@@ -73,7 +76,8 @@ export function resolveActiveSystemPrompt(cwd: string): ActiveSystemPrompt {
   // An explicitly saved override wins even when it uses a builtin display name.
   if (custom) return { kind: "custom", name: custom.name, content: custom.content };
   if (store.active === PI_DEFAULT_PROMPT) return { kind: "pi" };
-  return { kind: "forge", content: canonicalSwarmSystemPrompt };
+  if (store.active === FORGE_PROMPT) return { kind: "forge", content: canonicalSwarmSystemPrompt };
+  return { kind: "modes", content: modesSystemPrompt };
 }
 
 export function savePromptStore(cwd: string, store: PromptStore): void {
@@ -138,8 +142,9 @@ export async function openSystemPrompts(args: string, ctx: SystemPromptContext):
   const builtIn: SystemPromptPreset = { name: PI_DEFAULT_PROMPT, content: piPrompt || ctx.getSystemPrompt() };
   // The extension-owned list is augmented with Pi's existing prompt surfaces.
   // They are never copied into the persisted store: the source remains Pi.
-  const saved = store.prompts.filter(p => p.name !== builtIn.name && p.name !== FORGE_PROMPT);
+  const saved = store.prompts.filter(p => p.name !== builtIn.name && p.name !== FORGE_PROMPT && p.name !== MODES_PROMPT);
   const swarm: SystemPromptPreset = { name: FORGE_PROMPT, content: canonicalSwarmSystemPrompt };
+  const modes: SystemPromptPreset = { name: MODES_PROMPT, content: modesSystemPrompt };
   const command = args.trim();
 
   if (command === "current" || command === "show") {
@@ -148,6 +153,12 @@ export async function openSystemPrompts(args: string, ctx: SystemPromptContext):
   }
   if (command === "pi" || command === "default") {
     await ctx.ui.editor("Pi system prompt · current base", builtIn.content);
+    return;
+  }
+  if (command === "modes") {
+    store.active = modes.name;
+    savePromptStore(cwd, store);
+    ctx.ui.notify("Modes Agent system prompt selected.", "info");
     return;
   }
   if (command === "swarm" || command === "forge") {
@@ -175,10 +186,10 @@ export async function openSystemPrompts(args: string, ctx: SystemPromptContext):
       ctx.ui.notify("Using Pi's existing system prompt.", "info");
       return;
     }
-    if (name === swarm.name) {
-      store.active = swarm.name;
+    if (name === swarm.name || name === modes.name) {
+      store.active = name;
       savePromptStore(cwd, store);
-      ctx.ui.notify("Forge Swarm Agent system prompt selected.", "info");
+      ctx.ui.notify(`${name} system prompt selected.`, "info");
       return;
     }
     if (!saved.some(p => p.name === name)) {
@@ -193,7 +204,7 @@ export async function openSystemPrompts(args: string, ctx: SystemPromptContext):
 
   const selected = await ctx.ui.select(
     "System prompts · choose one (Pi and extension prompts)",
-    [describe(builtIn, store.active ? "" : builtIn.name), describe(swarm, store.active), ...saved.map(p => describe(p, store.active)), "＋ Add system prompt", "✎ Edit a system prompt", "▣ Show current exposed prompt"],
+    [describe(builtIn, store.active ? "" : builtIn.name), describe(modes, store.active), describe(swarm, store.active), ...saved.map(p => describe(p, store.active)), "＋ Add system prompt", "✎ Edit a system prompt", "▣ Show current exposed prompt"],
   );
   if (!selected) return;
   if (selected === "＋ Add system prompt") return addPrompt(cwd, store, ctx.ui);
@@ -229,15 +240,15 @@ export async function openSystemPrompts(args: string, ctx: SystemPromptContext):
     return;
   }
   const name = selected.replace(/^[●○] /, "").replace(/ · current$/, "");
-  if (name === swarm.name) {
-    store.active = swarm.name;
+  if (name === swarm.name || name === modes.name) {
+    store.active = name;
     savePromptStore(cwd, store);
-    ctx.ui.notify("Forge Swarm Agent system prompt selected.", "info");
+    ctx.ui.notify(`${name} system prompt selected.`, "info");
     return;
   }
   if (name === builtIn.name) {
     // Persist this choice explicitly. An absent store means the project
-    // default (Forge), so clearing active would make "use Pi" non-durable.
+    // default (Modes), so clearing active would make "use Pi" non-durable.
     store.active = PI_DEFAULT_PROMPT;
     savePromptStore(cwd, store);
     ctx.ui.notify("Using Pi's existing system prompt.", "info");

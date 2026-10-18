@@ -49,7 +49,6 @@ export function swarmSurfaceFor(environment: GatingEnvironment): Set<string> {
   // Pi's native CodeMode tool is a built-in surface, not a Swarm-owned tool;
   // keep it visible to the model when enabled by Pi settings.
   names.add("codemode");
-  names.add("bootstrap");
   // Durable memory is a Pi-Swarm state extension, not part of the upstream
   // Swarm wire fixture, but it is an intentional model-facing capability.
   names.add("memory_history");

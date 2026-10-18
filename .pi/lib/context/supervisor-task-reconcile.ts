@@ -1,4 +1,4 @@
-import { dispatchBootstrapHandoff } from "../runtime/bootstrap-dispatch.ts";
+import { dispatchSessionHandoff } from "../runtime/session-handoff.ts";
 import { collectSupervisorState, validateTaskProposal } from "./jev-operational-supervisor.ts";
 /** Parent-side gate; worker cannot own or directly mutate main-session tasks. */
 export async function applySupervisorTaskProposals(pi:any,ctx:any,snapshot:any[],receipt:any,signal:AbortSignal) {
@@ -19,7 +19,7 @@ export async function applySupervisorTaskProposals(pi:any,ctx:any,snapshot:any[]
   const p=validated.operations[0],old=snapshot.find(t=>t.id===p.targetTaskId);
   if(p.op==="update" && (old?.owner||p.task.status&&!["pending","in_progress"].includes(String(p.task.status)))){outcomes.push({status:"rejected",reason:"owner or status not eligible"});continue;}
   const op=p.op==="create"?{key:`supervisor-${proposal.task.id}`,op:"create",subject:p.task.title,status:p.task.status??"pending",...(p.task.dependsOn?.length?{addBlockedBy:p.task.dependsOn}:{})}:{key:`supervisor-${p.targetTaskId}`,op:"update",taskId:p.targetTaskId,...(p.task.status?{status:p.task.status}:{}),...(p.task.questions?{questions:p.task.questions}:{}),...(p.task.note?{addNote:p.task.note,noteType:"observation"}:{})};
-  try {const result=await dispatchBootstrapHandoff("TaskManage",{operations:[op]},signal,ctx,pi.getActiveTools?.()??[]);outcomes.push({status:"dispatched",taskId:p.targetTaskId,result});}
+  try {const result=await dispatchSessionHandoff("TaskManage",{operations:[op]},signal,ctx,pi.getActiveTools?.()??[]);outcomes.push({status:"dispatched",taskId:p.targetTaskId,result});}
   catch{outcomes.push({status:"rejected",reason:"parent task policy or dispatch refused"});}
  }
  return outcomes;

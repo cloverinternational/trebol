@@ -160,7 +160,7 @@ you can actually see it.
 [REPORTING DIRECTIVE]
 
 # Conversation startup
-When starting a conversation, call bootstrap first, then use TaskManage.
+When starting a conversation, use TaskManage.
 
 For every substantive final response, produce an evidence-based structured report:
 

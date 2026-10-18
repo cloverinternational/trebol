@@ -32,5 +32,12 @@ export const forgeSwarmSystemPrompt: string = promptSection("forge");
 export const swarmForgeDelegationAddendum: string = promptSection("delegation");
 export const swarmForgeSystemPrompt: string = forgeSwarmSystemPrompt + swarmForgeDelegationAddendum;
 
+/**
+ * Modes (Plan/Act/Auto/Debug) prompt: the adapted rinadelph/System-Prompt text that beat Forge
+ * in the sealed confirmatory benchmark (artifacts/prompt-bench/confirm/FINDINGS.md). Byte-identical
+ * to artifacts/prompt-bench/arms/M.md; `{{workspace}}` is rendered per workspace by swarm-prompt.
+ */
+export const modesSystemPrompt: string = readFileSync(new URL("../../../../prompts/modes-system-prompt.md", import.meta.url), "utf8");
+
 /** Provenance reference recorded by prompt-assembling extensions. */
 export const PROMPT_SOURCE = "prompts/swarm-system-prompt.md";

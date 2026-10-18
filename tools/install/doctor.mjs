@@ -28,7 +28,7 @@ const MIN_PI = [0, 85, 0];
 /** Bare imports the extensions need at runtime (rg over .pi and the package src trees). */
 const RUNTIME_DEPS = ["re2-wasm", "mermaid", "typescript", "absurd-sdk", "croner", "yaml", "@pi-swarm/core", "@pi-swarm/runtime-contracts"];
 /** Packages consumed from dist/ at runtime; built by the root `prepare` script. */
-const DIST_PACKAGES = ["packages/runtime/core", "packages/runtime/runtime-contracts", "packages/runtime/bootstrap"];
+const DIST_PACKAGES = ["packages/runtime/core", "packages/runtime/runtime-contracts"];
 
 const results = [];
 const report = (name, ok, detail, fix) => { results.push({ name, ok, detail, fix }); };
