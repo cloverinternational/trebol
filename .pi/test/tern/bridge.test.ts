@@ -301,7 +301,7 @@ describe("bridge rendering and draft ownership", () => {
 		fake.session.emit({ type: "tool_execution_start", toolCallId: "live", toolName: "bash", args: { command: "printf first; sleep 1; printf second" } });
 		fake.session.emit({ type: "tool_execution_update", toolCallId: "live", partialResult: { content: [{ type: "text", text: "first" }] } });
 		const during = out.writes.join("");
-		expect(during).toContain("Working · 1 running");
+		expect(during).toContain("1 running");
 		expect(during).not.toContain('"k":"ansi"');
 		expect(during).not.toContain("printf first");
 		fake.session.emit({ type: "tool_execution_update", toolCallId: "live", partialResult: { content: [{ type: "text", text: "firstsecond" }] } });

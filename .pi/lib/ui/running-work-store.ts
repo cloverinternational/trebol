@@ -16,6 +16,8 @@ export interface RunningWorkItem {
   /** Live snapshot of the process output; used while the work is still running. */
   readOutput?: () => string;
   transcriptPath?: string;
+  /** True while a tool call is still waiting on this work in the foreground; cleared when it is backgrounded. */
+  foreground?: boolean;
 }
 
 const KEY = Symbol.for("pi-swarm-running-work");
@@ -27,5 +29,6 @@ export const state = (): State => {
 
 export function runningWorkSnapshot(): RunningWorkItem[] { return [...state().items.values()].sort((a, b) => a.startedAt - b.startedAt); }
 export function setRunningWork(item: RunningWorkItem): void { state().items.set(item.id, { ...item }); state().listeners.forEach(listener => listener()); }
+export function patchRunningWork(id: string, patch: Partial<RunningWorkItem>): void { const item = state().items.get(id); if (item) setRunningWork({ ...item, ...patch }); }
 export function removeRunningWork(id: string): void { state().items.delete(id); state().listeners.forEach(listener => listener()); }
 export function onRunningWorkChange(listener: () => void): () => void { state().listeners.add(listener); return () => state().listeners.delete(listener); }
