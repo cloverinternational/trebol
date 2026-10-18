@@ -10,7 +10,7 @@
  * Order: per (task, rep) the arm order is a seeded shuffle.
  * Usage: node tools/bench/run-bench.mjs --tasks F --arms F,M,FM,FL --reps N
  *        --product SHA --out DIR [--only id,id] [--jobs 4] [--seed 1] */
-import {spawn,execFileSync} from 'node:child_process';import {readFileSync,appendFileSync,existsSync,mkdirSync} from 'node:fs';import {join,resolve,dirname} from 'node:path';import {fileURLToPath} from 'node:url';
+import {spawn,execFileSync} from 'node:child_process';import {readFileSync,appendFileSync,existsSync,mkdirSync,writeFileSync} from 'node:fs';import {join,resolve,dirname} from 'node:path';import {fileURLToPath} from 'node:url';
 const repo=resolve(fileURLToPath(new URL('../../',import.meta.url)));
 const arg=(k,d)=>{const i=process.argv.indexOf(`--${k}`);return i>0?process.argv[i+1]:d;};
 const out=resolve(arg('out')),arms=arg('arms','F,M,FM,FL').split(','),reps=Number(arg('reps',1)),product=arg('product'),jobs=Number(arg('jobs',4));
