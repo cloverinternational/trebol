@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PiTernBridge, TranscriptProjector, type PiEventLike, type PiSessionLike } from "../../lib/tern/bridge.ts";
 import { ESC, parseTspMessages, type TspNode } from "../../lib/tern/tsp.ts";
 import { summaryText } from "../../lib/tern/turn-groups.ts";
+import { patchRunningWork, removeRunningWork, setRunningWork } from "../../lib/ui/running-work-store.ts";
 
 const DIR = join(import.meta.dirname, "fixtures/turn-work");
 const readJsonl = (file: string) => readFileSync(join(DIR, file), "utf8").trim().split("\n").map((l) => JSON.parse(l));
@@ -45,9 +46,9 @@ describe("replay corpus", () => {
 });
 
 // Rebuilds the node tree from the TSP frames the bridge wrote, exactly as Tern applies them.
-function applyFrames(writes: string[]): TspNode[] {
+function applyFrames(writes: string[], all?: Map<string, TspNode & { parent: string }>): TspNode[] {
 	type N = TspNode & { parent: string };
-	const nodes = new Map<string, N>();
+	const nodes = all ?? new Map<string, N>();
 	const order: string[] = [];
 	const add = (node: TspNode, parent: string, before: string | null) => {
 		nodes.set(node.id, { ...node, c: undefined, parent });
@@ -288,5 +289,36 @@ describe("turn-work properties", () => {
 			compared += liveText.length;
 		}
 		expect(compared).toBeGreaterThan(SEEDS.length);
+	});
+});
+
+describe("turn line and running-work bar announce each piece of work once", () => {
+	afterEach(() => removeRunningWork("bash-1"));
+
+	it("a foreground call is only on the turn line; once backgrounded it is only in the bar", () => {
+		const session = fakeSession();
+		const writes: string[] = [];
+		const bridge = new PiTernBridge(session, { write: (d) => writes.push(d), surfaceId: "pi", credits: 1_000_000 });
+		bridge.start("pi");
+		const view = () => {
+			const all = new Map<string, TspNode & { parent: string }>();
+			const main = applyFrames(writes, all);
+			return {
+				line: main.filter((n) => n.p?.role === "tern.work-live").map((n) => String(n.p?.text)),
+				bar: [...all.values()].filter((n) => n.parent === "background-work").map((n) => n.id),
+			};
+		};
+		session.emit({ type: "agent_start" });
+		session.emit({ type: "message_start", message: { role: "user", content: [{ type: "text", text: "build" }] } });
+		session.emit({ type: "tool_execution_start", toolCallId: "c1", toolName: "Bash", args: { command: "make" } });
+		// Bash registers foreground work in the shared store as it starts (swarm-bgprocess.ts).
+		setRunningWork({ id: "bash-1", kind: "bash", label: "make", status: "running", startedAt: Date.now(), detail: "", foreground: true });
+		expect(view()).toEqual({ line: ["1 running · build"], bar: [] });
+
+		// Ctrl+B / auto-background: the call returns, so the turn line no longer counts it, and the bar shows it.
+		patchRunningWork("bash-1", { foreground: false });
+		session.emit({ type: "tool_execution_end", toolCallId: "c1", toolName: "Bash", result: { content: [{ type: "text", text: "moved to background" }] }, isError: false });
+		expect(view()).toEqual({ line: ["working · build"], bar: ["bg-work-bash-1"] });
+		bridge.close?.();
 	});
 });
