@@ -28,7 +28,7 @@ import { ASK_OPTIONS_ID, TernAskDialog, type AskEventBus } from "./ask-dialog.ts
 import { TernExtensionUI, UI_PROMPT_LIST_ID } from "./ext-ui.ts";
 import { AUTOCOMPLETE_ID, SlashAutocomplete, type Edit } from "./autocomplete.ts";
 import { expandMentions } from "./mentions.ts";
-import { goalLine, isAbortedAssistant, isCancellationError, liveLineText, SETTLED_LABEL, segmentTranscript, summarizeToolGroup } from "./turn-groups.ts";
+import { goalLine, isAbortedAssistant, isCancellationError, isFailedAssistant, isTurnBoundary, liveLineText, SETTLED_LABEL, segmentTranscript, summarizeToolGroup } from "./turn-groups.ts";
 import { DraftEditor, isLargePaste } from "./draft-edit.ts";
 import { getNativeClipboard } from "@earendil-works/pi-tui";
 import { randomUUID } from "node:crypto";
@@ -106,6 +106,11 @@ interface Item {
 	timedOut?: boolean;
 	cancelled?: boolean;
 	turnAborted?: boolean;
+	turnFailed?: boolean;
+	// A visible custom message (goal, monitor, schedule wakeup) that started its own agent turn.
+	turnStart?: boolean;
+	// An assistant message that calls tools: its text is narration of the work, folded with the steps.
+	callsTools?: boolean;
 	// The error text of a failed result, kept to tell an abort's "context canceled" from a real failure.
 	errorText?: string;
 	// TaskManage's structured batch from the final result, rendered as task rows (never as JSON).
@@ -148,6 +153,19 @@ function messageText(message: unknown): string {
 function roleOf(message: unknown): Role {
 	const role = typeof message === "object" && message !== null ? (message as { role?: unknown }).role : undefined;
 	return role === "user" || role === "assistant" ? role : "system";
+}
+
+// How a Pi message appears in the transcript, or null when it is not shown. Hidden custom messages
+// (display:false: hook context, nudges, steering) and Pi's own system/toolResult messages never render; a
+// visible custom message is a notice that starts its own turn (Pi sends it with triggerTurn). Live events and
+// session restore both go through here, so they agree.
+function transcriptEntry(message: unknown): { role: Exclude<Role, "tool">; turnStart?: boolean } | null {
+	if (typeof message !== "object" || message === null) return null;
+	const m = message as { role?: unknown; display?: unknown };
+	if (m.role === "user" || m.role === "assistant") return { role: m.role };
+	if (m.role === "custom") return m.display === true ? { role: "system", turnStart: true } : null;
+	if (m.role === "system" || m.role === "toolResult") return null;
+	return { role: "system" };
 }
 
 function sessionIdOf(session: PiSessionLike): string | undefined {
@@ -244,17 +262,21 @@ export class TranscriptProjector {
 		for (const raw of entries) {
 			if (typeof raw !== "object" || raw === null) continue;
 			const entry = raw as { id?: unknown; type?: unknown; message?: unknown };
-			if (entry.type !== "message" || typeof entry.id !== "string") continue;
-			if ((entry.message as { role?: unknown } | null)?.role === "toolResult") {
-				this.#settleRestoredTool(entry.message as ToolResultLike);
+			if (typeof entry.id !== "string") continue;
+			// Pi persists sendMessage() output as custom_message entries; live it arrives as a "custom" message.
+			const message = entry.type === "custom_message" ? { ...(raw as object), role: "custom" } : entry.type === "message" ? entry.message : undefined;
+			if (message === undefined) continue;
+			if ((message as { role?: unknown } | null)?.role === "toolResult") {
+				this.#settleRestoredTool(message as ToolResultLike);
 				continue;
 			}
-			const role = roleOf(entry.message);
-			if (role !== "user" && role !== "assistant") continue;
-			this.#items.push({ id: entry.id, role, text: messageText(entry.message) });
-			if (isAbortedAssistant(entry.message)) this.#markTurnAborted();
+			const shown = transcriptEntry(message);
+			if (!shown) continue;
+			this.#items.push({ id: entry.id, role: shown.role, text: messageText(message), ...(shown.turnStart ? { turnStart: true } : {}), ...(toolCallsOf(message).length > 0 ? { callsTools: true } : {}) });
+			if (isAbortedAssistant(message)) this.#markTurnAborted();
+			if (isFailedAssistant(message)) this.#markTurn("turnFailed");
 			// Persisted tool calls live in the assistant message; their results arrive later as toolResult entries.
-			for (const call of toolCallsOf(entry.message)) {
+			for (const call of toolCallsOf(message)) {
 				this.#items.push({ id: `t-${call.id}`, role: "tool", text: `tool ${call.name}`, status: "running", name: call.name, args: call.arguments });
 			}
 		}
@@ -283,10 +305,18 @@ export class TranscriptProjector {
 	// An aborted turn reads as interrupted. Its steps that were still running, or that failed only because of
 	// the abort, read as cancelled; finished and genuinely failed steps keep their result. Used live and on
 	// restore, so both agree.
+	#markTurn(flag: "turnFailed"): void {
+		for (let i = this.#items.length - 1; i >= 0; i--) {
+			const item = this.#items[i]!;
+			if (isTurnBoundary(item)) break;
+			if (item.role === "tool") item[flag] = true;
+		}
+	}
+
 	#markTurnAborted(): void {
 		for (let i = this.#items.length - 1; i >= 0; i--) {
 			const item = this.#items[i]!;
-			if (item.role === "user") break;
+			if (isTurnBoundary(item)) break;
 			if (item.role !== "tool") continue;
 			item.turnAborted = true;
 			if (item.cancelled) continue;
@@ -305,20 +335,26 @@ export class TranscriptProjector {
 				return true;
 			}
 			case "message_start": {
-				const role = roleOf(event.message);
-				// Tool results already belong to their tool_execution_* card.
-				if ((event.message as { role?: unknown } | null)?.role === "toolResult") return false;
+				// Tool results already belong to their tool_execution_* card; hidden messages are never shown.
+				const shown = transcriptEntry(event.message);
+				if (!shown) return false;
+				const role = shown.role;
 				if (role === "user" && this.#localUserPending) {
 					this.#localUserPending = false;
 					return false;
 				}
-				const item: Item = { id: `m${++this.#seq}`, role, text: messageText(event.message) };
+				const item: Item = { id: `m${++this.#seq}`, role, text: messageText(event.message), ...(shown.turnStart ? { turnStart: true } : {}), ...(toolCallsOf(event.message).length > 0 ? { callsTools: true } : {}) };
 				this.#items.push(item);
 				this.#current = item;
 				return true;
 			}
 			case "message_update": {
 				const delta = event.assistantMessageEvent as { type?: unknown; delta?: unknown } | undefined;
+				// Once the message starts a tool call its text is narration: fold it before the call runs.
+				if (this.#current && delta?.type === "toolcall_start" && !this.#current.callsTools) {
+					this.#current.callsTools = true;
+					return true;
+				}
 				if (this.#current && delta?.type === "text_delta" && typeof delta.delta === "string") {
 					this.#current.text += delta.delta;
 					return true;
@@ -326,13 +362,15 @@ export class TranscriptProjector {
 				return false;
 			}
 			case "message_end": {
-				if ((event.message as { role?: unknown } | null)?.role === "toolResult") return false;
-				const role = roleOf(event.message);
+				const shown = transcriptEntry(event.message);
+				if (!shown) return false;
 				const text = messageText(event.message);
-				const target = this.#current && this.#current.role === role ? this.#current : null;
+				const target = this.#current && this.#current.role === shown.role ? this.#current : null;
 				if (target && text) target.text = text;
+				if (target && toolCallsOf(event.message).length > 0) target.callsTools = true;
 				this.#current = null;
 				if (isAbortedAssistant(event.message)) this.#markTurnAborted();
+				if (isFailedAssistant(event.message)) this.#markTurn("turnFailed");
 				return true;
 			}
 			case "tool_execution_start": {
@@ -417,18 +455,25 @@ export class TranscriptProjector {
 					if (this.#items.indexOf(s.items[0]!) >= this.#turnStart) openGroup = i;
 					break;
 				}
-				if (s.item.role === "user") break;
+				if (isTurnBoundary(s.item)) break;
 			}
 		}
 		let goal = "";
 		segments.forEach((segment, i) => {
 			if (segment.kind === "tools") {
-				out.push(toolGroupNode(segment.items, goal, outputExpanded, i === openGroup));
+				out.push(...[toolGroupNode(segment.items, goal, outputExpanded, i === openGroup)].flat());
 				return;
 			}
 			const { item } = segment;
-			if (item.role === "user") goal = goalLine(item.text);
-			out.push(...projectTranscript([{ id: item.id, role: item.role, text: item.text }]));
+			if (isTurnBoundary(item)) goal = goalLine(item.text);
+			// A message with no visible text (thinking or tool calls only) has nothing to show.
+			if (item.role === "assistant" && item.text.trim() === "") return;
+			// A visible custom notice (agent completed, goal, monitor, schedule) is one muted line, never a block.
+			if (item.turnStart) {
+				out.push({ id: `msg-${item.id}`, k: "text", p: { role: "tern.notice", tone: "muted", wrap: "none", truncate: "end", text: goalLine(item.text) } });
+				return;
+			}
+			out.push(...projectTranscript([{ id: item.id, role: item.role as Exclude<Role, "tool">, text: item.text }]));
 		});
 		return out;
 	}
@@ -455,22 +500,28 @@ function toolCallsOf(message: unknown): Array<{ id: string; name: string; argume
 
 // Live: one text line, no children. Settled: one collapsed card whose steps sit behind the fold;
 // ctrl+o (outputExpanded) unfolds every card, a head click folds one card locally in Tern.
-function toolGroupNode(items: Item[], goal: string, outputExpanded: boolean, turnOpen: boolean): TspNode {
-	const id = `g-${items[0]?.id ?? "empty"}`;
-	const summary = summarizeToolGroup(items);
+function toolGroupNode(items: Item[], goal: string, outputExpanded: boolean, turnOpen: boolean): TspNode | TspNode[] {
+	const tools = items.filter((item) => item.role === "tool");
+	const id = `g-${tools[0]?.id ?? items[0]?.id ?? "empty"}`;
+	const summary = summarizeToolGroup(tools);
 	if (summary.status === "running" || turnOpen) {
 		return { id, k: "text", p: { role: "tern.work-live", tone: "pending", wrap: "none", truncate: "end", text: liveLineText(goal, summary.active) } };
 	}
-	const steps = items.length === 1 ? "1 step" : `${items.length} steps`;
+	// Narration whose tool calls never started (the turn ended first) is just what the agent said.
+	if (tools.length === 0) return items.filter((item) => item.text.trim()).flatMap((item) => projectTranscript([{ id: item.id, role: "assistant", text: item.text }]));
+	const steps = tools.length === 1 ? "1 step" : `${tools.length} steps`;
 	const status = summary.status === "done" ? "done" : summary.status === "failed" ? "error" : "cancelled";
 	return {
 		id, k: "tool",
 		p: {
 			role: "tern.work", key: id, name: "work", title: SETTLED_LABEL[summary.status], status,
 			...(goal ? { target: goal, targetKind: "text" } : {}),
-			frame: "card", collapsible: true, collapsed: !outputExpanded, meta: [steps],
+			frame: "card", collapsible: true, collapsed: !outputExpanded,
+			meta: summary.failedSteps > 0 ? [steps, `${summary.failedSteps} failed`] : [steps],
 		},
-		c: items.map((item) => toolRow(item, outputExpanded)),
+		// Steps in order, with the narration written between them; all behind the fold.
+		c: items.flatMap((item): TspNode[] => item.role === "tool" ? [toolRow(item, outputExpanded)]
+			: item.text.trim() ? [{ id: `${item.id}-note`, k: "md", p: { role: "tern.work-note", text: item.text } }] : []),
 	};
 }
 

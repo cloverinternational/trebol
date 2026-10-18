@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PiTernBridge, TranscriptProjector, type PiEventLike, type PiSessionLike } from "../../lib/tern/bridge.ts";
 import { ESC, parseTspMessages, type TspNode } from "../../lib/tern/tsp.ts";
-import { summaryText } from "../../lib/tern/turn-groups.ts";
+import { isTurnBoundary, summaryText } from "../../lib/tern/turn-groups.ts";
 import { patchRunningWork, removeRunningWork, setRunningWork } from "../../lib/ui/running-work-store.ts";
 
 const DIR = join(import.meta.dirname, "fixtures/turn-work");
@@ -23,16 +23,19 @@ const cardText = (n: TspNode) => summaryText(
 	String(n.p?.target ?? ""),
 	Number(String((n.p?.meta as string[] | undefined)?.[0] ?? "0").split(" ")[0]),
 );
+const cardLine = (n: TspNode) => [cardText(n), ...((n.p?.meta as string[] | undefined) ?? []).slice(1)].join(" · ");
 const workView = (nodes: readonly TspNode[]) => nodes.flatMap((n) =>
-	n.p?.role === "tern.work-live" ? [`LIVE ${String(n.p.text)}`] : n.p?.role === "tern.work" ? [`SUMMARY ${cardText(n)}`] : []);
+	n.p?.role === "tern.work-live" ? [`LIVE ${String(n.p.text)}`] : n.p?.role === "tern.work" ? [`SUMMARY ${cardLine(n)}`] : []);
 
 describe("replay corpus", () => {
 	it("is built from real recorded sessions with tool calls in every settled state", () => {
 		expect(corpus.length).toBeGreaterThanOrEqual(2);
 		const p = new TranscriptProjector();
 		for (const { events } of corpus) for (const e of events) p.apply(e);
-		const titles = new Set(p.nodes().filter((n) => n.p?.role === "tern.work").map((n) => n.p?.title));
-		expect([...titles].sort()).toEqual(["Done", "Failed", "Interrupted"]);
+		const cards = p.nodes().filter((n) => n.p?.role === "tern.work");
+		expect([...new Set(cards.map((n) => n.p?.title))].sort()).toEqual(["Done", "Interrupted"]);
+		// A real step failure the agent recovered from: the turn reads Done and counts the failed step.
+		expect(cards.some((n) => n.p?.title === "Done" && (n.p?.meta as string[]).some((m) => / failed$/.test(m)))).toBe(true);
 		const parallel = corpus.some(({ events }) => {
 			let running = 0, max = 0;
 			for (const e of events) {
@@ -42,6 +45,27 @@ describe("replay corpus", () => {
 			return max >= 2;
 		});
 		expect(parallel).toBe(true);
+	});
+
+	it("a recorded background-agent run: one notice line, the wakeup's work in its own card, no narration outside", () => {
+		const run = corpus.find((c) => c.events.some((e) => (e.message as { customType?: string } | undefined)?.customType === "swarm-agent-complete"));
+		expect(run, "corpus holds a real swarm-agent-complete wakeup").toBeDefined();
+		const live = new TranscriptProjector();
+		for (const e of run!.events) live.apply(e);
+		const restored = new TranscriptProjector();
+		restored.replaceFromSessionBranch(run!.branch);
+		for (const nodes of [live.nodes(), restored.nodes()]) {
+			const roles = nodes.map((n) => String(n.p?.role ?? n.k));
+			const notice = roles.indexOf("tern.notice");
+			expect(notice).toBeGreaterThan(-1);
+			expect(nodes[notice]!.p).toMatchObject({ wrap: "none", truncate: "end" });
+			expect(String(nodes[notice]!.p?.text)).toMatch(/^\[agent completed\] id=subagent-\S+ status=failed$/);
+			// The user turn: its card, then its final answer; the wakeup turn: its card, then its answer.
+			expect(roles.slice(roles.lastIndexOf("pi.user"))).toEqual(["pi.user", "tern.work", "pi.assistant", "tern.notice", "tern.work", "pi.assistant"]);
+			const cards = nodes.filter((n) => n.p?.role === "tern.work");
+			expect(cards.at(-2)!.c!.filter((c) => c.k !== "md").map((c) => c.p?.name)).toEqual(["TaskManage", "Subagent", "Subagent"]);
+		}
+		expect(workView(restored.nodes())).toEqual(workView(live.nodes()));
 	});
 });
 
@@ -141,15 +165,26 @@ function generate(seed: number): Generated {
 	let call = 0, entry = 0;
 	const turns = 1 + Math.floor(r() * 4);
 	for (let t = 0; t < turns; t++) {
-		const user = { role: "user", content: [{ type: "text", text: pick(GOALS) }] };
+		// A turn starts from the user or from a visible custom message (goal/monitor/schedule wakeup).
+		const fromNotice = t > 0 && r() < 0.25;
+		const user = fromNotice
+			? { role: "custom", customType: "swarm-goal", display: true, content: `Work toward this goal: ${pick(GOALS)}` }
+			: { role: "user", content: [{ type: "text", text: pick(GOALS) }] };
 		events.push({ type: "agent_start" }, { type: "message_start", message: user }, { type: "message_end", message: user });
-		branch.push({ id: `e${++entry}`, type: "message", message: user });
+		branch.push(fromNotice ? { id: `e${++entry}`, type: "custom_message", customType: "swarm-goal", display: true, content: user.content } : { id: `e${++entry}`, type: "message", message: user });
 		checkpoints.push({ index: events.length, open: true });
 		const aborted = r() < 0.3;
 		const batches = Math.floor(r() * 3);
 		for (let b = 0; b < batches && !(aborted && b > 0 && r() < 0.3); b++) {
 			const ids = Array.from({ length: 1 + Math.floor(r() * 3) }, () => `c${++call}`);
-			const assistant = { role: "assistant", content: ids.map((id) => ({ type: "toolCall", id, name: "Bash", arguments: { command: `run ${id}` } })), stopReason: "toolUse" };
+			// Hidden hook context and narration before the calls: neither may show outside the work fold.
+			if (r() < 0.3) {
+				const hidden = { role: "custom", customType: "swarm-hook-context", display: false, content: "<system-reminder>nudge</system-reminder>" };
+				events.push({ type: "message_start", message: hidden }, { type: "message_end", message: hidden });
+				branch.push({ id: `e${++entry}`, type: "custom_message", customType: "swarm-hook-context", display: false, content: hidden.content });
+			}
+			const narration = r() < 0.5 ? [{ type: "text", text: `checking ${call}` }] : [];
+			const assistant = { role: "assistant", content: [...narration, ...ids.map((id) => ({ type: "toolCall", id, name: "Bash", arguments: { command: `run ${id}` } }))], stopReason: "toolUse" };
 			events.push({ type: "message_start", message: assistant }, { type: "message_end", message: assistant });
 			branch.push({ id: `e${++entry}`, type: "message", message: assistant });
 			for (const id of ids) events.push({ type: "tool_execution_start", toolCallId: id, toolName: "Bash", args: { command: `run ${id}` } });
@@ -167,9 +202,12 @@ function generate(seed: number): Generated {
 				checkpoints.push({ index: events.length, open: true });
 			}
 		}
+		const providerFailed = !aborted && r() < 0.15;
 		const final = aborted
 			? { role: "assistant", content: [], stopReason: "error", errorMessage: "This operation was aborted" }
-			: { role: "assistant", content: [{ type: "text", text: "ok" }], stopReason: "stop" };
+			: providerFailed
+				? { role: "assistant", content: [], stopReason: "error", errorMessage: "529 overloaded" }
+				: { role: "assistant", content: [{ type: "text", text: "ok" }], stopReason: "stop" };
 		events.push({ type: "message_start", message: final }, { type: "message_end", message: final }, { type: "agent_end" });
 		branch.push({ id: `e${++entry}`, type: "message", message: final });
 		checkpoints.push({ index: events.length, open: false });
@@ -189,6 +227,8 @@ function* liveStates(events: readonly PiEventLike[]) {
 }
 
 type ItemView = { id: string; role: string };
+// A rendered turn start: the user's message, or a visible custom notice (one tern.notice line).
+const isBoundaryNode = (n: TspNode) => n.p?.role === "pi.user" || n.p?.role === "tern.notice";
 const toolIds = (items: readonly ItemView[]) => items.filter((i) => i.role === "tool").map((i) => i.id);
 
 describe("turn-work properties", () => {
@@ -200,10 +240,10 @@ describe("turn-work properties", () => {
 				// A live line names its group by id (g-<first call>); it has no children, so its members are the
 				// turn's tool items from that call up to the next user message.
 				const members = groups.flatMap((g) => {
-					if (g.c) return g.c.map((c) => c.id);
+					if (g.c) return g.c.filter((c) => c.k !== "md").map((c) => c.id.replace(/-group$/, ""));
 					const from = items.findIndex((i) => i.id === String(g.id).slice(2));
 					const out: string[] = [];
-					for (let k = from; k >= 0 && k < items.length && items[k]!.role !== "user"; k++) if (items[k]!.role === "tool") out.push(items[k]!.id);
+					for (let k = from; k >= 0 && k < items.length && (k === from || !isTurnBoundary(items[k]!)); k++) if (items[k]!.role === "tool") out.push(items[k]!.id);
 					return out;
 				});
 				const expected = toolIds(items);
@@ -220,7 +260,7 @@ describe("turn-work properties", () => {
 			for (const { index, open } of checkpoints) {
 				if (!open) continue;
 				const { items, nodes } = states[index - 1]!;
-				const lastUser = items.map((i) => i.role).lastIndexOf("user");
+				const lastUser = items.findLastIndex((i) => isTurnBoundary(i));
 				const turnHasTools = items.slice(lastUser + 1).some((i) => i.role === "tool");
 				const live = nodes.filter((n) => n.p?.role === "tern.work-live");
 				expect(live.length, `seed ${seed} @${index}`).toBe(turnHasTools ? 1 : 0);
@@ -231,7 +271,7 @@ describe("turn-work properties", () => {
 					expect(String(n.p?.text)).not.toContain("\n");
 				}
 				// Nothing rendered after the turn's user message is a tool row.
-				const after = nodes.slice(nodes.findLastIndex((n) => n.p?.role === "pi.user") + 1);
+				const after = nodes.slice(nodes.findLastIndex(isBoundaryNode) + 1);
 				expect(after.filter((n) => n.k === "tool"), `seed ${seed} @${index}`).toEqual([]);
 			}
 		}
@@ -248,7 +288,7 @@ describe("turn-work properties", () => {
 			// Tools per user turn come from the projector's items; cards per turn from the rendered nodes.
 			const toolsPerTurn: number[] = [];
 			for (const i of p.items) {
-				if (i.role === "user") toolsPerTurn.push(0);
+				if (isTurnBoundary(i)) toolsPerTurn.push(0);
 				else if (i.role === "tool") toolsPerTurn[toolsPerTurn.length - 1]! += 1;
 			}
 			let turnTools = 0, turnCards = 0, turn = -1;
@@ -258,14 +298,14 @@ describe("turn-work properties", () => {
 			};
 			let first = true;
 			for (const n of nodes) {
-				if (n.p?.role === "pi.user") {
+				if (isBoundaryNode(n)) {
 					if (!first) check();
 					turn++;
 					first = false; turnTools = 0; turnCards = 0;
 				}
 				if (n.p?.role === "tern.work") {
 					turnCards++;
-					turnTools += n.c?.length ?? 0;
+					turnTools += (n.c ?? []).filter((c) => c.k !== "md").length;
 					expect(n.p).toMatchObject({ collapsible: true, collapsed: true });
 				}
 			}
@@ -289,6 +329,37 @@ describe("turn-work properties", () => {
 			compared += liveText.length;
 		}
 		expect(compared).toBeGreaterThan(SEEDS.length);
+	});
+
+	it("nothing written mid-turn spills outside its work, live or restored, and Failed means the turn failed", () => {
+		const top = (nodes: readonly TspNode[]) => nodes.filter((n) => n.p?.role !== "tern.work" && n.p?.role !== "tern.work-live")
+			.map((n) => `${String(n.p?.role ?? n.k)} ${String(n.c?.[0]?.p?.text ?? n.p?.text ?? "")}`);
+		let narrated = 0, failedTurns = 0, recovered = 0;
+		for (const seed of SEEDS) {
+			const { events, branch } = generate(seed);
+			for (const { index, nodes } of liveStates(events)) {
+				for (const line of top(nodes)) {
+					expect(line, `seed ${seed} @${index}`).not.toMatch(/system-reminder|checking \d/);
+				}
+			}
+			const live = new TranscriptProjector();
+			for (const e of events) live.apply(e);
+			const restored = new TranscriptProjector();
+			restored.replaceFromSessionBranch(branch);
+			expect(top(restored.nodes()), `seed ${seed}`).toEqual(top(live.nodes()));
+			// Each turn's outcome comes from how the turn ended, never from one step's error.
+			const outcomes = events.filter((e) => e.type === "message_end" && (e.message as { role?: string }).role === "assistant" && (e.message as { stopReason?: string }).stopReason !== "toolUse");
+			const cards = live.nodes().filter((n) => n.p?.role === "tern.work");
+			const turnsWithWork = cards.length;
+			expect(cards.filter((n) => n.p?.title === "Failed").length).toBeLessThanOrEqual(outcomes.filter((e) => (e.message as { errorMessage?: string }).errorMessage === "529 overloaded").length);
+			for (const c of cards) {
+				if (c.p?.title === "Failed") failedTurns++;
+				if (c.p?.title === "Done" && (c.p?.meta as string[]).length > 1) recovered++;
+				narrated += (c.c ?? []).filter((x) => x.k === "md").length;
+			}
+			expect(turnsWithWork).toBeLessThanOrEqual(outcomes.length);
+		}
+		expect({ narrated: narrated > 0, failedTurns: failedTurns > 0, recovered: recovered > 0 }).toEqual({ narrated: true, failedTurns: true, recovered: true });
 	});
 });
 

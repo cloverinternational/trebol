@@ -48,6 +48,6 @@ for session_file, events in streams.items():
     with open(f"{OUT}/{name}.session.jsonl", "w", encoding="utf-8") as fh:
         for line in open(session_file, encoding="utf-8"):
             entry = json.loads(line)
-            if entry.get("type") == "message":
+            if entry.get("type") in ("message", "custom_message"):
                 fh.write(json.dumps(cut(entry), ensure_ascii=False) + "\n")
     print(name, len([e for e in events if e is not None]), "events")

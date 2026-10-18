@@ -12,13 +12,18 @@ describe("turn grouping (pure)", () => {
 		const items = [
 			{ role: "user" }, { role: "tool" }, { role: "tool" }, { role: "assistant" }, { role: "tool" }, { role: "user" }, { role: "tool" },
 		];
-		expect(segmentTranscript(items).map((s) => (s.kind === "tools" ? s.items.length : "msg"))).toEqual(["msg", 3, "msg", "msg", 1]);
+		expect(segmentTranscript(items).map((s) => (s.kind === "tools" ? s.items.length : "msg"))).toEqual(["msg", 4, "msg", 1]);
+		// Narration before the last tool call joins the work; the answer after it, and a custom notice that starts a turn, stay messages.
+		const withAnswer = [{ role: "user" }, { role: "assistant" }, { role: "tool" }, { role: "assistant" }, { role: "system", turnStart: true }, { role: "tool" }, { role: "assistant" }];
+		expect(segmentTranscript(withAnswer).map((s) => (s.kind === "tools" ? s.items.map((i) => i.role).join("+") : s.item.role))).toEqual(["user", "assistant+tool", "assistant", "system", "tool", "assistant"]);
 	});
 
 	it("reports running, done, failed and interrupted from step results only", () => {
 		expect(summarizeToolGroup([{ status: "running", startedAt: 0 }, { status: "ok", startedAt: 0, took: 5 }]).status).toBe("running");
-		expect(summarizeToolGroup([{ status: "ok", startedAt: 0, took: 5 }, { status: "ok", startedAt: 2, took: 10 }])).toEqual({ status: "done", active: 0, durationMs: 12 });
-		expect(summarizeToolGroup([{ status: "ok" }, { status: "error" }]).status).toBe("failed");
+		expect(summarizeToolGroup([{ status: "ok", startedAt: 0, took: 5 }, { status: "ok", startedAt: 2, took: 10 }])).toEqual({ status: "done", active: 0, failedSteps: 0, durationMs: 12 });
+		// A step error the agent continued from is not a failed turn.
+		expect(summarizeToolGroup([{ status: "ok" }, { status: "error" }])).toMatchObject({ status: "done", failedSteps: 1 });
+		expect(summarizeToolGroup([{ status: "ok", turnFailed: true }, { status: "error", turnFailed: true }]).status).toBe("failed");
 		expect(summarizeToolGroup([{ status: "error", cancelled: true }, { status: "ok" }]).status).toBe("interrupted");
 	});
 });
@@ -43,7 +48,7 @@ describe("turn grouping in the Tern transcript", () => {
 		start(p, "a"); end(p, "a");
 		start(p, "b"); end(p, "b", true);
 		const [summary] = p.nodes().slice(1);
-		expect(summary?.p).toMatchObject({ role: "tern.work", title: "Failed", status: "error", target: "fix login", collapsed: true, collapsible: true, meta: ["2 steps"] });
+		expect(summary?.p).toMatchObject({ role: "tern.work", title: "Done", status: "done", target: "fix login", collapsed: true, collapsible: true, meta: ["2 steps", "1 failed"] });
 		expect(summary?.c?.map((c) => c.id)).toEqual(["t-a", "t-b"]);
 	});
 

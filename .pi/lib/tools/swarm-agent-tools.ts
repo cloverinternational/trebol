@@ -205,8 +205,8 @@ export class SwarmAgentTools {
           new Promise<undefined>(resolve => setTimeout(resolve, Number(p.auto_background_seconds) * 1000)),
         ]);
         if (!result) { this.entries.set(e.id, e); e.foreground = false; patchRunningWork(e.id, { foreground: false }); return this.backgroundLaunch(e); }
-        return { text: result.status === "completed" ? (result.output ?? "") : `Sub-agent execution failed: ${result.error ?? "unknown error"}` };
-      } catch (err) { return { text: `Sub-agent execution failed: ${String(err)}` }; }
+        return result.status === "completed" ? { text: result.output ?? "" } : { text: `Sub-agent execution failed: ${result.error ?? "unknown error"}`, isError: true };
+      } catch (err) { return { text: `Sub-agent execution failed: ${String(err)}`, isError: true }; }
     }
     const result = await e.done;
     let out = result.status === "completed" ? (result.output ?? "") : `Sub-agent execution failed: ${result.error ?? "unknown error"}`;
@@ -214,7 +214,8 @@ export class SwarmAgentTools {
       const head = Buffer.from(out).subarray(0, MAX_OUTPUT).toString("utf8");
       out = `[${Math.trunc((Buffer.byteLength(out) - Buffer.byteLength(head)) / 1024)}KB of output truncated — sub-agent produced more than the 8MB result limit]\n\n${head}`;
     }
-    return { text: out };
+    // A failed or cancelled run is a tool error, so the step and the model both see it as one.
+    return result.status === "completed" ? { text: out } : { text: out, isError: true };
   }
 
   private enrichedTask(task: string, agentType: string): string {
