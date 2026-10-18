@@ -322,3 +322,23 @@ describe("turn line and running-work bar announce each piece of work once", () =
 		bridge.close?.();
 	});
 });
+
+describe("expansion", () => {
+	it("ctrl+o (outputExpanded) unfolds settled summaries and their steps; a running turn stays one line", () => {
+		const { events } = corpus.find((c) => c.name.startsWith("2026-10-18T19-29"))!;
+		const p = new TranscriptProjector();
+		for (const e of events) p.apply(e);
+		const folded = p.nodes(false).filter((n) => n.p?.role === "tern.work");
+		const open = p.nodes(true).filter((n) => n.p?.role === "tern.work");
+		expect(folded.every((n) => n.p?.collapsed === true)).toBe(true);
+		expect(open.every((n) => n.p?.collapsed === false)).toBe(true);
+		// Expansion changes nothing but the fold: the same groups, titles, and steps.
+		expect(open.map((n) => [n.id, n.p?.title, n.c?.map((c) => c.id)])).toEqual(folded.map((n) => [n.id, n.p?.title, n.c?.map((c) => c.id)]));
+
+		const running = new TranscriptProjector();
+		running.apply({ type: "agent_start" });
+		running.apply({ type: "message_start", message: { role: "user", content: [{ type: "text", text: "go" }] } });
+		running.apply({ type: "tool_execution_start", toolCallId: "a", toolName: "bash", args: { command: "x" } });
+		expect(running.nodes(true).filter((n) => n.p?.role === "tern.work-live").map((n) => [n.k, n.c])).toEqual([["text", undefined]]);
+	});
+});
