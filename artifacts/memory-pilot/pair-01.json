@@ -1,0 +1,3 @@
+{"id":"pair-01",
+ "t1":"Find out how TaskManage resolves `tool:Name#n` evidence references in completion answers: which session entries count, what the index is relative to, and which branch is used. Track it with a TaskManage task whose questions you answer with file#Lx-Ly evidence, then complete it. Do not modify any files.",
+ "t2":"A TaskManage completion was rejected with `tool_result_unavailable` for the evidence ref `tool:mcp__Bash#3`. Explain the exact cause and give the correct reference form, citing the code. Do not modify any files."}
