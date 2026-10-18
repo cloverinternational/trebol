@@ -13,7 +13,7 @@ export default function taskCandidateCapture(pi: any): void {
     if (!ctx?.cwd || !session || !manager?.snapshot) return;
     try {
       const tasks = manager.snapshot().tasks;
-      if (Array.isArray(tasks)) captureTaskCandidates({ cwd: ctx.cwd, session, tasks });
+      if (Array.isArray(tasks)) captureTaskCandidates({ cwd: ctx.cwd, session, tasks, entries: ctx.sessionManager.getBranch?.() ?? ctx.sessionManager.getEntries?.() ?? [] });
     } catch { /* best-effort projection; TaskManage remains authoritative */ }
   };
   pi.on("session_start", (_event: unknown, ctx: any) => capture(ctx));
