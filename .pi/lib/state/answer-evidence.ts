@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
 import { redactKnowledge, type EvidenceRef } from "./knowledge-store.ts";
+import { memoryIdentity } from "./shared-memory.ts";
 import { splitEvidence } from "../../../packages/tools/taskmanage/src/task-manage.ts";
 
 /** Evidence anchoring for TaskManage answers.
@@ -25,9 +26,13 @@ export const ANSWER_SOURCE = "taskmanage-answer";
 export const answerId = (session: string, taskId: string, questionId: string) =>
   createHash("sha256").update(`taskmanage-answer:v1\n${session}\n${taskId}\n${questionId}`).digest("hex").slice(0, 32);
 
-function workspaceFile(cwd: string, path: string): { abs: string; rel: string } | string {
+/** Paths are resolved from `base` (the cwd TaskManage validated against at
+ * capture; the worktree root on re-check) but bounded by and stored relative to
+ * the git worktree root, the same identity that keys the worktree store. Recall
+ * from any subdirectory therefore re-checks the same file. */
+function workspaceFile(cwd: string, path: string, base = cwd): { abs: string; rel: string } | string {
   let workspace: string, abs: string;
-  try { workspace = realpathSync(cwd); abs = realpathSync(isAbsolute(path) ? path : resolve(workspace, path)); } catch { return "missing"; }
+  try { workspace = realpathSync(memoryIdentity(cwd).worktree); abs = realpathSync(isAbsolute(path) ? path : resolve(realpathSync(base), path)); } catch { return "missing"; }
   const rel = relative(workspace, abs);
   if (!rel || rel.startsWith("..") || isAbsolute(rel)) return "outside_workspace";
   if (SENSITIVE.test(rel)) return "sensitive_path";
@@ -85,7 +90,7 @@ export function recheckAnswerEvidence(cwd: string, evidence: readonly EvidenceRe
   for (const item of evidence) {
     if (/\.jsonl#[^#/]+$/.test(item.ref)) { if (!item.quote) return { ok: false, reason: "tool_quote_missing" }; continue; }
     const hash = item.ref.lastIndexOf("#");
-    const file = workspaceFile(cwd, hash > 0 ? item.ref.slice(0, hash) : item.ref);
+    const file = workspaceFile(cwd, hash > 0 ? item.ref.slice(0, hash) : item.ref, memoryIdentity(cwd).worktree);
     if (typeof file === "string") return { ok: false, reason: `${item.ref}: ${file}` };
     if (hash < 0) continue;
     const all = lines(file.abs), span = /^L(\d+)-L(\d+)$/.exec(item.ref.slice(hash + 1));

@@ -323,11 +323,14 @@ heading line, `tool:Name#n` the cited session entry (`<session>.jsonl#<id>`) and
 a result excerpt, and a bare path is existence-only. The record is `verified`
 iff at least one anchored ref exists and every ref resolved; otherwise it stays
 candidate with the unresolved refs and reasons in its text. Anchors are frozen at
-first capture. `recallKnowledge` (bootstrap) re-checks file spans/headings of
+first capture. Paths are stored relative to, and bounded by, the git worktree
+root (the same identity that keys the worktree store), so recall from any
+subdirectory re-checks the same file; other worktrees do not see these records.
+`recallKnowledge` (bootstrap) re-checks file spans/headings of
 answer records on every read and drops changed ones as `staleExcluded`.
 "Verified" here means the cited evidence is unchanged, not that the answer is
 correct. E2E: `node tools/e2e/taskmanage-answer-memory.mjs` (real Pi, scripted
-provider; 8 steps including uncited-edit near miss and cited-edit stale).
+provider; 9 steps including subdirectory recall, uncited-edit near miss and cited-edit stale).
 Unverified candidates remain excluded from bootstrap recall. `context_search` can report candidate-leads on a session
 index miss, with Q&A projected as Markdown sections rather than raw JSON.
 `memory_history` operation `recall` invokes a bounded read-only memory agent

@@ -60,5 +60,7 @@ try{
  text=await readFile(src,'utf8');await writeFile(src,text.replace('return `hello ${name}`;','return `hi ${name}`;'));
  r=recallKnowledge(workspace,'where is greet implemented');
  step(8,!r.memories.some(m=>m.id.includes(impl.id))&&r.staleExcluded===1,`editing cited span excludes impl as stale (staleExcluded=${r.staleExcluded}); doc still recallable=${recallKnowledge(workspace,'setup documented guide').memories.some(m=>m.id.includes(doc.id))}`);
+ const sub=recallKnowledge(join(workspace,'docs'),'setup documented guide');
+ step(9,sub.memories.some(m=>m.id.includes(doc.id))&&sub.staleExcluded===1,`recall from subdirectory docs/ uses the same worktree store and re-checks against the worktree root: doc recalled=${sub.memories.some(m=>m.id.includes(doc.id))}, staleExcluded=${sub.staleExcluded} (only the edited impl)`);
  console.log('PASS');
 }finally{if(child&&child.exitCode===null)child.kill('SIGKILL');if(server)await new Promise(r=>server.close(r));await rm(root,{recursive:true,force:true});}
