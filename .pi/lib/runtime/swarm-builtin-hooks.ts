@@ -27,7 +27,7 @@
  */
 import { formatHookContext, nextReminderSeq, wrapReminder } from "../policy/swarm-annoyance-nudge.ts";
 import {
-  isBashReadOnly, isBashTool, isPlanModeTool, isReadOnlyExplorationTool, isSkillTool,
+  isBashReadOnly, isBashTool, isPlanModeTool, isReadOnlyExplorationTool, isReadOnlyMemoryCall, isSkillTool,
   isTaskManagementTool, isUserInteractionTool, isCodeModeTool, normalizeToolName,
 } from "./swarm-toolclass.ts";
 
@@ -140,7 +140,7 @@ export class TaskEnforcementHook {
     if (normalizeToolName(toolName) === "bootstrap") return CONTINUE;
     if (isPlanModeTool(toolName)) this.planModeUsed = true;
     if (isTaskManagementTool(toolName) || isPlanModeTool(toolName) || isSkillTool(toolName) || isUserInteractionTool(toolName) || isCodeModeTool(toolName)) return CONTINUE;
-    if (isReadOnlyExplorationTool(toolName)) return CONTINUE;
+    if (isReadOnlyExplorationTool(toolName) || isReadOnlyMemoryCall(toolName, event.params)) return CONTINUE;
     if (isBashTool(toolName)) {
       const cmd = event.params?.command;
       if (typeof cmd === "string" && isBashReadOnly(cmd)) return CONTINUE;

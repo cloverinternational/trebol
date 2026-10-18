@@ -155,7 +155,7 @@ export default function bootstrapExtension(pi: any) {
         const liveManager:any=(globalThis as any)[Symbol.for("pi-swarm-task-manager")];
         const liveTasks:any[]=liveManager?.snapshot?.()?.tasks??[];
         const focus=liveTasks.find(t=>!t.owner_id&&t.status==="in_progress"&&t.active===true);
-        if(!focus){
+        if(!focus && settings.mode !== "off"){
           const seed=await dispatchBootstrapHandoff("TaskManage",{operations:[{key:seedKey,op:"create",subject:task.slice(0,200),description:task,status:"in_progress",active:true,questions:[{id:"goal-acceptance",text:`What observable result must be true for this goal to be accepted, and where will its evidence be recorded?`}] }]},signal,ctx,pi.getActiveTools?.()??[]);
           const batch=JSON.parse(seed.content?.[0]?.text??"{}");
           if(batch.status!=="succeeded")throw new Error("Bootstrap could not establish a task; inspect TaskManage result");

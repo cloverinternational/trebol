@@ -71,7 +71,7 @@ describe("OMP composer port", () => {
 describe("OMP composer fact parity", () => {
 	it("tones a dirty git seg warning and gives every fact OMP's click action", () => {
 		const nodes = composerNodes({ draft: "", busy: false, effortKind: false, model: "M", context: { tokens: 1, window: 10 }, git: { branch: "main", staged: 0, unstaged: 1, untracked: 0 } });
-		expect(find(nodes, "git").p).toMatchObject({ tone: "warning", actions: { click: "status.git" } });
+		expect(find(nodes, "git").p).toMatchObject({ tone: "warning", actions: { click: "git.open" } });
 		expect(find(nodes, "ctx").p.actions).toEqual({ click: "status.context" });
 		expect(find(nodes, "model").p.actions).toEqual({ click: "model.select" });
 		expect(find(nodes, "usage").p.actions).toEqual({ click: "status.cost" });

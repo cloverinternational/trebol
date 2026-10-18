@@ -97,12 +97,12 @@ function gitSeg(g: GitFacts): TspNode | undefined {
 	const push = (t: string, s: string) => spans.push({ t: spans.length > 0 ? ` ${t}` : t, s });
 	if (g.unstaged > 0) push(`*${g.unstaged}`, "warning");
 	if (g.staged > 0) push(`+${g.staged}`, "success");
-	if (g.untracked > 0) push(`?${g.untracked}`, "muted");
+	if (g.untracked > 0) push(`?${g.untracked}`, "info");
 	if (spans.length === 0) return undefined;
-	return { id: "git", k: "seg", p: { role: "omp.composer.fact", priority: 1004, actions: { click: "status.git" }, spans, icon: g.branch ? "branch" : "git", ...(dirty ? { tone: "warning" } : {}) } };
+	return { id: "git", k: "seg", p: { role: "omp.composer.fact", priority: 1004, actions: { click: "git.open" }, spans, icon: g.branch ? "branch" : "git", ...(dirty ? { tone: "warning" } : {}) } };
 }
 
-export function composerNodes(f: ComposerFacts, loading?: TspNode, above: TspNode[] = []): TspNode[] {
+export function composerNodes(f: ComposerFacts, above: TspNode[] = []): TspNode[] {
 	const level = f.thinking;
 	const effortInModel = level !== undefined && f.effortKind;
 	const model: TspNode | undefined = f.model
@@ -154,7 +154,6 @@ export function composerNodes(f: ComposerFacts, loading?: TspNode, above: TspNod
 		c: [{ id: "composer", k: "editor", p: { text: f.draft, cursor: f.cursor ?? f.draft.length, ...(f.selection ? { selection: f.selection } : {}), ...(f.ghost ? { ghost: f.ghost } : {}), sendable: false, placeholder: PLACEHOLDER } }],
 	};
 	return [
-		...(loading ? [loading] : []),
 		{
 			id: "composer-col",
 			k: "col",

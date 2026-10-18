@@ -5,7 +5,9 @@
  */
 export const PI_COMPOSER_CSS = `
 .sf-col[data-role='pi.assistant'] { gap: var(--sf-inner-gap); padding: 0 2px; }
+.sf-main > .sf-col[data-role='pi.assistant']:not(:has(~ .sf-col[data-role='pi.assistant'])) .sf-md .md { font-family: var(--sans); }
 .sf-card[data-role='pi.user']:not(:first-child) { margin-top: 8px; }
+.sf-card[data-role='pi.user'] .sf-md .md { font-family: var(--sans); }
 [data-role='pi.tasks'] {
   position: relative;
   display: flex;

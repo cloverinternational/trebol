@@ -46,6 +46,7 @@
       "extensions/tern-resume/index.ts",
       "extensions/vault/index.ts",
       "extensions/memory-history/index.ts",
+      "extensions/project-context/index.ts",
       "extensions/task-candidate-capture/index.ts",
       "extensions/knowledge-enrichment/index.ts",
       "extensions/candidate-memory-review/index.ts",
