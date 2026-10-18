@@ -1,0 +1,122 @@
+[
+ {
+  "task": "q-T02",
+  "qid": "T02",
+  "queryTs": "2026-10-13T22:43:05.173Z",
+  "facts": 107,
+  "ranking": "hybrid",
+  "embedError": null
+ },
+ {
+  "task": "q-T15",
+  "qid": "T15",
+  "queryTs": "2026-10-17T15:38:23.087Z",
+  "facts": 111,
+  "ranking": "hybrid",
+  "embedError": null
+ },
+ {
+  "task": "q-T08",
+  "qid": "T08",
+  "queryTs": "2026-10-17T15:44:26.492Z",
+  "facts": 111,
+  "ranking": "hybrid",
+  "embedError": null
+ },
+ {
+  "task": "q-T01",
+  "qid": "T01",
+  "queryTs": "2026-10-18T06:15:04.378Z",
+  "facts": 123,
+  "ranking": "hybrid",
+  "embedError": null
+ },
+ {
+  "task": "q-T32",
+  "qid": "T32",
+  "queryTs": "2026-10-13T22:37:39.092Z",
+  "facts": 107,
+  "ranking": "hybrid",
+  "embedError": null
+ },
+ {
+  "task": "q-T34",
+  "qid": "T34",
+  "queryTs": "2026-10-12T22:45:17.676Z",
+  "facts": 93,
+  "ranking": "hybrid",
+  "embedError": null
+ },
+ {
+  "task": "q-T33",
+  "qid": "T33",
+  "queryTs": "2026-10-13T01:39:53.031Z",
+  "facts": 107,
+  "ranking": "hybrid",
+  "embedError": null
+ },
+ {
+  "task": "q-T41",
+  "qid": "T41",
+  "queryTs": "2026-10-17T15:14:20.000Z",
+  "facts": 110,
+  "ranking": "hybrid",
+  "embedError": null
+ },
+ {
+  "task": "q-T19",
+  "qid": "T19",
+  "queryTs": "2026-10-07T00:17:16.139Z",
+  "facts": 0,
+  "ranking": "bm25",
+  "embedError": null
+ },
+ {
+  "task": "q-T38",
+  "qid": "T38",
+  "queryTs": "2026-10-13T01:29:45.873Z",
+  "facts": 107,
+  "ranking": "hybrid",
+  "embedError": null
+ },
+ {
+  "task": "q-T30",
+  "qid": "T30",
+  "queryTs": "2026-10-12T22:48:34.075Z",
+  "facts": 96,
+  "ranking": "hybrid",
+  "embedError": null
+ },
+ {
+  "task": "q-T14",
+  "qid": "T14",
+  "queryTs": "2026-10-10T22:51:08.108Z",
+  "facts": 30,
+  "ranking": "hybrid",
+  "embedError": null
+ },
+ {
+  "task": "q-T07",
+  "qid": "T07",
+  "queryTs": "2026-10-10T23:54:27.522Z",
+  "facts": 40,
+  "ranking": "hybrid",
+  "embedError": null
+ },
+ {
+  "task": "q-T25",
+  "qid": "T25",
+  "queryTs": "2026-10-17T15:53:58.375Z",
+  "facts": 114,
+  "ranking": "hybrid",
+  "embedError": null
+ },
+ {
+  "task": "q-T20",
+  "qid": "T20",
+  "queryTs": "2026-10-13T22:42:56.981Z",
+  "facts": 107,
+  "ranking": "hybrid",
+  "embedError": null
+ }
+]
