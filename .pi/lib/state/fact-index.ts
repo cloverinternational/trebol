@@ -34,16 +34,22 @@ export function embedConfig(env: NodeJS.ProcessEnv = process.env): EmbedConfig |
   const url = env.PI_SWARM_MEMORY_EMBED_URL?.trim(); if (!url) return undefined;
   return { url: url.replace(/\/+$/, ""), model: env.PI_SWARM_MEMORY_EMBED_MODEL?.trim() || "embeddinggemma-2", timeoutMs: Number(env.PI_SWARM_MEMORY_EMBED_TIMEOUT_MS) || 8000 };
 }
+const EMBED_BATCH = 8, EMBED_MAX_CHARS = 6000;
 async function embed(cfg: EmbedConfig, model: string, input: string[], signal?: AbortSignal): Promise<number[][]> {
   const out: number[][] = [];
-  for (let i = 0; i < input.length; i += 8) {
-    const res = await fetch(`${cfg.url}/v1/embeddings`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ model, input: input.slice(i, i + 8).map(s => s.slice(0, 6000)) }), signal: signal ?? AbortSignal.timeout(cfg.timeoutMs) });
+  for (let i = 0; i < input.length; i += EMBED_BATCH) {
+    const batch = input.slice(i, i + EMBED_BATCH);
+    const res = await fetch(`${cfg.url}/v1/embeddings`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ model, input: batch.map(s => s.slice(0, EMBED_MAX_CHARS)) }), signal: signal ?? AbortSignal.timeout(cfg.timeoutMs) });
     if (!res.ok) throw new Error(`embeddings ${res.status}`);
-    const body = await res.json() as { data: { embedding: number[] }[] }; out.push(...body.data.map(d => d.embedding));
+    const body = await res.json() as { data: { embedding: number[] }[] };
+    const vectors = body.data.map(d => d.embedding);
+    if (vectors.length !== batch.length || vectors.some(v => !Array.isArray(v))) throw new Error(`embeddings returned ${vectors.length} of ${batch.length} vectors`);
+    out.push(...vectors);
   }
   return out;
 }
-const cos = (a: number[], b: number[]) => { let s = 0; for (let i = 0; i < a.length; i++) s += a[i] * b[i]; return s; };
+// Cosine similarity: vectors from an external endpoint need not be unit-normalized.
+const cos = (a: number[], b: number[]) => { let dot = 0, na = 0, nb = 0; for (let i = 0; i < a.length; i++) { dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; } return na && nb ? dot / Math.sqrt(na * nb) : 0; };
 
 /** Vectors for records, reading/writing the per-directory revision cache. */
 export async function recordVectors(cfg: EmbedConfig, groups: { directory: string; records: readonly KnowledgeRecord[] }[]): Promise<Map<string, number[]>> {

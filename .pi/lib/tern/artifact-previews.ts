@@ -38,7 +38,9 @@ export async function previewFile(absPath: string, workspace: string, signal?: A
   if (kind === "other") return null;
   const name = basename(absPath);
   const base = { name, path: absPath, citation: citationFor(workspace, absPath, kind === "pdf" ? 1 : undefined) };
-  const limit = sizeLimitFor(kind)!;
+  const limit = sizeLimitFor(kind);
+  // Fail closed: a kind without a cap must never fall through to an unbounded read.
+  if (limit === undefined) return { ...base, reason: "no preview size limit for this file type" };
   if (size > limit) return { ...base, reason: `${kind.toUpperCase()} is ${kilobytes(size)}, over the ${kilobytes(limit)} preview limit` };
   try {
     const bytes = kind === "pdf" ? await pdfFirstPagePng(absPath, signal) : await readFile(absPath);

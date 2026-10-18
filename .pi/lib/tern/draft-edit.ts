@@ -12,7 +12,6 @@ const UNDO_LIMIT = 200;
 const LARGE_PASTE_LINES = 10;
 const LARGE_PASTE_CHARS = 1000;
 const PASTE_MARKER = /\[paste #(\d+)(?: \+\d+ lines| \d+ chars)?\]/g;
-const PASTE_MARKER_AT_END = /\[paste #(\d+)(?: \+\d+ lines| \d+ chars)?\]$/;
 
 export function isLargePaste(text: string): boolean {
 	return text.length > LARGE_PASTE_CHARS || text.split("\n").length > LARGE_PASTE_LINES;
@@ -79,6 +78,8 @@ export class DraftEditor {
 	#typing = false;
 	// Large pastes kept out of the visible text, keyed by the id in their marker. Never cleared: undo can restore a marker.
 	#pastes = new Map<number, string>();
+	// The exact marker text each paste id was inserted with. Only this text is a marker, so typed look-alikes stay literal.
+	#markers = new Map<number, string>();
 	#pasteCounter = 0;
 
 	get text(): string {
@@ -87,7 +88,7 @@ export class DraftEditor {
 
 	// The text with every paste marker replaced by its pasted content; what gets sent.
 	get expandedText(): string {
-		return this.#text.replace(PASTE_MARKER, (marker, id: string) => this.#pastes.get(Number(id)) ?? marker);
+		return this.#text.replace(PASTE_MARKER, (marker, id: string) => this.#markers.get(Number(id)) === marker ? this.#pastes.get(Number(id)) ?? marker : marker);
 	}
 
 	get cursor(): number {
@@ -122,6 +123,7 @@ export class DraftEditor {
 		const id = ++this.#pasteCounter;
 		this.#pastes.set(id, text);
 		const marker = lines > LARGE_PASTE_LINES ? `[paste #${id} +${lines} lines]` : `[paste #${id} ${text.length} chars]`;
+		this.#markers.set(id, marker);
 		this.#record();
 		this.#typing = false;
 		this.#splice(marker);
@@ -137,8 +139,9 @@ export class DraftEditor {
 		if (this.selection) return this.#record(), this.#deleteSelection();
 		if (this.#cursor === 0) return;
 		this.#record();
-		const marker = PASTE_MARKER_AT_END.exec(this.#text.slice(Math.max(0, this.#cursor - 40), this.#cursor));
-		const start = marker && this.#pastes.has(Number(marker[1])) ? this.#cursor - marker[0].length : prevBoundary(this.#text, this.#cursor);
+		const before = this.#text.slice(0, this.#cursor);
+		const pasted = [...this.#markers.values()].find(m => before.endsWith(m));
+		const start = pasted !== undefined ? this.#cursor - pasted.length : prevBoundary(this.#text, this.#cursor);
 		this.#text = this.#text.slice(0, start) + this.#text.slice(this.#cursor);
 		this.#cursor = start;
 	}

@@ -115,15 +115,17 @@ const HOOK_WARMUP_TURNS = 5;
 const TURN_COUNTS = Symbol.for("pi-swarm-hook-turn-counts");
 const TURN_LISTENER = Symbol.for("pi-swarm-hook-turn-listener");
 const turnCounts: Map<string, number> = ((globalThis as any)[TURN_COUNTS] ??= new Map<string, number>());
-const turnSessionKey = (ctx: any) => { const id = ctx?.sessionManager?.getSessionId?.(); return typeof id === "string" && id ? id : "session"; };
+// Without a session id there is no safe key: contexts sharing a fallback key would merge counts across sessions. Such calls stay dormant.
+const turnSessionKey = (ctx: any): string | undefined => { const id = ctx?.sessionManager?.getSessionId?.(); return typeof id === "string" && id ? id : undefined; };
 // Installed once per process: every registerHook caller passes its own pi
 // object, and a per-object listener would count each turn several times.
 function installTurnCounter(pi: any) {
   if ((globalThis as any)[TURN_LISTENER]) return;
   (globalThis as any)[TURN_LISTENER] = true;
-  pi.on("turn_start", (_event: any, ctx: any) => { const key = turnSessionKey(ctx); turnCounts.set(key, (turnCounts.get(key) ?? 0) + 1); });
+  pi.on("turn_start", (_event: any, ctx: any) => { const key = turnSessionKey(ctx); if (key === undefined) return; turnCounts.set(key, (turnCounts.get(key) ?? 0) + 1); });
+  pi.on("session_shutdown", (_event: any, ctx: any) => { const key = turnSessionKey(ctx); if (key !== undefined) turnCounts.delete(key); });
 }
-export function hookTurnGateOpen(ctx: any): boolean { return (turnCounts.get(turnSessionKey(ctx)) ?? 0) > HOOK_WARMUP_TURNS; }
+export function hookTurnGateOpen(ctx: any): boolean { const key = turnSessionKey(ctx); return key !== undefined && (turnCounts.get(key) ?? 0) > HOOK_WARMUP_TURNS; }
 
 /** `warmup: false` is for composition hooks (the base system prompt), not
  * gates: Pi emits before_agent_start once per user prompt, so a dormant prompt
