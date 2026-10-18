@@ -1,0 +1,17 @@
+{
+ "raw": 1982,
+ "parse_failures": 0,
+ "non_tuning_session": 1848,
+ "usable_text_no_secret": 1730,
+ "has_followup_files": 1463,
+ "deduped_jaccard08": 761,
+ "no_overlap_with_tuned_or_heldout": 733,
+ "dev": 498,
+ "test": 235,
+ "sessions_dev": 23,
+ "sessions_test": 22,
+ "by_origin_test": {
+  "rg": 233,
+  "memory_history": 2
+ }
+}
