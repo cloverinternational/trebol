@@ -6,6 +6,7 @@
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { readFile } from "node:fs/promises";
+import { appendFileSync } from "node:fs";
 import {
 	createAgentSessionFromServices,
 	createAgentSessionRuntime,
@@ -173,6 +174,14 @@ function startTsp(): void {
 			apc,
 			kinds,
 			onClose: restore,
+			// Records the raw Pi event stream (one {at, event} JSON line each) for replay tests; off unless set.
+			...(process.env.PI_TERN_EVENT_LOG ? { onEvent: (event: unknown) => {
+				try {
+					appendFileSync(process.env.PI_TERN_EVENT_LOG!, `${JSON.stringify({ at: Date.now(), sessionFile: runtime.session.sessionManager?.getSessionFile?.(), event })}\n`);
+				} catch {
+					// A recorder failure must never affect the session.
+				}
+			} } : {}),
 			commands: sessionCommandSource(commandSession),
 			events,
 			reload: async () => {

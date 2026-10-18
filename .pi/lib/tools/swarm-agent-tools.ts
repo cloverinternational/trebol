@@ -4,7 +4,7 @@ import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { BUILTIN_AGENT_PROFILES, type AgentManager, type AgentResult, type BackgroundHandle } from "../../../packages/tools/agents/src/index.ts";
-import { setRunningWork } from "../ui/running-work.ts";
+import { patchRunningWork, setRunningWork } from "../ui/running-work.ts";
 
 export type ToolResult = { text: string; isError?: boolean; details?: unknown };
 export type AgentToolParams = Record<string, any>;
@@ -12,7 +12,7 @@ type Status = "running" | "completed" | "failed" | "cancelled";
 type Question = { id: string; question: string; context: string; askedAt: number; answer?: string; resolve?: (answer: string) => void };
 type Entry = {
   id: string; task: string; startedAt: number; outputFile: string; handle: BackgroundHandle; transcriptPath?: string;
-  done: Promise<AgentResult>; result?: AgentResult; delegate?: boolean; question?: Question; consumedOffset?: number;
+  done: Promise<AgentResult>; result?: AgentResult; delegate?: boolean; foreground?: boolean; question?: Question; consumedOffset?: number;
 };
 
 export const AGENT_MANAGER_SYMBOL = Symbol.for("pi-swarm.agent-manager");
@@ -133,7 +133,7 @@ export class SwarmAgentTools {
     }
   }
 
-  private spawn(task: string, opts: AgentToolParams, id: string, delegate = false, register = true): Entry {
+  private spawn(task: string, opts: AgentToolParams, id: string, delegate = false, register = true, foreground = false): Entry {
     const file = outputPath(id);
     mkdirSync(dirname(file), { recursive: true });
     closeSync(openSync(file, "a"));
@@ -146,11 +146,11 @@ export class SwarmAgentTools {
       ...(!opts.agent_id && opts.preset ? { preset: opts.preset } : {}),
       model: opts.model, background: true,
     });
-    const entry: Entry = { id, task, startedAt: Date.now(), outputFile: file, handle, delegate, done: undefined! };
+    const entry: Entry = { id, task, startedAt: Date.now(), outputFile: file, handle, delegate, foreground, done: undefined! };
     writeFileSync(metadataPath(id), JSON.stringify({ id, task, startedAt: entry.startedAt, delegate, cwd: this.cwd, sessionId: this.activeSessionId }) + "\n");
-    setRunningWork({ id, kind: "subagent", label: delegate ? `Delegate ${id}` : `Agent ${id}`, status: "running", startedAt: entry.startedAt, detail: task });
+    setRunningWork({ id, kind: "subagent", label: delegate ? `Delegate ${id}` : `Agent ${id}`, status: "running", startedAt: entry.startedAt, detail: task, foreground });
     const ownsSession = this.captureCompletionOwner?.() ?? (() => true);
-    const transcriptSink = (agentId: string, path: string) => { if (agentId === id) { entry.transcriptPath = path; if (ownsSession()) setRunningWork({ id, kind: "subagent", label: delegate ? `Delegate ${id}` : `Agent ${id}`, status: "running", startedAt: entry.startedAt, detail: task, transcriptPath: path }); } };
+    const transcriptSink = (agentId: string, path: string) => { if (agentId === id) { entry.transcriptPath = path; if (ownsSession()) setRunningWork({ id, kind: "subagent", label: delegate ? `Delegate ${id}` : `Agent ${id}`, status: "running", startedAt: entry.startedAt, detail: task, transcriptPath: path, foreground: entry.foreground }); } };
     const removeTranscriptSink = this.manager.addTranscriptSink(transcriptSink);
     entry.done = handle.wait().then(async result => {
       removeTranscriptSink();
@@ -196,7 +196,7 @@ export class SwarmAgentTools {
       this.fail(`Agent '${p.agent_id}' not found. Available agents: ${this.availableAgents().join(", ")}`);
     }
     const task = this.enrichedTask(p.task, p.agent_id || p.preset || "");
-    const e = this.spawn(task, p, `subagent-${callId || id8()}`, false, Boolean(p.run_in_background));
+    const e = this.spawn(task, p, `subagent-${callId || id8()}`, false, Boolean(p.run_in_background), !p.run_in_background);
     if (p.run_in_background) return this.backgroundLaunch(e);
     if (Number(p.auto_background_seconds) > 0) {
       try {
@@ -204,7 +204,7 @@ export class SwarmAgentTools {
           e.done,
           new Promise<undefined>(resolve => setTimeout(resolve, Number(p.auto_background_seconds) * 1000)),
         ]);
-        if (!result) { this.entries.set(e.id, e); return this.backgroundLaunch(e); }
+        if (!result) { this.entries.set(e.id, e); e.foreground = false; patchRunningWork(e.id, { foreground: false }); return this.backgroundLaunch(e); }
         return { text: result.status === "completed" ? (result.output ?? "") : `Sub-agent execution failed: ${result.error ?? "unknown error"}` };
       } catch (err) { return { text: `Sub-agent execution failed: ${String(err)}` }; }
     }

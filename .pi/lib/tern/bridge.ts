@@ -28,7 +28,7 @@ import { ASK_OPTIONS_ID, TernAskDialog, type AskEventBus } from "./ask-dialog.ts
 import { TernExtensionUI, UI_PROMPT_LIST_ID } from "./ext-ui.ts";
 import { AUTOCOMPLETE_ID, SlashAutocomplete, type Edit } from "./autocomplete.ts";
 import { expandMentions } from "./mentions.ts";
-import { segmentTranscript, summarizeToolGroup } from "./turn-groups.ts";
+import { goalLine, isAbortedAssistant, isCancellationError, liveLineText, SETTLED_LABEL, segmentTranscript, summarizeToolGroup } from "./turn-groups.ts";
 import { DraftEditor, isLargePaste } from "./draft-edit.ts";
 import { getNativeClipboard } from "@earendil-works/pi-tui";
 import { randomUUID } from "node:crypto";
@@ -105,6 +105,9 @@ interface Item {
 	exit?: number;
 	timedOut?: boolean;
 	cancelled?: boolean;
+	turnAborted?: boolean;
+	// The error text of a failed result, kept to tell an abort's "context canceled" from a real failure.
+	errorText?: string;
 	// TaskManage's structured batch from the final result, rendered as task rows (never as JSON).
 	batch?: TaskManageBatch;
 	// Picture previews for Read and apply_patch results; set after the result is known.
@@ -222,6 +225,10 @@ export class TranscriptProjector {
 	#items: Item[] = [];
 	#current: Item | null = null;
 	#localUserPending = false;
+	// Between agent_start and agent_end the turn's group stays a live line, even between tool calls.
+	#turnOpen = false;
+	// Items before this index belong to settled turns; only a group starting at or after it can be live.
+	#turnStart = 0;
 	#seq = 0;
 
 	get items(): readonly Item[] {
@@ -232,6 +239,8 @@ export class TranscriptProjector {
 		this.#items = [];
 		this.#current = null;
 		this.#localUserPending = false;
+		this.#turnOpen = false;
+		this.#turnStart = 0;
 		for (const raw of entries) {
 			if (typeof raw !== "object" || raw === null) continue;
 			const entry = raw as { id?: unknown; type?: unknown; message?: unknown };
@@ -243,6 +252,7 @@ export class TranscriptProjector {
 			const role = roleOf(entry.message);
 			if (role !== "user" && role !== "assistant") continue;
 			this.#items.push({ id: entry.id, role, text: messageText(entry.message) });
+			if (isAbortedAssistant(entry.message)) this.#markTurnAborted();
 			// Persisted tool calls live in the assistant message; their results arrive later as toolResult entries.
 			for (const call of toolCallsOf(entry.message)) {
 				this.#items.push({ id: `t-${call.id}`, role: "tool", text: `tool ${call.name}`, status: "running", name: call.name, args: call.arguments });
@@ -265,12 +275,35 @@ export class TranscriptProjector {
 		item.status = result.isError || item.exit !== undefined ? "error" : "ok";
 		item.took = typeof details?.duration_ms === "number" ? details.duration_ms : undefined;
 		const text = messageText(result);
+		if (item.status === "error") item.errorText = text;
 		item.output = item.name?.toLowerCase() === "bash" && !result.isError ? extractBashDisplayText(text) : resultText(text);
 		item.text = `tool ${item.name ?? "tool"} ${item.status}`;
 	}
 
+	// An aborted turn reads as interrupted. Its steps that were still running, or that failed only because of
+	// the abort, read as cancelled; finished and genuinely failed steps keep their result. Used live and on
+	// restore, so both agree.
+	#markTurnAborted(): void {
+		for (let i = this.#items.length - 1; i >= 0; i--) {
+			const item = this.#items[i]!;
+			if (item.role === "user") break;
+			if (item.role !== "tool") continue;
+			item.turnAborted = true;
+			if (item.cancelled) continue;
+			if (item.status === "running" || (item.status === "error" && item.exit === undefined && isCancellationError(item.errorText))) {
+				item.status = "error";
+				item.cancelled = true;
+			}
+		}
+	}
+
 	apply(event: PiEventLike): boolean {
 		switch (event.type) {
+			case "agent_start": {
+				this.#turnOpen = true;
+				this.#turnStart = this.#items.length;
+				return true;
+			}
 			case "message_start": {
 				const role = roleOf(event.message);
 				// Tool results already belong to their tool_execution_* card.
@@ -299,6 +332,7 @@ export class TranscriptProjector {
 				const target = this.#current && this.#current.role === role ? this.#current : null;
 				if (target && text) target.text = text;
 				this.#current = null;
+				if (isAbortedAssistant(event.message)) this.#markTurnAborted();
 				return true;
 			}
 			case "tool_execution_start": {
@@ -336,6 +370,7 @@ export class TranscriptProjector {
 					item.exit = typeof details?.exit_code === "number" && details.exit_code !== 0 ? details.exit_code : failureExit ? Number(failureExit) : undefined;
 					item.timedOut = details?.timed_out === true || (bashFailure && /^Error executing bash: command timed out after \d+s/.test(resultBody));
 					item.status = event.isError || item.exit !== undefined ? "error" : "ok";
+					if (item.status === "error") item.errorText = resultBody;
 					if (item.name === "TaskManage") item.batch = taskManageBatch(event.result);
 					item.text = `tool ${String(event.toolName)} ${item.status}`;
 					// A cancelled tool may have no final payload. Retain the last live snapshot.
@@ -348,7 +383,8 @@ export class TranscriptProjector {
 				return true;
 			}
 			case "agent_end": {
-				let changed = false;
+				let changed = this.#turnOpen;
+				this.#turnOpen = false;
 				for (const item of this.#items) {
 				if (item.role !== "tool" || item.status !== "running") continue;
 					// Pi's aborted turn can omit tool_execution_end; never leave a live spinner.
@@ -371,16 +407,29 @@ export class TranscriptProjector {
 
 	nodes(outputExpanded = false): TspNode[] {
 		const out: TspNode[] = [];
+		const segments = segmentTranscript(this.#items);
+		// Only the newest turn can still be running; an earlier group is settled once a user message follows it.
+		let openGroup = -1;
+		if (this.#turnOpen) {
+			for (let i = segments.length - 1; i >= 0; i--) {
+				const s = segments[i]!;
+				if (s.kind === "tools") {
+					if (this.#items.indexOf(s.items[0]!) >= this.#turnStart) openGroup = i;
+					break;
+				}
+				if (s.item.role === "user") break;
+			}
+		}
 		let goal = "";
-		for (const segment of segmentTranscript(this.#items)) {
+		segments.forEach((segment, i) => {
 			if (segment.kind === "tools") {
-				out.push(toolGroupNode(segment.items, goal, outputExpanded));
-				continue;
+				out.push(toolGroupNode(segment.items, goal, outputExpanded, i === openGroup));
+				return;
 			}
 			const { item } = segment;
-			if (item.role === "user") goal = item.text;
+			if (item.role === "user") goal = goalLine(item.text);
 			out.push(...projectTranscript([{ id: item.id, role: item.role, text: item.text }]));
-		}
+		});
 		return out;
 	}
 }
@@ -404,24 +453,22 @@ function toolCallsOf(message: unknown): Array<{ id: string; name: string; argume
 	return content.filter((part): part is { type: "toolCall"; id: string; name: string; arguments: unknown } => typeof part === "object" && part !== null && (part as { type?: unknown }).type === "toolCall" && typeof (part as { id?: unknown }).id === "string" && typeof (part as { name?: unknown }).name === "string");
 }
 
-// Live: one line with the running count. Done: one collapsed card; its steps sit behind the fold.
-function toolGroupNode(items: Item[], goal: string, outputExpanded: boolean): TspNode {
+// Live: one text line, no children. Settled: one collapsed card whose steps sit behind the fold;
+// ctrl+o (outputExpanded) unfolds every card, a head click folds one card locally in Tern.
+function toolGroupNode(items: Item[], goal: string, outputExpanded: boolean, turnOpen: boolean): TspNode {
 	const id = `g-${items[0]?.id ?? "empty"}`;
 	const summary = summarizeToolGroup(items);
-	const steps = items.length === 1 ? "1 step" : `${items.length} steps`;
-	if (summary.status === "running") {
-		return { id, k: "text", p: { role: "tern.work-live", tone: "pending", text: `${goal || "Working"} · ${summary.active} running` } };
+	if (summary.status === "running" || turnOpen) {
+		return { id, k: "text", p: { role: "tern.work-live", tone: "pending", wrap: "none", truncate: "end", text: liveLineText(goal, summary.active) } };
 	}
-	const label = summary.status === "done" ? "Done" : summary.status === "failed" ? "Failed" : "Interrupted";
+	const steps = items.length === 1 ? "1 step" : `${items.length} steps`;
 	const status = summary.status === "done" ? "done" : summary.status === "failed" ? "error" : "cancelled";
 	return {
 		id, k: "tool",
 		p: {
-			role: "tern.work", key: id, name: "work", title: label, status,
+			role: "tern.work", key: id, name: "work", title: SETTLED_LABEL[summary.status], status,
 			...(goal ? { target: goal, targetKind: "text" } : {}),
-			frame: "card", collapsible: true, collapsed: true, meta: [steps],
-			...(summary.durationMs !== undefined ? { took: summary.durationMs } : {}),
-			...(summary.status === "interrupted" ? { note: "interrupted" } : {}),
+			frame: "card", collapsible: true, collapsed: !outputExpanded, meta: [steps],
 		},
 		c: items.map((item) => toolRow(item, outputExpanded)),
 	};
@@ -564,6 +611,8 @@ export interface BridgeOptions {
 	credits?: number;
 	apc?: number;
 	onClose?: () => void;
+	// Observes every Pi session event before projection (run.ts records them when PI_TERN_EVENT_LOG is set).
+	onEvent?: (event: PiEventLike) => void;
 	// Live slash-command sources (extensions, templates, skills). Defaults to none: every `/x` is refused.
 	commands?: CommandSource;
 	// Pi event bus shared with the ask extension. Omitted: ask_user_question stays headless-denied.
@@ -606,6 +655,7 @@ export class PiTernBridge {
 	#gitView: { mode: "list" } | { mode: "diff"; ref: GitFileRef; text: string } | undefined;
 	#gitRefs: GitFileRef[] = [];
 	readonly #onClose?: () => void;
+	readonly #onEventTap?: (event: PiEventLike) => void;
 	readonly #commands: CommandSource;
 	readonly #complete: SlashAutocomplete;
 	#sessionId: string | undefined;
@@ -660,6 +710,7 @@ export class PiTernBridge {
 		};
 		this.#surface = new TernInlineSurface(options.write, options.surfaceId, options.credits, options.apc);
 		this.#onClose = options.onClose;
+		this.#onEventTap = options.onEvent;
 		this.#commands = options.commands ?? EMPTY_COMMAND_SOURCE;
 		this.#events = options.events;
 		this.#reload = options.reload;
@@ -725,6 +776,11 @@ export class PiTernBridge {
 		this.#unsubscribe?.();
 		this.#session = session;
 		this.#unsubscribe = session.subscribe((event) => this.#onEvent(event));
+		// The transcript follows the session: a resumed one is rebuilt from its persisted branch (JSONL),
+		// a new one starts empty.
+		const branch = session.sessionManager?.getBranch?.();
+		this.#projector.replaceFromSessionBranch(Array.isArray(branch) ? branch : []);
+		this.#busy = false;
 		this.#syncSession();
 		this.#refreshGit();
 		this.#render();
@@ -784,6 +840,7 @@ export class PiTernBridge {
 
 	#onEvent(event: PiEventLike): void {
 		if (this.#closed) return;
+		this.#onEventTap?.(event);
 		if (event.type === "session_tree") {
 			const branch = this.#session.sessionManager?.getBranch?.();
 			if (Array.isArray(branch)) this.#projector.replaceFromSessionBranch(branch);
@@ -1091,9 +1148,10 @@ export class PiTernBridge {
 	// by the stylesheet's :hover rule (composer-style.ts). Clicking a task puts "task #N" in the draft;
 	// right-click folds the questions. Read-only: nothing here answers, approves or mutates a task.
 	// Live background bash and subagent work as a card above the composer. Read-only projection of the
-	// shared running-work store; hidden when nothing is queued or running.
+	// shared running-work store; hidden when nothing is queued or running. Foreground calls belong to the
+	// turn's work line in the transcript, so they appear here only once moved to the background.
 	#backgroundWork(now = Date.now()): TspNode[] {
-		const live = runningWorkSnapshot().filter((item) => item.status === "queued" || item.status === "running");
+		const live = runningWorkSnapshot().filter((item) => (item.status === "queued" || item.status === "running") && item.foreground !== true);
 		if (!live.length) return [];
 		const rows: TspNode[] = live.slice(0, BACKGROUND_WORK_MAX_ROWS).map((item) => ({
 			id: `bg-work-${item.id}`, k: "row", p: { role: "pi.background.row", gap: "sm", align: "center", title: backgroundWorkTitle(item) }, c: [

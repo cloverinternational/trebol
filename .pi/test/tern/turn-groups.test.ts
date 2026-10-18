@@ -34,7 +34,7 @@ describe("turn grouping in the Tern transcript", () => {
 		expect(live.p?.role).toBe("tern.work-live");
 		expect(steps(p.nodes()).filter((n) => n.k === "tool")).toEqual([]);
 		expect(live.c).toBeUndefined();
-		expect(live.p).toMatchObject({ text: "fix login · 1 running" });
+		expect(live.p).toMatchObject({ text: "1 running · fix login", wrap: "none", truncate: "end" });
 	});
 
 	it("collapses a finished turn into one summary holding every step, in order, with the goal", () => {
@@ -56,7 +56,45 @@ describe("turn grouping in the Tern transcript", () => {
 		const nodes = p.nodes();
 		expect(nodes.filter((n) => n.p?.role === "tern.work" || n.p?.role === "tern.work-live").map((n) => n.p?.role)).toEqual(["tern.work", "tern.work-live"]);
 		expect(nodes.find((n) => n.p?.role === "tern.work")?.p?.target).toBe("first");
-		expect(nodes.find((n) => n.p?.role === "tern.work-live")?.p?.text).toBe("second · 1 running");
+		expect(nodes.find((n) => n.p?.role === "tern.work-live")?.p?.text).toBe("1 running · second");
+	});
+
+	it("an aborted turn reads Interrupted live and on restore, even when every step had finished", () => {
+		const user = { role: "user", content: [{ type: "text", text: "check" }] };
+		const call = { role: "assistant", content: [{ type: "toolCall", id: "a", name: "bash", arguments: {} }], stopReason: "toolUse" };
+		const result = { role: "toolResult", toolCallId: "a", toolName: "bash", isError: false, content: [{ type: "text", text: "ok" }], details: { exit_code: 0 } };
+		const aborted = { role: "assistant", content: [], stopReason: "aborted", errorMessage: "This operation was aborted" };
+		const live = new TranscriptProjector();
+		live.apply({ type: "agent_start" });
+		live.apply({ type: "message_start", message: user });
+		live.apply({ type: "message_start", message: call });
+		live.apply({ type: "message_end", message: call });
+		start(live, "a");
+		live.apply({ type: "tool_execution_end", toolCallId: "a", toolName: "bash", result, isError: false });
+		live.apply({ type: "message_start", message: aborted });
+		live.apply({ type: "message_end", message: aborted });
+		live.apply({ type: "agent_end" });
+		const restored = new TranscriptProjector();
+		restored.replaceFromSessionBranch([user, call, result, aborted].map((message, i) => ({ id: `e${i}`, type: "message", message })));
+		for (const p of [live, restored]) {
+			const card = p.nodes().find((n) => n.p?.role === "tern.work");
+			expect(card?.p).toMatchObject({ title: "Interrupted", status: "cancelled", meta: ["1 step"] });
+			expect(card?.c?.[0]?.p?.status).toBe("done");
+		}
+	});
+
+	it("an abort's 'context canceled' error is a cancelled step, a real failure in the same turn stays failed", () => {
+		const p = new TranscriptProjector();
+		p.apply({ type: "agent_start" });
+		p.apply({ type: "message_start", message: { role: "user", content: [{ type: "text", text: "go" }] } });
+		start(p, "real"); start(p, "cut");
+		p.apply({ type: "tool_execution_end", toolCallId: "real", toolName: "bash", result: { content: [{ type: "text", text: "Error executing bash: Command exited with code 2: x" }] }, isError: true });
+		p.apply({ type: "tool_execution_end", toolCallId: "cut", toolName: "bash", result: { content: [{ type: "text", text: "command execution error: context canceled" }] }, isError: true });
+		p.apply({ type: "message_end", message: { role: "assistant", content: [], stopReason: "error", errorMessage: "This operation was aborted" } });
+		p.apply({ type: "agent_end" });
+		const card = p.nodes().find((n) => n.p?.role === "tern.work");
+		expect(card?.p?.title).toBe("Interrupted");
+		expect(card?.c?.map((c) => c.p?.status)).toEqual(["error", "cancelled"]);
 	});
 
 	it("restores persisted tool calls and results, and marks unresolved calls interrupted", () => {
