@@ -486,6 +486,13 @@ When adding a new top-level package, extension, persistent entry type, hook
 group, or user-facing command, add it to the relevant tables above in the same
 patch. This is a contract, not optional documentation.
 
+## Tern work
+
+Whenever work touches or adds a Tern-related feature (for example
+`.pi/lib/tern/`, `tern-plugins/`, `extensions/tern-resume/`, or
+`tools/e2e/tern-*.mjs`), fetch and read
+https://docs.stencil.so/tern/index.md first, before planning or editing.
+
 ## Validation
 
 ```sh

@@ -28,6 +28,7 @@ import { ASK_OPTIONS_ID, TernAskDialog, type AskEventBus } from "./ask-dialog.ts
 import { TernExtensionUI, UI_PROMPT_LIST_ID } from "./ext-ui.ts";
 import { AUTOCOMPLETE_ID, SlashAutocomplete, type Edit } from "./autocomplete.ts";
 import { expandMentions } from "./mentions.ts";
+import { segmentTranscript, summarizeToolGroup } from "./turn-groups.ts";
 import { DraftEditor, isLargePaste } from "./draft-edit.ts";
 import { getNativeClipboard } from "@earendil-works/pi-tui";
 import { randomUUID } from "node:crypto";
@@ -235,10 +236,37 @@ export class TranscriptProjector {
 			if (typeof raw !== "object" || raw === null) continue;
 			const entry = raw as { id?: unknown; type?: unknown; message?: unknown };
 			if (entry.type !== "message" || typeof entry.id !== "string") continue;
+			if ((entry.message as { role?: unknown } | null)?.role === "toolResult") {
+				this.#settleRestoredTool(entry.message as ToolResultLike);
+				continue;
+			}
 			const role = roleOf(entry.message);
 			if (role !== "user" && role !== "assistant") continue;
 			this.#items.push({ id: entry.id, role, text: messageText(entry.message) });
+			// Persisted tool calls live in the assistant message; their results arrive later as toolResult entries.
+			for (const call of toolCallsOf(entry.message)) {
+				this.#items.push({ id: `t-${call.id}`, role: "tool", text: `tool ${call.name}`, status: "running", name: call.name, args: call.arguments });
+			}
 		}
+		// A call with no persisted result was interrupted before the session was saved.
+		for (const item of this.#items) {
+			if (item.role === "tool" && item.status === "running") {
+				item.status = "error";
+				item.cancelled = true;
+			}
+		}
+	}
+
+	#settleRestoredTool(result: ToolResultLike): void {
+		const item = this.#items.find((i) => i.id === `t-${result.toolCallId}`);
+		if (!item || item.status !== "running") return;
+		const details = result.details as { exit_code?: unknown; duration_ms?: unknown } | undefined;
+		item.exit = typeof details?.exit_code === "number" && details.exit_code !== 0 ? details.exit_code : undefined;
+		item.status = result.isError || item.exit !== undefined ? "error" : "ok";
+		item.took = typeof details?.duration_ms === "number" ? details.duration_ms : undefined;
+		const text = messageText(result);
+		item.output = item.name?.toLowerCase() === "bash" && !result.isError ? extractBashDisplayText(text) : resultText(text);
+		item.text = `tool ${item.name ?? "tool"} ${item.status}`;
 	}
 
 	apply(event: PiEventLike): boolean {
@@ -322,7 +350,7 @@ export class TranscriptProjector {
 			case "agent_end": {
 				let changed = false;
 				for (const item of this.#items) {
-				if (item.role !== "tool" || item.name?.toLowerCase() !== "bash" || item.status !== "running") continue;
+				if (item.role !== "tool" || item.status !== "running") continue;
 					// Pi's aborted turn can omit tool_execution_end; never leave a live spinner.
 					item.cancelled = true;
 					item.took = item.startedAt ? Date.now() - item.startedAt : undefined;
@@ -343,9 +371,15 @@ export class TranscriptProjector {
 
 	nodes(outputExpanded = false): TspNode[] {
 		const out: TspNode[] = [];
-		for (const item of this.#items) {
-			if (item.role === "tool") out.push(toolRow(item, outputExpanded));
-			else out.push(...projectTranscript([{ id: item.id, role: item.role, text: item.text }]));
+		let goal = "";
+		for (const segment of segmentTranscript(this.#items)) {
+			if (segment.kind === "tools") {
+				out.push(toolGroupNode(segment.items, goal, outputExpanded));
+				continue;
+			}
+			const { item } = segment;
+			if (item.role === "user") goal = item.text;
+			out.push(...projectTranscript([{ id: item.id, role: item.role, text: item.text }]));
 		}
 		return out;
 	}
@@ -355,6 +389,42 @@ function toolRow(item: Item, outputExpanded: boolean): TspNode {
 	const tool = toolNode(item, outputExpanded);
 	const previews = artifactNodes(item.id, item.artifacts ?? []);
 	return previews.length === 0 ? tool : { id: `${item.id}-group`, k: "col", p: { role: "tern.tool-group", gap: "none" }, c: [tool, ...previews] };
+}
+
+interface ToolResultLike {
+	toolCallId: string;
+	isError: boolean;
+	content?: unknown;
+	details?: unknown;
+}
+
+function toolCallsOf(message: unknown): Array<{ id: string; name: string; arguments: unknown }> {
+	const content = (message as { content?: unknown } | null)?.content;
+	if (!Array.isArray(content)) return [];
+	return content.filter((part): part is { type: "toolCall"; id: string; name: string; arguments: unknown } => typeof part === "object" && part !== null && (part as { type?: unknown }).type === "toolCall" && typeof (part as { id?: unknown }).id === "string" && typeof (part as { name?: unknown }).name === "string");
+}
+
+// Live: one line with the running count. Done: one collapsed card; its steps sit behind the fold.
+function toolGroupNode(items: Item[], goal: string, outputExpanded: boolean): TspNode {
+	const id = `g-${items[0]?.id ?? "empty"}`;
+	const summary = summarizeToolGroup(items);
+	const steps = items.length === 1 ? "1 step" : `${items.length} steps`;
+	if (summary.status === "running") {
+		return { id, k: "text", p: { role: "tern.work-live", tone: "pending", text: `${goal || "Working"} · ${summary.active} running` } };
+	}
+	const label = summary.status === "done" ? "Done" : summary.status === "failed" ? "Failed" : "Interrupted";
+	const status = summary.status === "done" ? "done" : summary.status === "failed" ? "error" : "cancelled";
+	return {
+		id, k: "tool",
+		p: {
+			role: "tern.work", key: id, name: "work", title: label, status,
+			...(goal ? { target: goal, targetKind: "text" } : {}),
+			frame: "card", collapsible: true, collapsed: true, meta: [steps],
+			...(summary.durationMs !== undefined ? { took: summary.durationMs } : {}),
+			...(summary.status === "interrupted" ? { note: "interrupted" } : {}),
+		},
+		c: items.map((item) => toolRow(item, outputExpanded)),
+	};
 }
 
 function toolNode(item: Item, outputExpanded: boolean): TspNode {
@@ -373,6 +443,7 @@ function toolNode(item: Item, outputExpanded: boolean): TspNode {
 			collapsible: true,
 			collapsed: status !== "running" && !outputExpanded,
 			...(target !== undefined ? { target, targetKind } : {}),
+			...(status === "running" && item.startedAt !== undefined ? { age: Date.now() - item.startedAt } : item.took !== undefined ? { took: item.took } : {}),
 		},
 	};
 	if (item.output) node.c = [{ id: `${item.id}-out`, k: "text", p: { text: item.output } }];

@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { PiTernBridge, TranscriptProjector, type PiEventLike, type PiSessionLike } from "../../lib/tern/bridge.ts";
-import { ESC, ST, parseTspMessages, type TspMessage } from "../../lib/tern/tsp.ts";
+import { ESC, ST, parseTspMessages, type TspMessage, type TspNode } from "../../lib/tern/tsp.ts";
+
+// Tool steps inside a summary (tern.work) or live (tern.work-live) group, in order.
+const steps = (nodes: TspNode[]): TspNode[] => nodes.flatMap((n) => (n.p?.role === "tern.work" || n.p?.role === "tern.work-live" ? (n.c ?? []).filter((c) => c.k === "tool") : [n]));
 
 function fakeSession() {
 	const listeners = new Set<(e: PiEventLike) => void>();
@@ -286,7 +289,8 @@ describe("bridge rendering and draft ownership", () => {
 	it("uses OMP's optional Bash name in the verb and description as intent", () => {
 		const p = new TranscriptProjector();
 		p.apply({ type: "tool_execution_start", toolCallId: "named", toolName: "bash", args: { name: "Tests", description: "Run focused checks", command: "npm test" } });
-		expect(p.nodes()[0]?.p).toMatchObject({ title: "Bash · Tests", target: "Run focused checks", targetKind: "text", command: "npm test" });
+		p.apply({ type: "tool_execution_end", toolCallId: "named", toolName: "bash", result: { content: [{ type: "text", text: "ok" }], details: { exit_code: 0 } }, isError: false });
+		expect(steps(p.nodes())[0]?.p).toMatchObject({ title: "Bash · Tests", target: "Run focused checks", targetKind: "text", command: "npm test" });
 	});
 
 	it("renders live bash output before completion and replaces it with human-readable final output", () => {
@@ -297,13 +301,10 @@ describe("bridge rendering and draft ownership", () => {
 		fake.session.emit({ type: "tool_execution_start", toolCallId: "live", toolName: "bash", args: { command: "printf first; sleep 1; printf second" } });
 		fake.session.emit({ type: "tool_execution_update", toolCallId: "live", partialResult: { content: [{ type: "text", text: "first" }] } });
 		const during = out.writes.join("");
-		expect(during).toContain('"k":"ansi"');
-		expect(during).toContain('"text":"first"');
-		expect(during).toContain('"status":"running"');
-		expect(during).toContain('"follow":true');
-		expect(during).toContain('"preview":{"lines":10}');
+		expect(during).toContain("Working · 1 running");
+		expect(during).not.toContain('"k":"ansi"');
+		expect(during).not.toContain("printf first");
 		fake.session.emit({ type: "tool_execution_update", toolCallId: "live", partialResult: { content: [{ type: "text", text: "firstsecond" }] } });
-		expect(JSON.stringify(lastFrame(out.writes))).toContain('["text","t-live-out","append","second"]');
 		fake.session.emit({ type: "tool_execution_end", toolCallId: "live", toolName: "bash", result: { content: [{ type: "text", text: '<result exit_code="0"><stdout><![CDATA[firstsecond]]></stdout><stderr><![CDATA[]]></stderr></result>' }], details: { duration_ms: 1000 } }, isError: false });
 		expect(bridge.items[0]).toMatchObject({ output: "firstsecond", status: "ok", took: 1000 });
 		expect(bridge.items[0]?.output).not.toContain("<result");
@@ -314,28 +315,28 @@ describe("bridge rendering and draft ownership", () => {
 		p.apply({ type: "tool_execution_start", toolCallId: "failed", toolName: "bash", args: { command: "exit 7", description: "Check status" } });
 		p.apply({ type: "tool_execution_update", toolCallId: "failed", partialResult: { content: [{ type: "text", text: "before failure" }] } });
 		p.apply({ type: "tool_execution_end", toolCallId: "failed", toolName: "bash", result: { content: [{ type: "text", text: "Error executing bash: Command exited with code 7" }], details: { exit_code: 7, duration_ms: 50 } }, isError: true });
-		const failed = p.nodes()[0]!;
+		const failed = steps(p.nodes())[0]!;
 		expect(failed.p).toMatchObject({ status: "error", exit: 7, title: "Bash", target: "Check status" });
 		expect(failed.c?.[0]?.c?.[1]).toMatchObject({ k: "ansi", p: { text: "before failure", follow: true } });
 		expect(failed.c?.[0]?.c?.[2]?.c?.[0]?.p).toMatchObject({ spans: [{ t: "exit 7" }] });
 		p.apply({ type: "tool_execution_start", toolCallId: "cancelled", toolName: "bash", args: { command: "sleep 10" } });
 		p.apply({ type: "agent_end" });
-		expect(p.nodes()[1]?.p).toMatchObject({ status: "cancelled", note: "cancelled" });
+		expect(steps(p.nodes())[1]?.p).toMatchObject({ status: "cancelled", note: "cancelled" });
 		expect(p.apply({ type: "tool_execution_update", toolCallId: "cancelled", partialResult: "late" })).toBe(false);
 		expect(p.apply({ type: "tool_execution_end", toolCallId: "cancelled", result: "late", isError: true })).toBe(false);
-		expect(p.nodes()[1]?.p).toMatchObject({ status: "cancelled" });
+		expect(steps(p.nodes())[1]?.p).toMatchObject({ status: "cancelled" });
 		expect(p.apply({ type: "tool_execution_start", toolCallId: "cancelled", toolName: "bash", args: {} })).toBe(false);
-		expect(p.nodes()).toHaveLength(2);
+		expect(steps(p.nodes())).toHaveLength(2);
 	});
 
 	it("recognizes thrown Bash failures without details and distinguishes timeout", () => {
 		const p = new TranscriptProjector();
 		p.apply({ type: "tool_execution_start", toolCallId: "err", toolName: "bash", args: { command: "exit 9" } });
 		p.apply({ type: "tool_execution_end", toolCallId: "err", toolName: "bash", result: { content: [{ type: "text", text: "Error executing bash: Command exited with code 9: exit status 9" }] }, isError: true });
-		expect(p.nodes()[0]?.p).toMatchObject({ status: "error", exit: 9 });
+		expect(steps(p.nodes())[0]?.p).toMatchObject({ status: "error", exit: 9 });
 		p.apply({ type: "tool_execution_start", toolCallId: "timeout", toolName: "bash", args: { command: "wait" } });
 		p.apply({ type: "tool_execution_end", toolCallId: "timeout", toolName: "bash", result: { content: [{ type: "text", text: "Error executing bash: command timed out after 60s (exit_code=-1)" }] }, isError: true });
-		expect(p.nodes()[1]?.p).toMatchObject({ status: "error", note: "timed out", tone: "warning" });
+		expect(steps(p.nodes())[1]?.p).toMatchObject({ status: "error", note: "timed out", tone: "warning" });
 	});
 
 	it("retains streamed ANSI colors when the final model envelope strips them", () => {
@@ -343,7 +344,7 @@ describe("bridge rendering and draft ownership", () => {
 		p.apply({ type: "tool_execution_start", toolCallId: "color", toolName: "bash", args: { command: "printf red" } });
 		p.apply({ type: "tool_execution_update", toolCallId: "color", partialResult: { content: [{ type: "text", text: "\x1b[31mred\x1b[0m" }] } });
 		p.apply({ type: "tool_execution_end", toolCallId: "color", result: { content: [{ type: "text", text: '<result exit_code="0"><stdout><![CDATA[red]]></stdout><stderr><![CDATA[]]></stderr></result>' }] }, isError: false });
-		expect(p.nodes()[0]?.c?.[0]?.c?.[1]?.p?.text).toBe("\x1b[31mred\x1b[0m");
+		expect(steps(p.nodes())[0]?.c?.[0]?.c?.[1]?.p?.text).toBe("\x1b[31mred\x1b[0m");
 	});
 
 	it("keeps the observed interleaving instead of replacing it with channel-grouped XML", () => {
@@ -351,7 +352,7 @@ describe("bridge rendering and draft ownership", () => {
 		p.apply({ type: "tool_execution_start", toolCallId: "interleaved", toolName: "bash", args: { command: "print" } });
 		p.apply({ type: "tool_execution_update", toolCallId: "interleaved", partialResult: { content: [{ type: "text", text: "out-1 err-2 out-3" }] } });
 		p.apply({ type: "tool_execution_end", toolCallId: "interleaved", result: { content: [{ type: "text", text: '<result exit_code="0"><stdout><![CDATA[out-1 out-3]]></stdout><stderr><![CDATA[err-2]]></stderr></result>' }] }, isError: false });
-		expect(p.nodes()[0]?.c?.[0]?.c?.[1]?.p?.text).toBe("out-1 err-2 out-3");
+		expect(steps(p.nodes())[0]?.c?.[0]?.c?.[1]?.p?.text).toBe("out-1 err-2 out-3");
 	});
 
 	it("keeps the draft in the bridge and clears it on submit", async () => {
