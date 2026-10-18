@@ -1,0 +1,137 @@
+{
+ "pair": "pair-01",
+ "t1": {
+  "run": "/Users/swarm/Work/Clover/trebol/artifacts/memory-pilot/runs/pair-01-f35d6a0/t1",
+  "exit": 0,
+  "seconds": 32.56,
+  "toolCalls": 6,
+  "errors": 0,
+  "byTool": {
+   "bash": 3,
+   "TaskManage": 2,
+   "memory_history": 1
+  },
+  "distinctFilesRead": 1,
+  "repeatReads": 0,
+  "asks": 0,
+  "bootstrapCalled": false,
+  "surfaced": [],
+  "modelCalls": 7,
+  "contextChars": [
+   189290,
+   193305,
+   201404,
+   208830,
+   215789,
+   218691,
+   23239
+  ],
+  "final": "`tool:Name#n` resolution in TaskManage is implemented in `packages/tools/taskmanage/src/task-manage.ts`. No files were modified, and the task is completed with answers to all three questions.\n\n- **Which entries count:** only session entries with `type: \"message\"` whose `message.role` is `\"toolResult\"` and whose `toolName` is a string (`task-manage.ts#L1069-L1076`).\n- **What `n` indexes:** `n` is a 1-based, chronological index counted per tool name, not globally across tools. Zero or out-of-range indices fail. Name matching is exact and case-sensitive (`task-manage.ts#L1077-L1090`).\n- **Which b"
+ },
+ "t2": [
+  {
+   "arm": "A",
+   "rep": 1,
+   "run": "/Users/swarm/Work/Clover/trebol/artifacts/memory-pilot/runs/pair-01-f35d6a0/A-1",
+   "exit": 0,
+   "seconds": 30.451,
+   "toolCalls": 2,
+   "errors": 0,
+   "byTool": {
+    "bash": 2
+   },
+   "distinctFilesRead": 1,
+   "repeatReads": 0,
+   "asks": 0,
+   "bootstrapCalled": false,
+   "surfaced": [],
+   "modelCalls": 5,
+   "contextChars": [
+    189202,
+    198633,
+    206443,
+    212531,
+    17554
+   ],
+   "final": "The explanation stands: the reference `tool:mcp__Bash#3` fails because no tool result with that exact name exists at index 3. The diagram below shows the resolver's decision path, as read from `.pi/lib/state/answer-evidence.ts:51-55` and `packages/tools/taskmanage/src/task-manage.ts:1127-1132`. I did not inspect the session transcript, so the branch outcome for this specific session is not confirmed.\n\n```mermaid\nflowchart TD\n    A[\"Completion evidence: tool:NAME or tool:NAME#n\"] --> B{\"Matches ^tool:([A-Za-z0-9_-]+)(#\\\\d+)?$ ?\"}\n    B -- no --> C[\"Not a tool ref; handled by file/span resolver\""
+  },
+  {
+   "arm": "B",
+   "rep": 1,
+   "run": "/Users/swarm/Work/Clover/trebol/artifacts/memory-pilot/runs/pair-01-f35d6a0/B-1",
+   "exit": 0,
+   "seconds": 28.558,
+   "toolCalls": 3,
+   "errors": 0,
+   "byTool": {
+    "bash": 3
+   },
+   "distinctFilesRead": 1,
+   "repeatReads": 0,
+   "asks": 0,
+   "bootstrapCalled": false,
+   "surfaced": [],
+   "modelCalls": 5,
+   "contextChars": [
+    189202,
+    206929,
+    213693,
+    219261,
+    20604
+   ],
+   "final": "The rejection comes from the `tool:` branch of evidence resolution. The name is matched exactly, then the index is checked against that name's results on the current branch.\n\n```mermaid\nflowchart TD\n    A[\"Completion evidence: tool:mcp__Bash#3\"] --> B{\"Matches /^tool:([A-Za-z0-9_-]+)(#\\\\d+)?$/i?\"}\n    B -- \"no\" --> X[\"Rejected: invalid_reference_or_missing_workspace\"]\n    B -- \"yes\" --> C[\"Collect toolResult names on the current branch\"]\n    C --> D{\"Exact, case-sensitive name match for mcp__Bash?\"}\n    D -- \"no (registered shell tool is bash)\" --> E[\"Rejected: tool_result_unavailable, with av"
+  },
+  {
+   "arm": "A",
+   "rep": 2,
+   "run": "/Users/swarm/Work/Clover/trebol/artifacts/memory-pilot/runs/pair-01-f35d6a0/A-2",
+   "exit": 0,
+   "seconds": 34.913,
+   "toolCalls": 2,
+   "errors": 0,
+   "byTool": {
+    "bash": 2
+   },
+   "distinctFilesRead": 1,
+   "repeatReads": 0,
+   "asks": 0,
+   "bootstrapCalled": false,
+   "surfaced": [],
+   "modelCalls": 5,
+   "contextChars": [
+    189202,
+    192727,
+    205121,
+    211786,
+    12491
+   ],
+   "final": "The previous explanation is unchanged. This diagram adds the decision path for the rejected reference. It follows `resolveToolEvidence` in `packages/tools/taskmanage/src/task-manage.ts:1076-1088`, which is called from the completion path at `task-manage.ts:700`.\n\n```mermaid\nflowchart TD\n    A[\"Completion cites tool:NAME or tool:NAME#n\"] --> B{\"Matches tool pattern and session manager exists?\"}\n    B -- no --> X[\"Reject: tool_result_unavailable\"]\n    B -- yes --> C[\"names = toolName of every toolResult on current branch\"]\n    C --> D{\"NAME exactly in names?\"}\n    D -- yes --> G\n    D -- no --> "
+  },
+  {
+   "arm": "B",
+   "rep": 2,
+   "run": "/Users/swarm/Work/Clover/trebol/artifacts/memory-pilot/runs/pair-01-f35d6a0/B-2",
+   "exit": 0,
+   "seconds": 29.315,
+   "toolCalls": 2,
+   "errors": 0,
+   "byTool": {
+    "bash": 2
+   },
+   "distinctFilesRead": 1,
+   "repeatReads": 0,
+   "asks": 0,
+   "bootstrapCalled": false,
+   "surfaced": [],
+   "modelCalls": 5,
+   "contextChars": [
+    189202,
+    199230,
+    208187,
+    213068,
+    17429
+   ],
+   "final": "The rejection comes from the session-result lookup, not from a missing file. The diagram below shows the path I read in the source. It does not show the actual session contents, which I could not inspect.\n\n```mermaid\nflowchart TD\n    A[\"Completion evidence: tool:mcp__Bash#3\"] --> B{\"Starts with tool: ?\"}\n    B -- \"no\" --> F[\"File, heading or line check\"]\n    B -- \"yes\" --> C[\"resolveSessionEvidence\"]\n    C --> D{\"Regex matches name and optional #n?\"}\n    D -- \"no\" --> R[\"Reject: tool_result_unavailable\"]\n    D -- \"yes\" --> E[\"Collect toolName from toolResult messages on current branch\"]\n    E "
+  }
+ ]
+}

@@ -1,0 +1,525 @@
+event: message_start
+data: {"type":"message_start","message":{"model":"claude-haiku-5-5","id":"msg_011Cg9zvZP9Z1YGnMygNgJAH","type":"message","role":"assistant","content":[],"container":null,"stop_reason":null,"stop_sequence":null,"stop_details":null,"usage":{"input_tokens":2,"cache_creation_input_tokens":4749,"cache_read_input_tokens":64213,"cache_creation":{"ephemeral_5m_input_tokens":4749,"ephemeral_1h_input_tokens":0},"output_tokens":3,"service_tier":"standard","inference_geo":"global","speed":"standard"},"diagnostics":null,"context_management":null}    }
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}            }
+
+event: ping
+data: {"type": "ping"}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":""}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"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"}  }
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0           }
+
+event: content_block_start
+data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"**Cause:"}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"** `"}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"tool:mcp__"}           }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Bash#3` is not a"}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" name and"}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" index that ex"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ists on the current session bran"}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ch. The resolver found"}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" no"}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" mat"}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ching result"}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":","}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" so it retur"}       }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ned the"}           }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" gener"}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ic `tool_result_un"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"available`.\n\nThe"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" code"}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" path"}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":":\n\n- `pack"}         }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ages/tools/taskm"}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"anage/src/task-man"}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"age.ts:700` s"}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ends any"}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" `tool:` reference to"}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" `resolveToolEv"}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"idence`. The"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" error text"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" is set"}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" there"}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":", with"}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" the hint"}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" `"}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"use"}         }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" an exact registered tool name"}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" and a current-branch result index"}           }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"`.\n- `packages/"}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"tools/taskmanage"}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"/src/task-manage."}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ts:1078-"}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"1088"}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"` parses `tool:"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"<name"}          }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":">#"}          }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"<n>`"}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" with `[A-Za-"}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"z0-9_-]+"}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"`,"}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" so `mcp__B"}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ash` par"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ses as the"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" name. It then counts `"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"to"}           }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"olResult` messages whose"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" `toolName` equ"}         }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"als that"}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" string"}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" exactly (case"}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"-sensitive). `#"}         }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"n` is a"}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" 1-based index into that fil"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"tered list, and it fails"}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" if `"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"n` ex"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ceeds the count.\n-"}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" `.pi/lib/"}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"state/answer-evidence"}         }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":".ts:51-55"}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"` is the same r"}         }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ule for"}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" the"}       }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" ev"}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"idence-an"}       }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"choring path, and fails"}          }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" with the same reason.\n\nSo"}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" the"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" r"}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ejection means"}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" one"}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" of these"} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" is"}           }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" true on"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" the current branch:\n\n1."}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" No"}       }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" t"}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ool result has `toolName`"}          }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" exactly `mcp__"}           }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Bash`. The sh"} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ell tool in"}         }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" this session is registered as `b"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ash` (it"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" appears in the effective capab"}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ilities list)."}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" `"}         }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"mcp__Bash`"}       }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" is not a Pi-"}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Swarm tool name; `"} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"mcp__` names"}         }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" are for"}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" MCP serv"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ers.\n2. The name"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" exists, but there are few"}          }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"er than three"}          }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" results"}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" with"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" that ex"}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"act name on"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" this branch."}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Failed results and"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" results"}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" from other branches don"} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"'t count.\n\n**"} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Correct form:** use"} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" the ex"}         }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"act registered name pl"}           }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"us a"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" 1-based index among"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" that"}          }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" t"} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ool's results on the current"}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" branch,"}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" for"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" example `tool:bash#"}         }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"3`"}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":". The rejection text l"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ists the names"}         }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" and"}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" counts that do"}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" exist ("}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"`available"}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":": tool:<name>#"}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"<count>`"}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":", from `sessionEv"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"idenceHints`"}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" at `"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"task-manage.ts:"}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"700`), so use one"}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" of those."}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"\n\nAlternatively, c"}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ite a work"}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"space file ("}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"`file."}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"md#He"}           }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ading` or `file#L"}           }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"x-Ly`) for"}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" the pro"}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"of."}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Files are preferred for det"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ail"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ed ev"}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"idence.\n\nI did not mod"}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ify any files. I did"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" not in"}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"spect the session trans"}         }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"cript, so I"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" can't say"}          }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" which of"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" the two caus"}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"es appl"}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ies here"}         }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":". The rejection's"}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" `"}       }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"available:` list will"}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" show"}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" which."}    }
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":1      }
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null,"stop_details":null,"container":null},"usage":{"input_tokens":2,"cache_creation_input_tokens":4749,"cache_read_input_tokens":64213,"output_tokens":1503,"output_tokens_details":{"thinking_tokens":781}},"context_management":{"applied_edits":[]}  }
+
+event: message_stop
+data: {"type":"message_stop"               }
+
