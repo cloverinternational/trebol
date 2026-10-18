@@ -125,13 +125,16 @@ function installTurnCounter(pi: any) {
 }
 export function hookTurnGateOpen(ctx: any): boolean { return (turnCounts.get(turnSessionKey(ctx)) ?? 0) > HOOK_WARMUP_TURNS; }
 
-export function registerHook(pi: any, group: HookGroup, event: string, handler: any) {
+/** `warmup: false` is for composition hooks (the base system prompt), not
+ * gates: Pi emits before_agent_start once per user prompt, so a dormant prompt
+ * hook leaves the whole first request on Pi's base prompt. */
+export function registerHook(pi: any, group: HookGroup, event: string, handler: any, options: { warmup?: boolean } = {}) {
   installTurnCounter(pi);
   installHookCorrection(pi);
   normalizeState();
   shared.state.counts.registered++;
   const callback = async (payload: any, ctx: any) => {
-    if (!hookTurnGateOpen(ctx)) return;
+    if (options.warmup !== false && !hookTurnGateOpen(ctx)) return;
     if (!isHookEnabled(group)) { recordHook(group, event, payload, "skipped", "hook group disabled"); persistHookState(pi); return; }
     try {
       const result = await handler(payload, ctx);

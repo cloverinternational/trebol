@@ -507,7 +507,7 @@ export function registerSwarmPrompt(pi: PromptExtensionAPI): void {
       return { ...(result ?? {}), message: { customType: "pi-swarm-footer-explanation-guidance", content: FOOTER_EXPLANATION_PROMPT, display: false } };
     }
     return result;
-  });
+   }, { warmup: false });
 }
 function selectedBaseIsForge(cwd: string): boolean { return resolveActiveSystemPrompt(cwd).kind === "forge" && cliIsolation().systemPrompt === undefined; }
 export default function swarmPromptExtension(pi: PromptExtensionAPI): void { registerSwarmPrompt(pi); }

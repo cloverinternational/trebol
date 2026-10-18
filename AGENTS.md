@@ -741,7 +741,9 @@ stays silent to avoid duplicate hooks. Explicit hook-off policy remains honored.
 blocked write -> TaskManage create -> successful write in a temporary workspace.
 `memory_history` `search`/`get` are exempt from this gate (`isReadOnlyMemoryCall`
 in `.pi/lib/runtime/swarm-toolclass.ts`); its write operations stay gated. All
-hooks are dormant for the first 5 turns (`HOOK_WARMUP_TURNS`), so gate smokes
+hooks are dormant for the first 5 turns (`HOOK_WARMUP_TURNS`), except composition
+hooks registered with `{ warmup: false }` (swarm-prompt, so the Forge prompt reaches the first
+request; e2e `node tools/e2e/forge-prompt-first-turn.mjs`), so gate smokes
 must pad warm-up turns: `node tools/e2e/memory-gate.mjs` does, while the
 task-enforcement smoke above does not and currently passes its first write.
 Reviewed, citable project facts promoted from memory candidates live in
