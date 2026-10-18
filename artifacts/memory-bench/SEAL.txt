@@ -1,0 +1,6 @@
+1537ee60dc9139b892a7ab9f7ba24e92b6d73e40bd05c6e48424abb7a61aeb4d  artifacts/memory-bench/PREREG.md
+3aa71272884ae85528e0088a771f9b9b168aa2a9ccc3f0cd1a60a32d1e4be034  artifacts/memory-bench/qrels.json
+9d205c46b78a63aacaa8cb0f9284933fe9d0747cca0102e92f438bf1f184ce02  artifacts/memory-bench/records-snapshot.jsonl
+e0fb2c129b80ffdbc469cc384be9ab5c008bb0acccb290e0d3a68025b452e132  tools/bench/retrieval-bench.mjs
+53f01766443c86d953c99f1c5d0e9506db7338e13ccb574f5f453548ea4fb3ae  tools/bench/mine-retrieval-qrels.py
+f0e6bb63e8624caf719b695b3cdc091003c215210c6c1b4f3e0e5406fb61235e  .pi/lib/state/fact-index.ts
