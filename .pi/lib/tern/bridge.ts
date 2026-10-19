@@ -463,10 +463,19 @@ export class TranscriptProjector {
 				if (isTurnBoundary(s.item)) break;
 			}
 		}
+		// What the running turn is saying right now: the last line of its newest assistant text, streamed.
+		let tail = "";
+		if (openGroup >= 0) {
+			const said = this.#items.slice(this.#turnStart).findLast((item) => item.role === "assistant" && item.text.trim() !== "");
+			tail = said ? (said.text.trim().split("\n").map((line) => line.trim()).filter(Boolean).at(-1) ?? "").replace(/\s+/g, " ") : "";
+		}
 		let goal = "";
 		segments.forEach((segment, i) => {
 			if (segment.kind === "tools") {
 				out.push(...[toolGroupNode(segment.items, goal, outputExpanded, i === openGroup)].flat());
+				if (i === openGroup && tail && !outputExpanded) {
+					out.push({ id: `g-${segment.items[0]?.id ?? "empty"}-tail`, k: "text", p: { role: "tern.work-tail", tone: "muted", wrap: "none", truncate: "end", text: tail } });
+				}
 				return;
 			}
 			const { item } = segment;
@@ -511,12 +520,28 @@ function toolGroupNode(items: Item[], goal: string, outputExpanded: boolean, tur
 	// (a changed id is a remove plus insert in Tern, which flickers).
 	const id = `g-${items[0]?.id ?? "empty"}`;
 	const summary = summarizeToolGroup(tools);
+	const children = (): TspNode[] => items.flatMap((item): TspNode[] => item.role === "tool" ? [toolRow(item, outputExpanded)]
+		: item.text.trim() ? [{ id: `${item.id}-note`, k: "md", p: { role: "tern.work-note", text: item.text } }] : []);
+	const steps = tools.length === 1 ? "1 step" : `${tools.length} steps`;
 	if (summary.status === "running" || turnOpen) {
-		return { id, k: "text", p: { role: "tern.work-live", tone: "pending", wrap: "none", truncate: "end", text: liveLineText(goal, summary.active) } };
+		const line = liveLineText(goal, summary.active);
+		// ctrl+o while running: the same work as an open card, its steps and narration streaming in place.
+		// It keeps the group's id and kind when it settles, so only the title and status change.
+		if (outputExpanded) {
+			return {
+				id, k: "tool",
+				p: {
+					role: "tern.work-live", key: id, name: "work", title: line.split(" · ")[0], status: "running", text: line,
+					...(goal ? { target: goal, targetKind: "text" } : {}),
+					frame: "card", collapsible: true, collapsed: false, meta: [steps],
+				},
+				c: children(),
+			};
+		}
+		return { id, k: "text", p: { role: "tern.work-live", tone: "pending", wrap: "none", truncate: "end", text: line } };
 	}
 	// Narration whose tool calls never started (the turn ended first) is just what the agent said.
 	if (tools.length === 0) return items.filter((item) => item.text.trim()).flatMap((item) => projectTranscript([{ id: item.id, role: "assistant", text: item.text }]));
-	const steps = tools.length === 1 ? "1 step" : `${tools.length} steps`;
 	const status = summary.status === "done" ? "done" : summary.status === "failed" ? "error" : "cancelled";
 	return {
 		id, k: "tool",
@@ -527,8 +552,7 @@ function toolGroupNode(items: Item[], goal: string, outputExpanded: boolean, tur
 			meta: summary.failedSteps > 0 ? [steps, `${summary.failedSteps} failed`] : [steps],
 		},
 		// Steps in order, with the narration written between them; all behind the fold.
-		c: items.flatMap((item): TspNode[] => item.role === "tool" ? [toolRow(item, outputExpanded)]
-			: item.text.trim() ? [{ id: `${item.id}-note`, k: "md", p: { role: "tern.work-note", text: item.text } }] : []),
+		c: children(),
 	};
 }
 

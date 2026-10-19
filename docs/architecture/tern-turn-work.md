@@ -69,8 +69,14 @@ Each piece of work is announced by exactly one indicator while it runs.
 While a run is busy, an assistant message that is still streaming stays with the turn's work (under the live
 line) until `message_end`, because it may yet call a tool. On `message_end` it becomes narration inside the card
 if it called tools, otherwise the turn's top-level reply. Showing it as a reply first and folding it into the
-card at `toolcall_start` made each narration sentence appear and vanish. A plain reply therefore appears whole
-when its message ends; the live line covers it while it streams. A turn's work node is keyed by its first member,
+card at `toolcall_start` made each narration sentence appear and vanish. What the agent is writing stays visible while it
+streams: under the live line, a muted `text` `role:"tern.work-tail"` (`wrap:"none"`, `truncate:"end"`) shows the
+last line of the turn's newest assistant text and updates with every delta; it is removed when the turn settles.
+
+ctrl+o while the turn runs turns the live line into an open running card with the same id (`k:"tool"`,
+`role:"tern.work-live"`, `status:"running"`, `collapsed:false`, meta `N steps`). Its children are the steps and
+narration so far, streaming in place, and there is no separate tail. When the turn settles, the same node becomes
+the `Done`/`Failed`/`Interrupted` card, so expanding never re-creates a row. ctrl+o again folds it back to the line. A turn's work node is keyed by its first member,
 so its id does not change when the first tool starts.
 
 ## UI trace (dogfooding)

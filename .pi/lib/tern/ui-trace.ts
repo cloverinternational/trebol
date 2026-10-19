@@ -18,7 +18,7 @@ export function traceRows(nodes: readonly TspNode[]): TraceRow[] {
 	return nodes.filter((n) => !String(n.id).startsWith("startup")).map((n) => {
 		const p = n.p ?? {};
 		const role = String(p.role ?? n.k);
-		const state = role === "tern.work" ? `${String(p.title)} ${((p.meta as string[] | undefined) ?? []).join(" · ")}` : String(p.status ?? "");
+		const state = role === "tern.work-live" ? (n.k === "tool" ? "open" : "line") : role === "tern.work" ? `${String(p.title)} ${((p.meta as string[] | undefined) ?? []).join(" · ")}` : String(p.status ?? "");
 		const text = String(p.text ?? p.target ?? n.c?.[0]?.p?.text ?? "");
 		return [String(n.id), role, state, cut(text)];
 	});
@@ -87,9 +87,9 @@ export function findFlicker(frames: readonly TraceFrame[]): Flicker[] {
 		const cur = new Map(f.rows.map((r) => [r[0], r]));
 		if (cur.size === 0 || f.trigger === "session_tree" || f.trigger === "rebind") { history.clear(); gone.clear(); prev = cur; continue; }
 		for (const [id, row] of prev) {
-			// A live line handing over to the turn's reply is its one intended exit; it flickers only when other
+			// A live line (or its streaming tail) handing over to the turn's reply is its one intended exit; it flickers only when other
 			// work replaces it (a new id for the same work) while the turn still runs.
-			const replaced = row[1] !== "tern.work-live" || f.rows.some((r) => !prev.has(r[0]) && (r[1] === "tern.work-live" || r[1] === "tern.work"));
+			const replaced = (row[1] !== "tern.work-live" && row[1] !== "tern.work-tail") || f.rows.some((r) => !prev.has(r[0]) && (r[1] === "tern.work-live" || r[1] === "tern.work"));
 			if (!cur.has(id) && f.busy && replaced) { out.push({ kind: "vanished", id, role: row[1], at: f.at, detail: `${row[1]} "${row[3]}" after ${f.trigger}` }); gone.add(id); }
 		}
 		for (const [id, row] of cur) {

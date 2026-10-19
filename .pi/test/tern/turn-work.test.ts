@@ -332,7 +332,8 @@ describe("turn-work properties", () => {
 	});
 
 	it("nothing written mid-turn spills outside its work, live or restored, and Failed means the turn failed", () => {
-		const top = (nodes: readonly TspNode[]) => nodes.filter((n) => n.p?.role !== "tern.work" && n.p?.role !== "tern.work-live")
+		// The streaming tail under a running turn's line is part of its work, not a transcript row.
+		const top = (nodes: readonly TspNode[]) => nodes.filter((n) => n.p?.role !== "tern.work" && n.p?.role !== "tern.work-live" && n.p?.role !== "tern.work-tail")
 			.map((n) => `${String(n.p?.role ?? n.k)} ${String(n.c?.[0]?.p?.text ?? n.p?.text ?? "")}`);
 		let narrated = 0, failedTurns = 0, recovered = 0;
 		for (const seed of SEEDS) {
@@ -395,7 +396,7 @@ describe("turn line and running-work bar announce each piece of work once", () =
 });
 
 describe("expansion", () => {
-	it("ctrl+o (outputExpanded) unfolds settled summaries and their steps; a running turn stays one line", () => {
+	it("ctrl+o (outputExpanded) unfolds settled summaries and their steps, and opens a running turn in place", () => {
 		const { events } = corpus.find((c) => c.name.startsWith("2026-10-18T19-29"))!;
 		const p = new TranscriptProjector();
 		for (const e of events) p.apply(e);
@@ -410,6 +411,25 @@ describe("expansion", () => {
 		running.apply({ type: "agent_start" });
 		running.apply({ type: "message_start", message: { role: "user", content: [{ type: "text", text: "go" }] } });
 		running.apply({ type: "tool_execution_start", toolCallId: "a", toolName: "bash", args: { command: "x" } });
-		expect(running.nodes(true).filter((n) => n.p?.role === "tern.work-live").map((n) => [n.k, n.c])).toEqual([["text", undefined]]);
+		running.apply({ type: "message_start", message: { role: "assistant", content: [] } });
+		running.apply({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "Now checking the\nbuild log" } });
+		// Folded: one line plus the streaming tail (the last line written so far); no steps.
+		expect(running.nodes(false).slice(1).map((n) => [n.k, n.p?.role, n.p?.text, n.c])).toEqual([
+			["text", "tern.work-live", "1 running · go", undefined],
+			["text", "tern.work-tail", "build log", undefined],
+		]);
+		// Unfolded: the same id as an open running card with the step and the narration streaming inside; no tail.
+		const open2 = running.nodes(true).slice(1);
+		expect(open2.map((n) => [n.id, n.k, n.p?.role, n.p?.status, n.p?.collapsed])).toEqual([[running.nodes(false)[1]!.id, "tool", "tern.work-live", "running", false]]);
+		expect(open2[0]!.c?.map((c) => [c.k, c.p?.role ?? c.p?.name, c.p?.text ?? c.p?.status])).toEqual([["tool", "omp.tool.bash", "running"], ["md", "tern.work-note", "Now checking the\nbuild log"]]);
+		running.apply({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: " now" } });
+		expect(running.nodes(false).at(-1)?.p?.text).toBe("build log now");
+		// Settling keeps the id: the open card becomes the Done card.
+		running.apply({ type: "tool_execution_end", toolCallId: "a", toolName: "bash", result: { content: [] }, isError: false });
+		running.apply({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "Now checking the\nbuild log now" }], stopReason: "stop" } });
+		running.apply({ type: "agent_end" });
+		const settled = running.nodes(true).filter((n) => n.p?.role === "tern.work");
+		expect(settled.map((n) => [n.id, n.p?.title])).toEqual([[open2[0]!.id, "Done"]]);
+		expect(running.nodes(false).some((n) => n.p?.role === "tern.work-tail")).toBe(false);
 	});
 });
