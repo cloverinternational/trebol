@@ -27,6 +27,13 @@ describe("explicit Pi extension tool gating", () => {
     expect(gateActiveTools(["project_init", "unlisted_local"], environment, {})).toEqual(["project_init"]);
   });
 
+  it("keeps the tern tool on the model surface so agents can drive Tern browsers and panes", () => {
+    const environment = { interactive: false, remoteAsk: true, home: "/nonexistent", env: {} };
+    expect(swarmSurfaceFor(environment).has("tern")).toBe(true);
+    expect(swarmSurfaceFor(environment).has("tern_browser")).toBe(false);
+    expect(gateActiveTools(["tern"], environment, {})).toBeUndefined();
+  });
+
   it("always allows required policy tools and keeps other extras explicit", () => {
     expect(REQUIRED_PI_EXTENSION_TOOLS).toEqual(["change_context", "context_index", "context_remember", "context_reindex", "context_search", "context_outline", "context_read", "context_inspect", "context_delete"]);
     expect([
