@@ -12,13 +12,18 @@ describe("turn grouping (pure)", () => {
 		const items = [
 			{ role: "user" }, { role: "tool" }, { role: "tool" }, { role: "assistant" }, { role: "tool" }, { role: "user" }, { role: "tool" },
 		];
-		expect(segmentTranscript(items).map((s) => (s.kind === "tools" ? s.items.length : "msg"))).toEqual(["msg", 3, "msg", "msg", 1]);
+		expect(segmentTranscript(items).map((s) => (s.kind === "tools" ? s.items.length : "msg"))).toEqual(["msg", 4, "msg", 1]);
+		// Narration before the last tool call joins the work; the answer after it, and a custom notice that starts a turn, stay messages.
+		const withAnswer = [{ role: "user" }, { role: "assistant" }, { role: "tool" }, { role: "assistant" }, { role: "system", turnStart: true }, { role: "tool" }, { role: "assistant" }];
+		expect(segmentTranscript(withAnswer).map((s) => (s.kind === "tools" ? s.items.map((i) => i.role).join("+") : s.item.role))).toEqual(["user", "assistant+tool", "assistant", "system", "tool", "assistant"]);
 	});
 
 	it("reports running, done, failed and interrupted from step results only", () => {
 		expect(summarizeToolGroup([{ status: "running", startedAt: 0 }, { status: "ok", startedAt: 0, took: 5 }]).status).toBe("running");
-		expect(summarizeToolGroup([{ status: "ok", startedAt: 0, took: 5 }, { status: "ok", startedAt: 2, took: 10 }])).toEqual({ status: "done", active: 0, durationMs: 12 });
-		expect(summarizeToolGroup([{ status: "ok" }, { status: "error" }]).status).toBe("failed");
+		expect(summarizeToolGroup([{ status: "ok", startedAt: 0, took: 5 }, { status: "ok", startedAt: 2, took: 10 }])).toEqual({ status: "done", active: 0, failedSteps: 0, durationMs: 12 });
+		// A step error the agent continued from is not a failed turn.
+		expect(summarizeToolGroup([{ status: "ok" }, { status: "error" }])).toMatchObject({ status: "done", failedSteps: 1 });
+		expect(summarizeToolGroup([{ status: "ok", turnFailed: true }, { status: "error", turnFailed: true }]).status).toBe("failed");
 		expect(summarizeToolGroup([{ status: "error", cancelled: true }, { status: "ok" }]).status).toBe("interrupted");
 	});
 });
@@ -34,7 +39,7 @@ describe("turn grouping in the Tern transcript", () => {
 		expect(live.p?.role).toBe("tern.work-live");
 		expect(steps(p.nodes()).filter((n) => n.k === "tool")).toEqual([]);
 		expect(live.c).toBeUndefined();
-		expect(live.p).toMatchObject({ text: "fix login · 1 running" });
+		expect(live.p).toMatchObject({ text: "1 running · fix login", wrap: "none", truncate: "end" });
 	});
 
 	it("collapses a finished turn into one summary holding every step, in order, with the goal", () => {
@@ -43,7 +48,7 @@ describe("turn grouping in the Tern transcript", () => {
 		start(p, "a"); end(p, "a");
 		start(p, "b"); end(p, "b", true);
 		const [summary] = p.nodes().slice(1);
-		expect(summary?.p).toMatchObject({ role: "tern.work", title: "Failed", status: "error", target: "fix login", collapsed: true, collapsible: true, meta: ["2 steps"] });
+		expect(summary?.p).toMatchObject({ role: "tern.work", title: "Done", status: "done", target: "fix login", collapsed: true, collapsible: true, meta: ["2 steps", "1 failed"] });
 		expect(summary?.c?.map((c) => c.id)).toEqual(["t-a", "t-b"]);
 	});
 
@@ -56,7 +61,45 @@ describe("turn grouping in the Tern transcript", () => {
 		const nodes = p.nodes();
 		expect(nodes.filter((n) => n.p?.role === "tern.work" || n.p?.role === "tern.work-live").map((n) => n.p?.role)).toEqual(["tern.work", "tern.work-live"]);
 		expect(nodes.find((n) => n.p?.role === "tern.work")?.p?.target).toBe("first");
-		expect(nodes.find((n) => n.p?.role === "tern.work-live")?.p?.text).toBe("second · 1 running");
+		expect(nodes.find((n) => n.p?.role === "tern.work-live")?.p?.text).toBe("1 running · second");
+	});
+
+	it("an aborted turn reads Interrupted live and on restore, even when every step had finished", () => {
+		const user = { role: "user", content: [{ type: "text", text: "check" }] };
+		const call = { role: "assistant", content: [{ type: "toolCall", id: "a", name: "bash", arguments: {} }], stopReason: "toolUse" };
+		const result = { role: "toolResult", toolCallId: "a", toolName: "bash", isError: false, content: [{ type: "text", text: "ok" }], details: { exit_code: 0 } };
+		const aborted = { role: "assistant", content: [], stopReason: "aborted", errorMessage: "This operation was aborted" };
+		const live = new TranscriptProjector();
+		live.apply({ type: "agent_start" });
+		live.apply({ type: "message_start", message: user });
+		live.apply({ type: "message_start", message: call });
+		live.apply({ type: "message_end", message: call });
+		start(live, "a");
+		live.apply({ type: "tool_execution_end", toolCallId: "a", toolName: "bash", result, isError: false });
+		live.apply({ type: "message_start", message: aborted });
+		live.apply({ type: "message_end", message: aborted });
+		live.apply({ type: "agent_end" });
+		const restored = new TranscriptProjector();
+		restored.replaceFromSessionBranch([user, call, result, aborted].map((message, i) => ({ id: `e${i}`, type: "message", message })));
+		for (const p of [live, restored]) {
+			const card = p.nodes().find((n) => n.p?.role === "tern.work");
+			expect(card?.p).toMatchObject({ title: "Interrupted", status: "cancelled", meta: ["1 step"] });
+			expect(card?.c?.[0]?.p?.status).toBe("done");
+		}
+	});
+
+	it("an abort's 'context canceled' error is a cancelled step, a real failure in the same turn stays failed", () => {
+		const p = new TranscriptProjector();
+		p.apply({ type: "agent_start" });
+		p.apply({ type: "message_start", message: { role: "user", content: [{ type: "text", text: "go" }] } });
+		start(p, "real"); start(p, "cut");
+		p.apply({ type: "tool_execution_end", toolCallId: "real", toolName: "bash", result: { content: [{ type: "text", text: "Error executing bash: Command exited with code 2: x" }] }, isError: true });
+		p.apply({ type: "tool_execution_end", toolCallId: "cut", toolName: "bash", result: { content: [{ type: "text", text: "command execution error: context canceled" }] }, isError: true });
+		p.apply({ type: "message_end", message: { role: "assistant", content: [], stopReason: "error", errorMessage: "This operation was aborted" } });
+		p.apply({ type: "agent_end" });
+		const card = p.nodes().find((n) => n.p?.role === "tern.work");
+		expect(card?.p?.title).toBe("Interrupted");
+		expect(card?.c?.map((c) => c.p?.status)).toEqual(["error", "cancelled"]);
 	});
 
 	it("restores persisted tool calls and results, and marks unresolved calls interrupted", () => {

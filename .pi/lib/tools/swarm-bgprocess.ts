@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WAIT_DELAY_MS, decodeSignalExit, signalNote, stripANSI, type BashParams } from "./swarm-bash.ts";
-import { setRunningWork } from "../ui/running-work.ts";
+import { patchRunningWork, setRunningWork } from "../ui/running-work.ts";
 
 export type ProcessState = "running" | "completed" | "failed" | "cancelled";
 export interface BackgroundLine {
@@ -217,9 +217,14 @@ export class SwarmBackgroundProcessManager {
   private ownsSession(rec?: ProcessRecord): boolean { return rec?.owner ? rec.owner() : true; }
   requestBackground(): boolean {
     if (!this.foreground || this.foreground.rec.state !== "running") return false;
-    this.foreground.rec.backgrounded = true;
+    this.markBackgrounded(this.foreground.rec);
     this.foreground.detach();
     return true;
+  }
+  /** The tool call stops waiting: the work now belongs to the background-work views, not the turn. */
+  private markBackgrounded(rec: ProcessRecord): void {
+    rec.backgrounded = true;
+    if (this.ownsSession(rec)) patchRunningWork(rec.id, { foreground: false });
   }
   private emitDone(done: BackgroundDone): void { for (const listener of this.doneListeners) { try { listener(done); } catch { /* UI side effect */ } } }
   /** manager.go handleStateChange: only backgrounded processes notify. */
@@ -303,7 +308,7 @@ export class SwarmBackgroundProcessManager {
     // The drawer inspects running commands live: drain any buffered chunks
     // first so Enter shows output written since the last 50ms poll tick.
     const readOutput = () => { this.poll(rec); return rec.lines.slice(-160).map(line => line.content).join("\n"); };
-    if (this.ownsSession(rec)) setRunningWork({ id, kind: "bash", label: params.description || "Background Bash", status: "running", startedAt: startedMs, detail: command, readOutput });
+    if (this.ownsSession(rec)) setRunningWork({ id, kind: "bash", label: params.description || "Background Bash", status: "running", startedAt: startedMs, detail: command, readOutput, foreground: params.background !== true });
     // Under a PTY the child sees one terminal, so stderr is interleaved into
     // stdout and every newline arrives as CRLF. Strip the CR so stored lines,
     // regex filters and byte counts match the non-PTY tiers.
@@ -383,7 +388,7 @@ export class SwarmBackgroundProcessManager {
     // async contract. The process remains tracked by ReadBackgroundCommand and
     // emits its normal completion notification when it exits.
     if (params.background === true) {
-      rec.backgrounded = true;
+      this.markBackgrounded(rec);
       return { text: goJSON({
         backgrounded: true,
         message: "Command launched in the background. Use ReadBackgroundCommand with task_id to monitor output or cancel it.",
@@ -419,7 +424,7 @@ export class SwarmBackgroundProcessManager {
       throw new Error("command execution error: context canceled");
     }
     if (winner === "idle" || winner === "background") {
-      rec.backgrounded = true;
+      this.markBackgrounded(rec);
       const text = goJSON({
         backgrounded: true,
         message: winner === "background" ? "Command backgrounded by Ctrl+B. Use ReadBackgroundCommand with task_id to monitor output or cancel it." : `Command idle for ${goDuration(timeoutSec)} (no output) and was auto-backgrounded. Use ReadBackgroundCommand to check status — look at metadata.seconds_since_last_output to decide if it is still healthy.`,

@@ -55,6 +55,8 @@ export function swarmSurfaceFor(environment: GatingEnvironment): Set<string> {
   // Project scaffolding is driven by the agent through /init, so the tool must
   // reach the model surface even though upstream Swarm has no equivalent.
   names.add("project_init");
+  // Tern browser, pane and tab control is an intentional model-facing capability of the Tern pane.
+  names.add("tern");
   for (const name of ["CronCreate", "CronList", "CronDelete", "ScheduleWakeup"]) names.delete(name);
   names.add("scheduler");
   if (environment.interactive) {
