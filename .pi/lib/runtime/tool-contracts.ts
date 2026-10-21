@@ -9,6 +9,7 @@ import { CONTRACTS as agentTools } from "../tools/swarm-agent-tools.contract.ts"
 import { CONTRACTS as annoyed } from "../tools/swarm-annoyed.contract.ts";
 import { CONTRACTS as bash } from "../tools/swarm-bash.contract.ts";
 import { CONTRACTS as fsTools } from "../tools/swarm-fs-tools.contract.ts";
+import { CONTRACTS as hoja } from "../tools/swarm-hoja.contract.ts";
 import { CONTRACTS as historyTools } from "../tools/swarm-history-tools.contract.ts";
 import { CONTRACTS as interaction } from "../tools/swarm-interaction.contract.ts";
 import { CONTRACTS as skills } from "../tools/swarm-skills.contract.ts";
@@ -19,6 +20,6 @@ import type { ToolContract } from "./tool-contract.ts";
 export type { ToolContract } from "./tool-contract.ts";
 
 export const TOOL_CONTRACTS: Record<string, ToolContract> = {
-  ...agentTools, ...annoyed, ...bash, ...fsTools, ...historyTools,
+  ...agentTools, ...annoyed, ...bash, ...fsTools, ...hoja, ...historyTools,
   ...interaction, ...skills, ...taskmanage, ...vault,
 };
