@@ -5,9 +5,9 @@
       "command": "/bin/sh",
       "args": [
         "-c",
-        "GITHUB_PERSONAL_ACCESS_TOKEN=$(/opt/homebrew/bin/gh auth token) exec /usr/local/bin/docker run -i --rm -e GITHUB_PERSONAL_ACCESS_TOKEN ghcr.io/github/github-mcp-server"
+        "GITHUB_PERSONAL_ACCESS_TOKEN=$(/opt/homebrew/bin/gh auth token) exec /Users/swarm/.local/bin/github-mcp-server stdio"
       ],
-      "description": "GitHub MCP server: repositories, issues, pull requests, code search (token taken from the active gh CLI login at launch)"
+      "description": "GitHub MCP server v2.0.3 binary: repositories, issues, pull requests, code search (token taken from the active gh CLI login at launch)"
     }
   }
 }
