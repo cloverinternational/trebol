@@ -60,12 +60,12 @@ export function tabLabel(raw: string): string {
 	return name || "claw-worker";
 }
 
-export type LaunchSpec = { session: number; cwd: string; label: string; runId: string; clawDir: string; prompt: string };
+export type LaunchSpec = { session: number; cwd: string; label: string; runId: string; clawDir: string; prompt: string; provider?: string; model?: string };
 
 export function workerCommand(spec: LaunchSpec): string[] {
 	// PI_TERN_UI=0 is the documented bypass of the Tern shell dispatch (docs/reference/tern-pi-shell-dispatch.md):
 	// the worker is a plain terminal pi with its normal tools, not the Tern-native preview.
-	const line = `exec env PI_TERN_UI=0 PI_CLAW_RUN=${shellQuote(spec.runId)} PI_CLAW_DIR=${shellQuote(spec.clawDir)} pi --name ${shellQuote(spec.label)} ${shellQuote(spec.prompt)}`;
+	const line = `exec env PI_TERN_UI=0 PI_CLAW_RUN=${shellQuote(spec.runId)} PI_CLAW_DIR=${shellQuote(spec.clawDir)} pi --name ${shellQuote(spec.label)}${spec.provider ? ` --provider ${shellQuote(spec.provider)}` : ""}${spec.model ? ` --model ${shellQuote(spec.model)}` : ""} ${shellQuote(spec.prompt)}`;
 	return ["/bin/zsh", "-lic", line];
 }
 
@@ -79,6 +79,20 @@ export async function launchTab(tern: TernExec, spec: LaunchSpec): Promise<{ tab
 }
 
 export async function renameTabOf(tern: TernExec, block: number, name: string): Promise<void> { await tern(["rename", String(block), name, "--json"]); }
+
+/** The block whose launch command carries this run id. A worker tab is named only after it is created, so a failure in
+ *  between leaves an unnamed tab; the run id in its command is the only reliable handle. Inspect exposes `args`/`command`. */
+export async function findRunBlock(tern: TernExec, runId: string): Promise<{ tab: number; block: number } | undefined> {
+	const s = await inspect(tern);
+	// Tern records the launch command shell-escaped: PI_CLAW_RUN='\''run-id'\'' so quotes and escapes sit between "=" and the id.
+	const carries = new RegExp(`PI_CLAW_RUN=[\\s'\\\\"]*${runId.replace(/[^\w-]/g, "")}(?![\\w-])`);
+	for (const session of s.sessions) for (const tab of session.tabs) for (const block of tab.blocks) {
+		const b = block as { command?: string | null; args?: string[] };
+		const text = `${b.command ?? ""} ${(b.args ?? []).join(" ")}`;
+		if (carries.test(text)) return { tab: tab.id, block: block.id };
+	}
+	return undefined;
+}
 
 export async function sendToBlock(tern: TernExec, block: number, text: string): Promise<void> {
 	if (/[\u0000-\u0008\u000b-\u001f\u007f]/.test(text)) throw new Error("text may contain newlines and tabs but no other control characters");

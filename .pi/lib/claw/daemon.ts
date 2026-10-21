@@ -5,7 +5,7 @@ import { spawn as spawnChild } from "node:child_process";
 import { openSync, rmSync, writeFileSync } from "node:fs";
 import { nextCronTime, validateCron } from "../../../packages/tools/schedule/src/cron.ts";
 import type { LaunchDeps } from "./spawn.ts";
-import { continueRun, queueComment, queueState, startRun, opMarker } from "./spawn.ts";
+import { continueRun, findByKey, queueComment, queueState, runMarker, startRun, opMarker } from "./spawn.ts";
 import { liveBlocks, closeBlock, sendToBlock } from "./launcher.ts";
 import { ClawStore, readJson, TERMINAL, type ClawEvent, type Request, type Response, type Run, type Trigger, type SpawnInput } from "./store.ts";
 import { validateFinish } from "./child.ts";
@@ -14,15 +14,32 @@ export const TICK_MS = 1000;
 export const IDLE_EXIT_MS = 120_000;
 export const LOST_GRACE_MS = 60_000;
 export const TRIGGER_RETRY_MS = 60_000;
+export const CANCEL_VERIFY_MS = 5_000;
 
 export type DaemonDeps = LaunchDeps & {
 	now: () => Date;
 	alive: (pid: number) => boolean;
 	signal: (pid: number, sig: "SIGTERM") => void;
+	cancelVerifyMs?: number;
 };
 
 export function pidAlive(pid: number): boolean {
 	try { process.kill(pid, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code === "EPERM"; }
+}
+
+/** A cancel is verified only when the worker process and its tab are both confirmed gone. Anything else is unverified,
+ *  and the Hoja issue state is then left alone. */
+export async function verifyCancelled(run: Run, deps: DaemonDeps): Promise<boolean> {
+	if (run.pid !== undefined) {
+		const deadline = Date.now() + (deps.cancelVerifyMs ?? CANCEL_VERIFY_MS);
+		while (deps.alive(run.pid) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 200));
+		if (deps.alive(run.pid)) return false;
+	}
+	if (run.block !== undefined) {
+		const live = await liveBlocks(deps.tern).catch(() => undefined);
+		if (!live || live.has(run.block)) return false;
+	}
+	return true;
 }
 
 /** Singleton claim. A live owner blocks; a dead owner's lock is reclaimed; the write is re-read to confirm ownership. */
@@ -61,7 +78,7 @@ export async function handleRequest(req: Request, deps: DaemonDeps): Promise<unk
 	switch (req.kind) {
 		case "spawn": {
 			if (!control.enabled) throw new Error("claw is off: new runs are not scheduled. Turn it on with /claw on");
-			return summary(await startRun(req.input, deps, { requestId: req.id }));
+			return summary(await startRun(req.input, deps, { requestId: req.id, deadline: req.expiresAt }));
 		}
 		case "send": {
 			const run = store.getRun(req.runId);
@@ -76,11 +93,31 @@ export async function handleRequest(req: Request, deps: DaemonDeps): Promise<unk
 			if (TERMINAL.includes(run.status)) return summary(run);
 			if (run.pid && deps.alive(run.pid)) deps.signal(run.pid, "SIGTERM");
 			if (run.block !== undefined) await closeBlock(tern, run.block).catch((e) => { run.error = `tab close failed: ${(e as Error).message}`.slice(0, 300); });
+			const verified = await verifyCancelled(run, deps);
 			run.status = "cancelled";
-			queueComment(run, "Claw: run cancelled by the orchestrator. No completion is implied.");
+			if (!run.hoja) {
+				// No Hoja issue is linked. If the create was unresolved, a late commit may exist: a human must check the marker.
+				if (run.phase === "create_dispatched") run.error = `cancelled while the Hoja create outcome was unknown; a late issue carrying ${runMarker(run.id)} may exist and needs a manual check`;
+			} else {
+				queueComment(run, verified
+					? "Claw: run cancelled by the orchestrator; worker process and tab confirmed gone. No completion is implied."
+					: "Claw: cancel requested but the worker or its tab is not confirmed gone; Hoja state left unchanged. No completion is implied.");
+			}
+			// Claw-owned issue only (run.hoja is set by this run's own create), and only after verified cancellation. Never Done.
+			if (verified && run.hoja) queueState(run, "Canceled");
 			store.saveRun(run);
 			store.appendInbox({ kind: "run_cancelled", runId: run.id, text: `${run.id} cancelled`, key: `cancel:${run.id}` });
 			return summary(run);
+		}
+		case "withdraw": {
+			// Settles a request its caller gave up on. The daemon is sequential: the target is already answered, or a run
+			// exists (dispatched), or it is still undispatched and is refused now so it can never start later.
+			const target = store.readResponse(req.requestId);
+			if (target) return { withdrawn: false, state: target.ok ? "accepted" : target.code === "not_started" ? "not_started" : "refused", result: target.result, error: target.error };
+			const run = findByKey(store, { requestId: req.requestId });
+			if (run) return { withdrawn: false, state: "accepted", runId: run.id };
+			store.writeResponse({ id: req.requestId, ok: false, code: "not_started", error: "withdrawn by the caller before dispatch; not started" });
+			return { withdrawn: true, state: "not_started" };
 		}
 		case "trigger_add": {
 			const id = `trg-${req.id.replace(/^req-/, "")}`;
@@ -112,7 +149,12 @@ export async function processRequests(deps: DaemonDeps): Promise<void> {
 	for (const req of deps.store.listRequests()) {
 		if (!deps.store.readResponse(req.id)) {
 			let res: Response;
-			try { res = { id: req.id, ok: true, result: await handleRequest(req, deps) }; }
+			try {
+				// A spawn past its deadline never starts, unless a run already exists for it (then it was dispatched).
+				const expired = req.kind === "spawn" && deps.now().getTime() > Date.parse(req.expiresAt);
+				if (expired && !findByKey(deps.store, { requestId: req.id })) res = { id: req.id, ok: false, code: "not_started", error: "expired before dispatch; not started" };
+				else res = { id: req.id, ok: true, result: await handleRequest(req, deps) };
+			}
 			catch (error) { res = { id: req.id, ok: false, error: (error as Error).message.slice(0, 1000) }; }
 			deps.store.writeResponse(res);
 		}
@@ -274,8 +316,8 @@ export async function tick(deps: DaemonDeps): Promise<{ ternAvailable: boolean }
 	await processRequests(deps);
 	for (const run of store.listRuns()) {
 		if (TERMINAL.includes(run.status)) continue;
-		if (run.phase === "tab_opening") { await continueRun(run, deps); continue; }
-		if (run.phase === "intent" || run.phase === "issue_created") await continueRun(run, deps);
+		if (run.reconcileAt && Date.parse(run.reconcileAt) > deps.now().getTime()) continue;
+		if (run.phase === "intent" || run.phase === "create_dispatched" || run.phase === "issue_created" || run.phase === "tab_opening") await continueRun(run, deps);
 	}
 	let live: Set<number> | undefined;
 	let ternAvailable = true;

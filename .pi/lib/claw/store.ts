@@ -10,17 +10,20 @@ import { appendFileSync, closeSync, existsSync, fstatSync, mkdirSync, openSync, 
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 
+import type { Resolved } from "./hoja.ts";
+
 export type RunStatus = "launching" | "running" | "idle" | "awaiting_user" | "completed" | "failed" | "lost" | "cancelled";
 export const TERMINAL: readonly RunStatus[] = ["completed", "failed", "lost", "cancelled"];
-/** Where a run is in its launch sequence; persisted before each side effect so a restart knows what is safe to redo. */
-export type RunPhase = "intent" | "issue_created" | "tab_opening" | "tab_open";
+/** Where a run is in its launch sequence; persisted before each side effect so a restart knows what is safe to redo.
+ *  create_dispatched: the Hoja create was about to be sent; its outcome may be unknown and is only ever reconciled. */
+export type RunPhase = "intent" | "create_dispatched" | "issue_created" | "tab_opening" | "tab_open";
 export type HojaRef = { issueId: string; identifier: string; teamKey: string; project: string; assignee: string };
 export type Finish = { outcome: "completed" | "failed" | "needs_user"; summary: string; evidence: string[]; at: string };
 export type OutboxOp = { id: string; kind: "comment"; body: string; done: boolean } | { id: string; kind: "state"; state: string; done: boolean };
-export type SpawnInput = { task: string; project: string; assignee?: string; label?: string; cwd?: string };
+export type SpawnInput = { task: string; project: string; assignee?: string; label?: string; cwd?: string; provider?: string; model?: string };
 export type Run = {
 	id: string; label: string; task: string; cwd: string; status: RunStatus; phase: RunPhase;
-	createdAt: string; updatedAt: string; project: string; assignee?: string;
+	createdAt: string; updatedAt: string; project: string; assignee?: string; provider?: string; model?: string;
 	requestedAssignee?: string; requestId?: string; fireKey?: string; trigger?: string;
 	tab?: number; block?: number; sessionFile?: string; pid?: number;
 	eventsOffset: number; settles: number; finalText?: string; finish?: Finish;
@@ -29,6 +32,12 @@ export type Run = {
 	tabWarning?: string;
 	/** Last Hoja write failure; the op stays pending and is retried. Kept apart from `error` so it cannot hide a launch failure. */
 	syncError?: string;
+	/** ISO instant after which no side effect may start (the spawn request's expiry). Checked before the Hoja create and before the tab. */
+	deadline?: string;
+	/** Team, state and assignee resolved before dispatch. Needed to verify an issue whose create outcome was unknown. */
+	target?: Resolved;
+	/** Next reconcile of an unknown create (backoff). */
+	reconcileAt?: string;
 };
 export type ClawEvent = {
 	eid: string; type: "started" | "settled" | "finish"; at: string; runId: string;
@@ -42,16 +51,25 @@ export type Trigger = {
 	nextFireAt?: string; fired: number; lastFiredAt?: string; lastRunId?: string; lastError?: string; retryAt?: string;
 };
 export type InboxKind = "run_started" | "run_idle" | "run_completed" | "run_failed" | "run_needs_user" | "run_lost" | "run_cancelled" | "trigger_fired" | "notify" | "error";
-export type InboxItem = { at: string; key?: string; kind: InboxKind; runId?: string; triggerId?: string; text: string };
+/** `id` is the stable delivery identity: the dedup key when one exists, otherwise a generated id. It is what the receiver records in its transcript. */
+export type InboxItem = { id: string; at: string; key?: string; kind: InboxKind; runId?: string; triggerId?: string; text: string };
 export type Request =
-	| { id: string; kind: "spawn"; createdAt: string; input: SpawnInput }
+	| { id: string; kind: "spawn"; createdAt: string; expiresAt: string; input: SpawnInput }
 	| { id: string; kind: "send"; createdAt: string; runId: string; text: string }
 	| { id: string; kind: "cancel"; createdAt: string; runId: string }
 	| { id: string; kind: "trigger_add"; createdAt: string; when: TriggerWhen; action: TriggerAction; once: boolean }
-	| { id: string; kind: "trigger_remove"; createdAt: string; triggerId: string };
-export type Response = { id: string; ok: boolean; result?: unknown; error?: string };
+	| { id: string; kind: "trigger_remove"; createdAt: string; triggerId: string }
+	/** Caller gave up waiting. Settles the target request: refused (not started) if still undispatched, else reports its outcome. */
+	| { id: string; kind: "withdraw"; createdAt: string; requestId: string };
+/** code "not_started" is a definitive refusal with no side effect (expired or withdrawn before dispatch). */
+export type Response = { id: string; ok: boolean; result?: unknown; error?: string; code?: "not_started" };
+export type OrchestratorState = {
+	offset: number; owner?: string; ownerPid?: number;
+	/** Inbox items handed to a session whose persistence is not yet seen in that session's transcript. */
+	inflight?: { ids: string[]; endOffset: number; sentAt: string; session: string };
+};
 /** Request without its id/timestamp, distributed over the union so each kind keeps its fields. */
-export type RequestBody = Request extends infer R ? (R extends unknown ? Omit<R, "id" | "createdAt"> : never) : never;
+export type RequestBody = Request extends infer R ? (R extends unknown ? Omit<R, "id" | "createdAt" | "expiresAt"> : never) : never;
 
 export const writeJson = (path: string, value: unknown) => {
 	const tmp = `${path}.${process.pid}.${randomBytes(3).toString("hex")}.tmp`;
@@ -145,14 +163,15 @@ export class ClawStore {
 	writeResponse(res: Response): void { writeJson(join(this.responsesDir, `${res.id}.json`), res); }
 	removeRequest(id: string): void { rmSync(join(this.requestsDir, `${id}.json`), { force: true }); }
 
-	appendInbox(item: Omit<InboxItem, "at">): void {
+	appendInbox(item: Omit<InboxItem, "at" | "id">): void {
 		if (item.key && this.readInbox(0).items.some((i) => i.key === item.key)) return;
-		appendFileSync(this.inboxPath, `${JSON.stringify({ at: new Date().toISOString(), ...item })}\n`);
+		const id = item.key ?? this.newId("evt");
+		appendFileSync(this.inboxPath, `${JSON.stringify({ id, at: new Date().toISOString(), ...item })}\n`);
 	}
 	readInbox(offset: number) { return readLines<InboxItem>(this.inboxPath, offset); }
 	/** Owner = the Pi session that drives the inbox; only that session delivers inbox items. */
-	readOrchestrator(): { offset: number; owner?: string } { return readJson<{ offset: number; owner?: string }>(join(this.dir, "orchestrator.json")) ?? { offset: 0 }; }
-	writeOrchestrator(state: { offset: number; owner?: string }): void { writeJson(join(this.dir, "orchestrator.json"), state); }
+	readOrchestrator(): OrchestratorState { return readJson<OrchestratorState>(join(this.dir, "orchestrator.json")) ?? { offset: 0 }; }
+	writeOrchestrator(state: OrchestratorState): void { writeJson(join(this.dir, "orchestrator.json"), state); }
 
 	/** Absent control file means on. `pane` is the orchestrator's Tern block (TERN_PANE) recorded by /claw on; worker tabs open in its session. */
 	readControl(): { enabled: boolean; pane?: number } {

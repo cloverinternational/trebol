@@ -4,6 +4,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { MCPManager } from "../../packages/tools/mcp/src/index.ts";
 import { withDefaultToolRenderer } from "../../packages/runtime/core/src/tool-renderer.ts";
 import { pushStartupNotice } from "../../.pi/lib/ui/startup-notices.ts";
+import { clearMcpStatus, publishMcpStatus } from "../../.pi/lib/tools/mcp-status.ts";
 type Pi = any;
 function safeMcpError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
@@ -20,7 +21,7 @@ function loadMcpManifests(pi: Pi, cwd: string): any[] {
       const servers = raw?.mcpServers ?? raw?.servers ?? raw;
       if (!servers || typeof servers !== "object" || Array.isArray(servers)) throw new Error("invalid manifest shape");
       return Object.entries(servers).map(([id, value]: [string, any]) => ({ id, enabled: value?.enabled !== false, ...value, type: value?.type ?? (value?.command ? "stdio" : "http") }));
-    } catch { pushStartupNotice(`MCP configuration is invalid or unreadable: ${file}`, "error"); return []; }
+    } catch { throw new Error("MCP configuration is invalid or unreadable"); }
   }
   return [];
 }
@@ -29,15 +30,25 @@ export function registerMcpFallback(pi: Pi, options: { cwd?: string; closed?: bo
   const cwd = resolve(options.cwd ?? pi.getCwd?.() ?? process.cwd());
   const state: { mcp?: MCPManager } = {};
   let manifests: any[] = [];
+  let sessionId: string | undefined;
+  let generation = 0;
   const discoverMcp = async () => {
+    const gen = ++generation;
     try {
       manifests = loadMcpManifests(pi, cwd).filter(m => m.enabled !== false);
       await state.mcp?.close();
-      state.mcp = new MCPManager(manifests, { closed: options.closed ?? true, registerTool: tool => pi.registerTool(withDefaultToolRenderer(tool as any)) });
-      for (const manifest of manifests) if (manifest.lazy !== true) await state.mcp.discover(manifest.id);
+      if (gen !== generation) return;
+      // Only the manager that is still current may publish; a closed predecessor must not overwrite the status.
+      const manager: MCPManager = new MCPManager(manifests, { closed: options.closed ?? true, registerTool: tool => pi.registerTool(withDefaultToolRenderer(tool as any)), onConnectionChange: () => { if (gen === generation && state.mcp === manager) publishMcpStatus(state, manager.connectedServers(), sessionId); } });
+      state.mcp = manager;
+      publishMcpStatus(state, [], sessionId);
+      for (const manifest of manifests) { if (gen !== generation) return; if (manifest.lazy !== true) await manager.discover(manifest.id); }
       pi.setActiveTools?.(Array.from(new Set([...(pi.getActiveTools?.() ?? []), ...(pi.getAllTools?.() ?? []).map((t: any) => t.name).filter((n: string) => n.startsWith("mcp__"))])));
     } catch (error) {
+      if (gen !== generation) return;
+      await state.mcp?.close();
       state.mcp = undefined;
+      clearMcpStatus(state);
       pushStartupNotice(`MCP startup failed: ${safeMcpError(error)}`, "error");
     }
   };
@@ -64,12 +75,18 @@ export function registerMcpFallback(pi: Pi, options: { cwd?: string; closed?: bo
     } catch (error) { ctx.ui?.notify?.(error instanceof Error ? error.message : String(error), "error"); }
   }});
   pi.on?.("session_start", async (_event: unknown, ctx: any) => {
+    sessionId = ctx?.sessionManager?.getSessionId?.();
     // The installed adapter owns /mcp, resources, prompts and authentication.
     // Do not open a second connection using a different config dialect.
     if ((pi.getCommands?.() ?? []).some((command: any) => command.name === "pi-mcp")) return;
     await discoverMcp();
   });
-  pi.on?.("session_shutdown", () => { void state.mcp?.close(); state.mcp = undefined; });
+  pi.on?.("session_switch", (_event: unknown, ctx: any) => {
+    clearMcpStatus(state);
+    sessionId = ctx?.sessionManager?.getSessionId?.();
+    if (state.mcp) publishMcpStatus(state, state.mcp.connectedServers(), sessionId);
+  });
+  pi.on?.("session_shutdown", () => { generation++; const old = state.mcp; state.mcp = undefined; clearMcpStatus(state); void old?.close(); });
   pi.registerCommand?.("swarm-runtime", { description: "Inspect MCP fallback (legacy command name)", handler: async (_args: string, ctx: any) => ctx.ui?.notify?.(`MCP fallback active at ${cwd}; mcp=${manifests.length}`, "info") });
   return state;
 }

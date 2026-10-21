@@ -1,24 +1,26 @@
 import {
-  chmodSync,
   existsSync,
-  lstatSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
-  realpathSync,
-  renameSync,
+  readdirSync,
   rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, basename, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { tmpdir } from "node:os";
+import { dirname, basename, isAbsolute, join, resolve } from "node:path";
 import { goQuote } from "./swarm-bash.ts";
 
 export type PatchKind = "add" | "update" | "delete";
-export interface PatchChunk { ctxOffset: number; del: string[]; ins: string[] }
-export interface PatchHunk { anchors: string[]; context: string[]; chunks: PatchChunk[]; eof: boolean }
-export interface PatchOp { kind: PatchKind; path: string; moveTo: string; addBody: string; hunks: PatchHunk[] }
+/** One `@@`-delimited chunk of an update, following upstream UpdateFileChunk. */
+export interface PatchChunk {
+  changeContext?: string;
+  oldLines: string[];
+  newLines: string[];
+  /** [oldIndex, newIndex] pairs for context lines, which keep their original bytes. */
+  contextPairs: Array<[number, number]>;
+  eof: boolean;
+}
+export interface PatchOp { kind: PatchKind; path: string; moveTo?: string; addBody: string; chunks: PatchChunk[] }
 export interface ApplyPatchOptions {
   workspacePath?: string; cwd?: string; signal?: AbortSignal;
   /** checkpoint.go SnapshotContext provenance: tools.OwnerConversationID / UserMessageFromContext. */
@@ -31,292 +33,302 @@ export function truncateSnapshotMessage(message: string): string {
   return bytes.length > 300 ? bytes.subarray(0, 297).toString("utf8") + "..." : message;
 }
 
+/**
+ * Failure during sequential execution. Earlier operations are NOT rolled back;
+ * `committed` lists what was written before the failing operation.
+ */
+export class ApplyPatchExecutionError extends Error {
+  readonly committed: Array<{ tag: "A" | "M" | "D"; path: string; note?: string }>;
+  constructor(message: string, committed: ApplyPatchExecutionError["committed"]) {
+    super(message);
+    this.name = "ApplyPatchExecutionError";
+    this.committed = committed;
+  }
+}
+
+// Markers and parser states mirror codex-rs/apply-patch/src/{parser,streaming_parser}.rs.
 const BEGIN = "*** Begin Patch", END = "*** End Patch", EOF = "*** End of File";
 const UPDATE = "*** Update File: ", DELETE = "*** Delete File: ", ADD = "*** Add File: ", MOVE = "*** Move to: ";
-const section = (line: string) => line.startsWith(UPDATE) || line.startsWith(DELETE) || line.startsWith(ADD);
+const ENVIRONMENT_ID = "*** Environment ID:";
+const CHANGE_CONTEXT = "@@ ", EMPTY_CHANGE_CONTEXT = "@@";
+const HEADERS = "Valid hunk headers: '*** Add File: {path}', '*** Delete File: {path}', '*** Update File: {path}'";
 
-function parseHunkBody(lines: string[], start: number, path: string) {
-  const context: string[] = [], chunks: PatchChunk[] = [];
-  let del: string[] = [], ins: string[] = [], mode = "keep", i = start, eof = false;
-  const flush = () => {
-    if (del.length || ins.length) chunks.push({ ctxOffset: context.length - del.length, del, ins });
-    del = []; ins = [];
+// Rust char::is_whitespace (White_Space property). JS trim() differs (e.g. BOM, NEL).
+const RUST_WS = "\\t\\n\\u000B\\f\\r \\u0085\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000";
+const LEADING_WS = new RegExp(`^[${RUST_WS}]+`), TRAILING_WS = new RegExp(`[${RUST_WS}]+$`);
+const rtrimStart = (s: string) => s.replace(LEADING_WS, "");
+const rtrimEnd = (s: string) => s.replace(TRAILING_WS, "");
+const rtrim = (s: string) => rtrimEnd(rtrimStart(s));
+
+const invalidPatch = (message: string) => new Error(`invalid patch: ${message}`);
+const invalidHunk = (lineNumber: number, message: string) => new Error(`invalid hunk at line ${lineNumber}, ${message}`);
+const unexpectedLine = (line: string) =>
+  `Unexpected line found in update hunk: '${line}'. Every line should start with ' ' (context line), '+' (added line), or '-' (removed line)`;
+
+/** Boundary check, including upstream's lenient `<<'EOF'` heredoc wrapper. */
+function patchBodyLines(input: string): string[] {
+  const trimmed = rtrim(input);
+  const lines = trimmed === "" ? [] : trimmed.split("\n").map(l => (l.endsWith("\r") ? l.slice(0, -1) : l));
+  const strict = (ls: string[]) => {
+    const first = ls[0]?.trim(), last = ls.at(-1)?.trim();
+    if (first === BEGIN && last === END) return ls;
+    if (first !== undefined && first !== BEGIN) throw invalidPatch(`The first line of the patch must be '${BEGIN}'`);
+    throw invalidPatch(`The last line of the patch must be '${END}'`);
   };
-  while (i < lines.length) {
-    const raw = lines[i];
-    if (raw.startsWith("@@") || section(raw)) break;
-    if (raw === EOF) { i++; eof = true; break; }
-    if (raw.startsWith("***")) throw new Error(`update ${path}: invalid line ${JSON.stringify(raw)}`);
-    i++;
-    const line = raw === "" ? " " : raw;
-    const last = mode;
-    if (line[0] === "+") mode = "add";
-    else if (line[0] === "-") mode = "delete";
-    else if (line[0] === " ") mode = "keep";
-    else throw new Error(`update ${path}: hunk line must start with '+', '-', or ' ': ${JSON.stringify(raw)}`);
-    if (mode === "keep" && last !== mode) flush();
-    const content = line.slice(1);
-    if (mode === "delete") { del.push(content); context.push(content); }
-    else if (mode === "add") ins.push(content);
-    else context.push(content);
-  }
-  flush();
-  return { context, chunks, next: i, eof };
-}
-
-function parseHunks(lines: string[], start: number, path: string): [PatchHunk[], number] {
-  const hunks: PatchHunk[] = [];
-  let i = start;
-  while (i < lines.length && !section(lines[i])) {
-    if (lines[i].trim() === "") { i++; continue; }
-    const anchors: string[] = [];
-    while (i < lines.length && lines[i].startsWith("@@")) {
-      let anchor = lines[i].slice(2);
-      if (anchor.startsWith(" ")) anchor = anchor.slice(1);
-      if (anchor.trim() !== "") anchors.push(anchor);
-      i++;
+  try { return strict(lines); }
+  catch (original) {
+    if (lines.length >= 4 && (lines[0] === "<<EOF" || lines[0] === "<<'EOF'" || lines[0] === '<<"EOF"') && lines.at(-1)!.endsWith("EOF")) {
+      return strict(lines.slice(1, -1));
     }
-    const body = parseHunkBody(lines, i, path);
-    if (!body.context.length && !body.chunks.length && !anchors.length) break;
-    hunks.push({ anchors, context: body.context, chunks: body.chunks, eof: body.eof });
-    i = body.next;
+    throw original;
   }
-  return [hunks, i];
 }
 
-/** Parse the Codex V4A envelope exactly as Swarm's forge parser does. */
+/** Parse a V4A patch with upstream's streaming state machine (lenient mode). */
 export function parsePatch(input: string): PatchOp[] {
-  input = input.replace(/\r\n/g, "\n");
-  let lines = input.trim().split("\n");
-  if (lines.length >= 4) {
-    const first = lines[0].trim(), last = lines.at(-1)!.trim();
-    if ((first === "<<EOF" || first === "<<'EOF'" || first === '<<"EOF"') && last.endsWith("EOF")) lines = lines.slice(1, -1);
-  }
-  if (!lines.length || lines[0].trim() !== BEGIN) throw new Error(`The first line of the patch must be ${JSON.stringify(BEGIN)}`);
-  if (lines.at(-1)!.trim() !== END) throw new Error(`The last line of the patch must be ${JSON.stringify(END)}`);
-  lines = lines.slice(1, -1);
+  const lines = patchBodyLines(input);
   const ops: PatchOp[] = [];
-  for (let i = 0; i < lines.length;) {
-    const raw = lines[i], header = raw.trim();
-    if (header === "") { i++; continue; }
-    if (header.startsWith(UPDATE)) {
-      const path = header.slice(UPDATE.length).trim();
-      if (!path) throw new Error("update: missing path");
-      const op: PatchOp = { kind: "update", path, moveTo: "", addBody: "", hunks: [] };
-      i++;
-      if (i < lines.length && lines[i].trim().startsWith(MOVE)) {
-        op.moveTo = lines[i].trim().slice(MOVE.length).trim();
-        if (!op.moveTo) throw new Error(`update ${path}: empty move target`);
-        i++;
-      }
-      [op.hunks, i] = parseHunks(lines, i, path);
-      if (!op.hunks.length) throw new Error(`update ${path}: no hunks`);
-      ops.push(op);
-    } else if (header.startsWith(DELETE)) {
-      const path = header.slice(DELETE.length).trim();
-      if (!path) throw new Error("delete: missing path");
-      ops.push({ kind: "delete", path, moveTo: "", addBody: "", hunks: [] }); i++;
-    } else if (header.startsWith(ADD)) {
-      const path = header.slice(ADD.length).trim();
-      if (!path) throw new Error("add: missing path");
-      const body: string[] = []; i++;
-      while (i < lines.length && !section(lines[i].trim())) {
-        if (!lines[i].startsWith("+")) throw new Error(`add ${path}: line must start with '+': ${JSON.stringify(lines[i])}`);
-        body.push(lines[i].slice(1)); i++;
-      }
-      if (!body.length) throw new Error(`add ${path}: file hunk is empty`);
-      ops.push({ kind: "add", path, moveTo: "", addBody: body.join("\n") + "\n", hunks: [] });
-    } else throw new Error(`unknown patch line: ${JSON.stringify(raw)}`);
-  }
-  return ops;
-}
+  type Mode = "notStarted" | "started" | "add" | "delete" | "update" | "ended";
+  const st: { mode: Mode; hunkLine: number } = { mode: "notStarted", hunkLine: 0 };
+  const current = () => ops.at(-1)!;
 
-const normalize = (s: string) => s.trim().replace(/[\u2010-\u2015\u2212]/g, "-")
-  .replace(/[\u2018-\u201b]/g, "'").replace(/[\u201c-\u201f]/g, '"')
-  .replace(/[\u00a0\u2002-\u200a\u202f\u205f\u3000]/g, " ");
-function lineEqual(a: string, b: string, tier: number) {
-  if (tier === 0) return a === b;
-  if (tier === 1) return a.replace(/[ \t]+$/, "") === b.replace(/[ \t]+$/, "");
-  if (tier === 2) return a.trim() === b.trim();
-  return normalize(a) === normalize(b);
-}
-function matchAt(file: string[], context: string[], at: number, tier: number) {
-  return at >= 0 && at + context.length <= file.length && context.every((line, j) => lineEqual(file[at + j], line, tier));
-}
-function findContext(file: string[], context: string[], cursor: number, eof: boolean, anchored: boolean): [number, number] {
-  if (!context.length) return [cursor, 0];
-  if (eof) {
-    const end = file.length - context.length;
-    for (let tier = 0; tier <= 3; tier++) if (end >= cursor && matchAt(file, context, end, tier)) return [end, tier];
-  }
-  for (let tier = 0; tier <= 3; tier++) {
-    const found: number[] = [];
-    for (let i = cursor; i + context.length <= file.length; i++) if (matchAt(file, context, i, tier)) found.push(i);
-    // An @@ anchor has already selected the target region.  Do not make the
-    // rest of the file's repeated generic context make an otherwise valid
-    // hunk ambiguous; the first match is the one nearest that anchor.
-    if (anchored && found.length) return [found[0], tier];
-    if (found.length > 1) throw new Error(`ambiguous context at lines ${found.map(i => i + 1).join(", ")} for:\n${context.join("\n")}\nAdd an @@ class/function anchor or more surrounding lines`);
-    if (found.length === 1) return [found[0], tier];
-  }
-  throw new Error(`context not found:\n${context.join("\n")}`);
-}
-function anchorMatches(line: string, snippet: string, tier: number) {
-  if (tier === 0) return line === snippet;
-  if (tier === 1) return line.replace(/[ \t]+$/, "") === snippet.replace(/[ \t]+$/, "");
-  if (tier === 2) return line.trim() === snippet.trim();
-  return line.includes(snippet);
-}
-function findAnchor(file: string[], anchor: string, cursor: number): [number, number] {
-  const snippets = anchor.split("\\n");
-  for (let tier = 0; tier <= 3; tier++) {
-    const found: number[] = [];
-    for (let i = cursor; i + snippets.length <= file.length; i++)
-      if (snippets.every((s, n) => anchorMatches(file[i + n], s, tier))) found.push(i);
-    if (found.length > 1) throw new Error(`ambiguous @@ anchor at lines ${found.map(i => i + 1).join(", ")}: ${JSON.stringify(anchor)}; use a longer or multiline anchor`);
-    if (found.length === 1) return [found[0], tier];
-  }
-  throw new Error(`@@ anchor not found from line ${cursor + 1}: ${JSON.stringify(anchor)}`);
-}
-
-function repairBlankContext(file: string[], hunk: PatchHunk, cursor: number): [PatchHunk, number] | undefined {
-  for (let tier = 0; tier <= 3; tier++) {
-    const found: Array<{ at: number; insert: number[]; span: number }> = [];
-    for (let at = cursor; at < file.length; at++) {
-      let f = at; const insert: number[] = []; let ok = true;
-      for (let c = 0; c < hunk.context.length; c++) {
-        while (f < file.length && file[f] === "" && hunk.context[c] !== "") { insert.push(c); f++; }
-        if (f >= file.length || !lineEqual(file[f], hunk.context[c], tier)) { ok = false; break; }
-        f++;
+  const ensureUpdateNotEmpty = (line: string, lineNo: number) => {
+    const last = ops.at(-1);
+    if (last?.kind === "update") {
+      if (!last.chunks.length && st.mode === "update") throw invalidHunk(st.hunkLine, `Update file hunk for path '${last.path}' is empty`);
+      const tail = last.chunks.at(-1);
+      if (tail && !tail.oldLines.length && !tail.newLines.length) {
+        throw invalidHunk(lineNo, line === END ? "Update hunk does not contain any lines" : unexpectedLine(line));
       }
-      if (ok && insert.length) found.push({ at, insert, span: f - at });
-      if (hunk.anchors.length && found.length) break;
     }
-    if (found.length === 1 || (hunk.anchors.length && found.length)) {
-      const a = found[0], context: string[] = [];
-      for (let c = 0, n = 0; c <= hunk.context.length; c++) {
-        while (n < a.insert.length && a.insert[n] === c) { context.push(""); n++; }
-        if (c < hunk.context.length) context.push(hunk.context[c]);
+  };
+  // Headers are matched on the already-trimmed (or trim_end'ed) line, as upstream does.
+  const header = (s: string, lineNo: number): boolean => {
+    if (s === END) { ensureUpdateNotEmpty(s, lineNo); st.mode = "ended"; return true; }
+    if (s.startsWith(ADD)) { ensureUpdateNotEmpty(s, lineNo); ops.push({ kind: "add", path: s.slice(ADD.length), addBody: "", chunks: [] }); st.mode = "add"; return true; }
+    if (s.startsWith(DELETE)) { ensureUpdateNotEmpty(s, lineNo); ops.push({ kind: "delete", path: s.slice(DELETE.length), addBody: "", chunks: [] }); st.mode = "delete"; return true; }
+    if (s.startsWith(UPDATE)) {
+      ensureUpdateNotEmpty(s, lineNo);
+      ops.push({ kind: "update", path: s.slice(UPDATE.length), addBody: "", chunks: [] });
+      st.mode = "update"; st.hunkLine = lineNo; return true;
+    }
+    return false;
+  };
+  const badHeader = (trimmed: string, lineNo: number) => invalidHunk(lineNo, `'${trimmed}' is not a valid hunk header. ${HEADERS}`);
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i], lineNo = i + 1, trimmed = rtrim(line);
+    // Upstream finish(): the final line is matched with a full trim before normal processing.
+    if (i === lines.length - 1 && trimmed === END) { ensureUpdateNotEmpty(END, lineNo); st.mode = "ended"; break; }
+    switch (st.mode) {
+      case "notStarted":
+        if (trimmed !== BEGIN) throw invalidPatch(`The first line of the patch must be '${BEGIN}'`);
+        st.mode = "started";
+        break;
+      case "started":
+        if (trimmed.startsWith(ENVIRONMENT_ID)) {
+          throw invalidPatch("environment_id is not supported by the local apply_patch tool");
+        }
+        if (!header(trimmed, lineNo)) throw badHeader(trimmed, lineNo);
+        break;
+      case "add":
+        if (header(trimmed, lineNo)) break;
+        if (!line.startsWith("+")) throw badHeader(trimmed, lineNo);
+        current().addBody += line.slice(1) + "\n";
+        break;
+      case "delete":
+        if (!header(trimmed, lineNo)) throw badHeader(trimmed, lineNo);
+        break;
+      case "update":
+        parseUpdateLine(line, lineNo);
+        break;
+      case "ended":
+        if (trimmed !== "") throw invalidPatch(`The last line of the patch must be '${END}'`);
+        break;
+    }
+  }
+  if (st.mode !== "ended") throw invalidPatch(`The last line of the patch must be '${END}'`);
+  return ops;
+
+  function parseUpdateLine(line: string, lineNo: number) {
+    const ul = rtrimEnd(line);
+    if (header(ul, lineNo)) return;
+    const op = current();
+    const chunks = op.chunks;
+    const tail = chunks.at(-1);
+    if (tail?.eof) {
+      if (ul === "") return;
+      if (ul !== EMPTY_CHANGE_CONTEXT && !ul.startsWith(CHANGE_CONTEXT)) {
+        throw invalidHunk(lineNo, `Expected update hunk to start with a @@ context marker, got: '${line}'`);
       }
-      const chunks = hunk.chunks.map(ch => ({
-        ...ch, ctxOffset: ch.ctxOffset + a.insert.filter(pos => pos <= ch.ctxOffset).length,
-      }));
-      const repaired = { ...hunk, context, chunks };
-      if (context.length === a.span && matchAt(file, context, a.at, 0)) return [repaired, a.at];
+    }
+    if (!chunks.length && op.moveTo === undefined && ul.startsWith(MOVE)) { op.moveTo = ul.slice(MOVE.length); return; }
+    const isMarker = ul === EMPTY_CHANGE_CONTEXT || ul.startsWith(CHANGE_CONTEXT);
+    if (isMarker && tail && !tail.oldLines.length && !tail.newLines.length) throw invalidHunk(lineNo, unexpectedLine(line));
+    if (ul === EMPTY_CHANGE_CONTEXT) { chunks.push(newChunk()); return; }
+    if (ul.startsWith(CHANGE_CONTEXT)) { chunks.push({ ...newChunk(), changeContext: ul.slice(CHANGE_CONTEXT.length) }); return; }
+    if (ul === EOF) {
+      if (tail && !tail.oldLines.length && !tail.newLines.length) throw invalidHunk(lineNo, "Update hunk does not contain any lines");
+      if (tail) tail.eof = true;
       return;
     }
-    if (found.length > 1) return;
+    const target = () => { if (!chunks.length) chunks.push(newChunk()); return chunks.at(-1)!; };
+    if (line === "") { pushContext(target(), ""); return; }
+    if (line.startsWith(" ")) { pushContext(target(), line.slice(1)); return; }
+    if (line.startsWith("+")) { target().newLines.push(line.slice(1)); return; }
+    if (line.startsWith("-")) { target().oldLines.push(line.slice(1)); return; }
+    if (tail && (tail.oldLines.length || tail.newLines.length)) {
+      throw invalidHunk(lineNo, `Expected update hunk to start with a @@ context marker, got: '${line}'`);
+    }
+    throw invalidHunk(lineNo, unexpectedLine(line));
   }
 }
 
-function applyHunks(original: string, hunks: PatchHunk[], path: string): string {
-  const crlf = original.includes("\r\n"), file = original.replace(/\r\n/g, "\n").split("\n");
-  const out: string[] = []; let cursor = 0;
-  for (let hunk of hunks) {
-    for (const anchor of hunk.anchors) {
-      let idx: number;
-      try { [idx] = findAnchor(file, anchor, cursor); }
-      catch (e) { throw new Error(`update ${path}: ${(e as Error).message}`); }
-      out.push(...file.slice(cursor, idx)); cursor = idx;
-    }
-    let at: number;
-    try { [at] = findContext(file, hunk.context, cursor, hunk.eof, hunk.anchors.length > 0); }
-    catch (e) {
-      const repaired = repairBlankContext(file, hunk, cursor);
-      if (!repaired) throw new Error(`update ${path}: ${(e as Error).message}`);
-      [hunk, at] = repaired;
-    }
-    const pureAdd = hunk.context.length === 0 && hunk.chunks.length > 0 && hunk.chunks.every(c => !c.del.length);
-    if (pureAdd) at = hunk.anchors.length ? cursor : file.length - (file.at(-1) === "" ? 1 : 0);
-    out.push(...file.slice(cursor, at));
-    let ctxCursor = at;
-    for (const chunk of hunk.chunks) {
-      const chunkAt = at + chunk.ctxOffset;
-      if (chunkAt < ctxCursor) throw new Error(`update ${path}: overlapping hunk chunks`);
-      out.push(...file.slice(ctxCursor, chunkAt), ...chunk.ins);
-      ctxCursor = chunkAt + chunk.del.length;
-    }
-    out.push(...file.slice(ctxCursor, at + hunk.context.length));
-    cursor = at + hunk.context.length;
-  }
-  out.push(...file.slice(cursor));
-  let result = out.join("\n");
-  if (result && !result.endsWith("\n")) result += "\n";
-  return crlf ? result.replace(/\n/g, "\r\n") : result;
+const newChunk = (): PatchChunk => ({ oldLines: [], newLines: [], contextPairs: [], eof: false });
+function pushContext(chunk: PatchChunk, line: string) {
+  chunk.contextPairs.push([chunk.oldLines.length, chunk.newLines.length]);
+  chunk.oldLines.push(line);
+  chunk.newLines.push(line);
 }
 
-function canonicalProspective(path: string) {
-  let parent = resolve(path);
-  while (!existsSync(parent)) {
-    const next = dirname(parent);
-    if (next === parent) throw new Error(`no existing parent for ${path}`);
-    parent = next;
-  }
-  return resolve(realpathSync(parent), relative(parent, resolve(path)));
+/** Upstream normalise(): Rust trim, then fold typographic punctuation and spaces to ASCII. */
+function normalise(s: string): string {
+  return rtrim(s).replace(/[\u2010-\u2015\u2212]/g, "-")
+    .replace(/[\u2018-\u201b]/g, "'")
+    .replace(/[\u201c-\u201f]/g, '"')
+    .replace(/[\u00a0\u2002-\u200a\u202f\u205f\u3000]/g, " ");
 }
-function gitCommonDir(dir: string): string {
-  let current = resolve(dir);
-  for (;;) {
-    const dot = join(current, ".git");
-    if (existsSync(dot)) {
-      if (lstatSync(dot).isDirectory()) return realpathSync(dot);
-      const line = readFileSync(dot, "utf8").trim();
-      if (line.startsWith("gitdir:")) {
-        let git = line.slice(7).trim();
-        if (!isAbsolute(git)) git = resolve(dirname(dot), git);
-        const parent = dirname(git);
-        return realpathSync.native?.(basename(parent) === "worktrees" ? dirname(parent) : git) ?? realpathSync(basename(parent) === "worktrees" ? dirname(parent) : git);
+
+/**
+ * Upstream seek_sequence: four passes (exact, trim_end, trim, normalise). The
+ * first pass with any match wins and returns its first index; no ambiguity error.
+ * With `eof`, only the position at end-of-file is considered.
+ */
+export function seekSequence(lines: string[], pattern: string[], start: number, eof: boolean): number | undefined {
+  if (!pattern.length) return start;
+  if (pattern.length > lines.length) return undefined;
+  const last = lines.length - pattern.length;
+  const searchStart = eof ? Math.max(last, start) : start;
+  const passes: Array<(a: string, b: string) => boolean> = [
+    (a, b) => a === b,
+    (a, b) => rtrimEnd(a) === rtrimEnd(b),
+    (a, b) => rtrim(a) === rtrim(b),
+    (a, b) => normalise(a) === normalise(b),
+  ];
+  for (const same of passes) {
+    for (let i = searchStart; i <= last; i++) {
+      if (pattern.every((p, j) => same(lines[i + j], p))) return i;
+    }
+  }
+  return undefined;
+}
+
+type Replacement = [start: number, oldLen: number, newLines: string[]];
+
+/** Upstream compute_replacements: resolve every chunk against the original lines. */
+function computeReplacements(original: string[], path: string, chunks: PatchChunk[]): Replacement[] {
+  const replacements: Replacement[] = [];
+  let lineIndex = 0;
+  for (const chunk of chunks) {
+    if (chunk.changeContext !== undefined) {
+      const idx = seekSequence(original, [chunk.changeContext], lineIndex, false);
+      if (idx === undefined) throw new Error(`Failed to find context '${chunk.changeContext}' in ${path}`);
+      lineIndex = idx + 1;
+    }
+    if (!chunk.oldLines.length) {
+      replacements.push([original.length, 0, chunk.newLines.slice()]);
+      continue;
+    }
+    let pattern = chunk.oldLines, newSlice = chunk.newLines;
+    let found = seekSequence(original, pattern, lineIndex, chunk.eof);
+    if (found === undefined && pattern.at(-1) === "") {
+      // Trailing empty line stands for the file's final newline; retry without it.
+      pattern = pattern.slice(0, -1);
+      if (newSlice.at(-1) === "") newSlice = newSlice.slice(0, -1);
+      found = seekSequence(original, pattern, lineIndex, chunk.eof);
+    }
+    if (found === undefined) {
+      throw new Error(`Failed to find expected lines in ${path}:\n${chunk.oldLines.join("\n")}`);
+    }
+    // Only changed spans are replaced; context lines keep their original text and ending.
+    let oldStart = 0, newStart = 0;
+    for (const [oldCtx, newCtx] of chunk.contextPairs) {
+      if (oldCtx >= pattern.length || newCtx >= newSlice.length) break;
+      if (oldStart !== oldCtx || newStart !== newCtx) {
+        replacements.push([found + oldStart, oldCtx - oldStart, newSlice.slice(newStart, newCtx)]);
       }
+      oldStart = oldCtx + 1;
+      newStart = newCtx + 1;
     }
-    const parent = dirname(current); if (parent === current) return ""; current = parent;
-  }
-}
-function resolvePatchPath(workspace: string, base: string, requested: string) {
-  if (!requested) throw new Error(`cannot resolve ${JSON.stringify(requested)}: empty path`);
-  let abs = isAbsolute(requested) ? resolve(requested) : resolve(base, requested);
-  if (workspace && !existsSync(abs)) {
-    const prefix = join(resolve(workspace), basename(resolve(workspace))) + sep;
-    if (abs.startsWith(prefix)) {
-      const healed = join(resolve(workspace), abs.slice(prefix.length));
-      if (existsSync(healed)) abs = healed;
+    if (oldStart !== pattern.length || newStart !== newSlice.length) {
+      replacements.push([found + oldStart, pattern.length - oldStart, newSlice.slice(newStart)]);
     }
+    lineIndex = found + pattern.length;
   }
-  let canonical: string;
-  try { canonical = canonicalProspective(abs); }
-  catch (e) { throw new Error(`resolve ${JSON.stringify(requested)}: ${(e as Error).message}`); }
-  return canonical;
+  return replacements.sort((a, b) => a[0] - b[0]);
 }
 
-interface State { exists: boolean; isDir: boolean; content: string; mode: number }
-interface Change { op: PatchOp; absPath: string; absDest: string; oldContent: string; oldMode: number; newContent: string; destExisted: boolean; destOldContent: string; destOldMode: number }
-function state(path: string): State {
-  if (!existsSync(path)) return { exists: false, isDir: false, content: "", mode: 0o644 };
-  const st = lstatSync(path);
-  return { exists: true, isDir: st.isDirectory(), content: st.isDirectory() ? "" : readFileSync(path, "utf8"), mode: st.mode & 0o777 };
-}
-function conflictBlocks(s: string) {
-  let blocks = 0, conflict = false, separator = false;
-  for (const line of s.replace(/\r\n/g, "\n").split("\n")) {
-    if (line.startsWith("<<<<<<<")) { conflict = true; separator = false; }
-    else if (conflict && line.startsWith("=======")) separator = true;
-    else if (conflict && separator && line.startsWith(">>>>>>>")) { blocks++; conflict = separator = false; }
+type LineEnding = "\n" | "\r\n" | "\r";
+interface SourceLine { text: string; ending?: LineEnding }
+
+/** Upstream SourceFile: split on LF, CRLF, and lone CR, retaining each ending. */
+function parseSource(contents: string): { lines: SourceLine[]; preferred: LineEnding } {
+  const lines: SourceLine[] = [];
+  let preferred: LineEnding | undefined, start = 0, i = 0;
+  while (i < contents.length) {
+    const c = contents[i];
+    if (c !== "\r" && c !== "\n") { i++; continue; }
+    const ending: LineEnding = c === "\n" ? "\n" : contents[i + 1] === "\n" ? "\r\n" : "\r";
+    preferred ??= ending;
+    lines.push({ text: contents.slice(start, i), ending });
+    i += ending.length;
+    start = i;
   }
-  return blocks;
+  if (start < contents.length) lines.push({ text: contents.slice(start) });
+  return { lines, preferred: preferred ?? "\n" };
 }
-function atomicWrite(path: string, content: string, mode: number) {
-  mkdirSync(dirname(path), { recursive: true, mode: 0o755 });
-  const dir = mkdtempSync(join(dirname(path), ".apply-patch-"));
-  const temp = join(dir, "file");
-  try { writeFileSync(temp, content, { mode }); chmodSync(temp, mode); renameSync(temp, path); }
-  finally { rmSync(dir, { recursive: true, force: true }); }
+
+/** Upstream derive_new_contents_from_chunks, applied to in-memory text. */
+export function applyChunks(original: string, path: string, chunks: PatchChunk[]): string {
+  const source = parseSource(original);
+  const replacements = computeReplacements(source.lines.map(l => l.text), path, chunks);
+  const out: SourceLine[] = [];
+  let sourceIndex = 0;
+  for (const [start, oldLen, segment] of replacements) {
+    if (start < sourceIndex) throw new Error(`update ${path}: overlapping replacements`);
+    out.push(...source.lines.slice(sourceIndex, start));
+    sourceIndex = start + oldLen;
+    out.push(...segment.map(text => ({ text, ending: source.preferred })));
+  }
+  out.push(...source.lines.slice(sourceIndex));
+  // Historical behavior: every resulting line terminates, including an unterminated final line.
+  return out.map(l => l.text + (l.ending ?? source.preferred)).join("");
+}
+
+/** Raw bytes of a source path. Delete needs no text decoding (upstream deletes any file). */
+function readSourceBytes(abs: string, requested: string): Buffer {
+  if (!existsSync(abs)) throw new Error(`${requested}: file not found`);
+  try { return readFileSync(abs); }
+  catch (e) { throw new Error(`Failed to read ${requested}: ${(e as Error).message}`); }
+}
+
+/**
+ * Strict UTF-8 read of an update source. Invalid bytes are rejected, not replaced.
+ * A leading BOM is kept in the text (ignoreBOM), so it survives an update as upstream does.
+ */
+function readSource(abs: string, requested: string): string {
+  const bytes = readSourceBytes(abs, requested);
+  try { return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes); }
+  catch { throw new Error(`${requested}: not valid UTF-8 text`); }
 }
 
 let snapshotCounter = 0n;
 const snapshotName = (path: string) => `${basename(path)}-${BigInt(Date.now()) * 1_000_000n + process.hrtime.bigint() % 1_000_000n + snapshotCounter++}.bak`;
-function snapshot(workspace: string, path: string, existed: boolean, content: string, provenance: { conversationId?: string; userMessage?: string } = {}) {
+interface Provenance { conversationId?: string; userMessage?: string }
+function snapshot(workspace: string, path: string, existed: boolean, content: Buffer | string, provenance: Provenance = {}) {
   if (!workspace) return;
   const dir = join(workspace, ".swarm", "snapshots");
-  mkdirSync(dir, { recursive: true, mode: 0o700 }); chmodSync(dir, 0o700);
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
   const ignore = join(dir, ".gitignore");
   if (!existsSync(ignore)) writeFileSync(ignore, "# Auto-generated by swarm: agent file snapshots — not for version control.\n*\n", { mode: 0o644 });
   const name = snapshotName(path), bak = join(dir, name);
@@ -329,6 +341,11 @@ function snapshot(workspace: string, path: string, existed: boolean, content: st
     ...(existed ? {} : { new_file: true }),
   }, null, 2), { mode: 0o644 });
 }
+/** Snapshot the current on-disk state of `path` (raw bytes), before this tool writes it. */
+function snapshotCurrent(workspace: string, path: string, provenance: Provenance) {
+  if (!existsSync(path)) return snapshot(workspace, path, false, "", provenance);
+  snapshot(workspace, path, true, readFileSync(path), provenance);
+}
 /** time.Now().UTC().Format(time.RFC3339Nano): trailing zeros trimmed. */
 function goNowUTC(): string {
   const iso = new Date().toISOString();
@@ -336,8 +353,116 @@ function goNowUTC(): string {
   return `${iso.slice(0, 19)}${frac ? `.${frac}` : ""}Z`;
 }
 
-/** Preflight and transactionally apply every operation in a V4A patch. */
+/** Resolve a patch path lexically against `base`, as upstream cwd.join(path). */
+function resolvePatchPath(base: string, requested: string): string {
+  if (!requested) throw new Error(`cannot resolve ${JSON.stringify(requested)}: empty path`);
+  return isAbsolute(requested) ? resolve(requested) : resolve(base, requested);
+}
+
+/**
+ * Agent verification (upstream verify_apply_patch_args): parse-time checks,
+ * duplicate resolved source paths, and every update/delete validated against
+ * the ORIGINAL on-disk state. Performs no writes.
+ */
+function verifyOps(ops: PatchOp[], cwd: string) {
+  const seen = new Set<string>();
+  for (const op of ops) {
+    const abs = resolvePatchPath(cwd, op.path);
+    if (seen.has(abs)) throw invalidPatch(`multiple operations target ${abs}`);
+    seen.add(abs);
+    // Upstream verification reads delete targets as UTF-8 text (writer execution does not).
+    if (op.kind === "delete") readSource(abs, op.path);
+    if (op.kind === "update") applyChunks(readSource(abs, op.path), op.path, op.chunks);
+  }
+}
+
+/**
+ * Sequential execution (upstream apply_hunks_to_files). Each operation re-reads
+ * current disk state and writes immediately. Failure stops the patch; earlier
+ * writes are not reverted. Snapshots are taken before each write.
+ */
+function executeOps(ops: PatchOp[], workspace: string, cwd: string, provenance: Provenance): string {
+  if (!ops.length) throw new ApplyPatchExecutionError("No files were modified.", []);
+  const committed: ApplyPatchExecutionError["committed"] = [];
+  const added: string[] = [], modified: string[] = [], deleted: string[] = [];
+  const describe = (i: number, op: PatchOp, cause: unknown): never => {
+    const lines = committed.map(c => `${c.tag} ${c.path}${c.note ? ` (${c.note})` : ""}\n`).join("");
+    const after = committed.length
+      ? `Changes already written were NOT rolled back:\n${lines}Use Undo on each listed file to revert it.`
+      : "No files were written before this failure.";
+    const kind = op.moveTo ? "update+move" : op.kind;
+    throw new ApplyPatchExecutionError(
+      `apply_patch stopped at operation ${i + 1} of ${ops.length} (${kind} ${op.path}): ${(cause as Error).message}. ` +
+      `That operation may be partially applied. ${after}`,
+      committed,
+    );
+  };
+  for (let i = 0; i < ops.length; i++) {
+    const op = ops[i];
+    try {
+      const abs = resolvePatchPath(cwd, op.path);
+      if (op.kind === "add") {
+        snapshotCurrent(workspace, abs, provenance);
+        mkdirSync(dirname(abs), { recursive: true });
+        writeFileSync(abs, op.addBody);
+        committed.push({ tag: "A", path: op.path }); added.push(op.path);
+      } else if (op.kind === "delete") {
+        const current = readSourceBytes(abs, op.path);
+        snapshot(workspace, abs, true, current, provenance);
+        rmSync(abs);
+        committed.push({ tag: "D", path: op.path }); deleted.push(op.path);
+      } else {
+        const current = readSource(abs, op.path);
+        const next = applyChunks(current, op.path, op.chunks);
+        const dest = op.moveTo === undefined ? abs : resolvePatchPath(cwd, op.moveTo);
+        if (dest === abs && op.moveTo === undefined) {
+          snapshot(workspace, abs, true, current, provenance);
+          writeFileSync(abs, next);
+          committed.push({ tag: "M", path: op.path }); modified.push(op.path);
+        } else {
+          // A move onto its own source writes the destination, then removes the source: the file is deleted (upstream).
+          snapshot(workspace, abs, true, current, provenance);
+          snapshotCurrent(workspace, dest, provenance);
+          mkdirSync(dirname(dest), { recursive: true });
+          writeFileSync(dest, next);
+          committed.push({ tag: "M", path: op.moveTo!, note: `source ${op.path} not yet removed` });
+          modified.push(op.moveTo!);
+          try { rmSync(abs); }
+          catch (e) { committed[committed.length - 1].note = `source ${op.path} NOT removed: ${(e as Error).message}`; throw e; }
+          committed[committed.length - 1].note = undefined;
+        }
+      }
+    } catch (cause) {
+      describe(i, op, cause);
+    }
+  }
+  return "Success. Updated the following files:\n" +
+    added.map(p => `A ${p}\n`).join("") + modified.map(p => `M ${p}\n`).join("") + deleted.map(p => `D ${p}\n`).join("");
+}
+
+/**
+ * Agent tool path: validate the whole patch (no writes), then execute it
+ * sequentially. Validation failures leave every file untouched. Execution
+ * failures keep earlier writes and are reported as ApplyPatchExecutionError.
+ */
 export async function applyPatch(input: string, options: ApplyPatchOptions = {}): Promise<string> {
+  const { ops, workspace, cwd } = prepare(input, options);
+  verifyOps(ops, cwd);
+  if (options.signal?.aborted) throw options.signal.reason ?? new Error("context canceled");
+  return executeOps(ops, workspace, cwd, options);
+}
+
+/**
+ * Standalone writer semantics (upstream apply_patch executable): parse and
+ * execute sequentially with no up-front verification. Not used by the agent
+ * tool; the parity runner uses it to compare against upstream fixtures.
+ */
+export async function applyPatchStandalone(input: string, options: ApplyPatchOptions = {}): Promise<string> {
+  const { ops, workspace, cwd } = prepare(input, options);
+  return executeOps(ops, workspace, cwd, options);
+}
+
+function prepare(input: string, options: ApplyPatchOptions) {
   if (options.signal?.aborted) throw options.signal.reason ?? new Error("context canceled");
   if (!input.trim()) throw new Error("input is required");
   const workspace = resolve(options.workspacePath ?? process.cwd());
@@ -347,81 +472,14 @@ export async function applyPatch(input: string, options: ApplyPatchOptions = {})
     if (!statSync(cwd).isDirectory()) throw new Error(`cwd ${JSON.stringify(options.cwd.trim())} is not a directory`);
   }
   const ops = parsePatch(input);
-  if (!ops.length) throw new Error("No files were modified.");
-  const virtual = new Map<string, State>(), load = (p: string) => virtual.get(p) ?? (() => { const s = state(p); virtual.set(p, s); return s; })();
-  const changes: Change[] = [];
-  for (const op of ops) {
-    const absPath = resolvePatchPath(workspace, cwd, op.path), source = load(absPath);
-    const ch: Change = { op, absPath, absDest: absPath, oldContent: "", oldMode: 0o644, newContent: "", destExisted: false, destOldContent: "", destOldMode: 0 };
-    if (op.kind === "add") {
-      if (source.isDir) throw new Error(`${op.path} is a directory`);
-      ch.destExisted = source.exists;
-      if (source.exists) Object.assign(ch, { oldContent: source.content, oldMode: source.mode, destOldContent: source.content, destOldMode: source.mode });
-      ch.newContent = op.addBody;
-      virtual.set(absPath, { exists: true, isDir: false, content: ch.newContent, mode: ch.oldMode });
-    } else {
-      if (!source.exists) throw new Error(`${op.path}: file not found`);
-      if (source.isDir) throw new Error(`${op.path} is a directory`);
-      ch.oldContent = source.content; ch.oldMode = source.mode;
-      if (op.kind === "delete") virtual.set(absPath, { ...source, exists: false });
-      else {
-        ch.newContent = applyHunks(ch.oldContent, op.hunks, op.path);
-        if (op.moveTo) {
-          const dest = resolvePatchPath(workspace, cwd, op.moveTo);
-          if (dest !== absPath) {
-            const ds = load(dest);
-            if (ds.isDir) throw new Error(`move target ${op.moveTo} is a directory`);
-            Object.assign(ch, { absDest: dest, destExisted: ds.exists, destOldContent: ds.content, destOldMode: ds.mode });
-            virtual.set(absPath, { ...source, exists: false });
-            virtual.set(dest, { exists: true, isDir: false, content: ch.newContent, mode: source.mode });
-          } else virtual.set(absPath, { ...source, content: ch.newContent });
-        } else virtual.set(absPath, { ...source, content: ch.newContent });
-      }
-    }
-    if (op.kind !== "delete" && conflictBlocks(ch.newContent) > conflictBlocks(ch.oldContent))
-      throw new Error(`${op.path} introduces unresolved merge conflict markers`);
-    changes.push(ch);
-  }
-  const seen = new Set<string>();
-  for (const ch of changes) {
-    const take = (p: string, existed: boolean, body: string) => { if (!seen.has(p)) { snapshot(workspace, p, existed, body, options); seen.add(p); } };
-    if (ch.op.kind === "add") take(ch.absDest, ch.destExisted, ch.destOldContent);
-    else { take(ch.absPath, true, ch.oldContent); if (ch.op.kind === "update" && ch.absDest !== ch.absPath) take(ch.absDest, ch.destExisted, ch.destOldContent); }
-  }
-  const undo: Array<() => void> = [], added: string[] = [], modified: string[] = [], deleted: string[] = [];
-  try {
-    for (const ch of changes) {
-      if (ch.op.kind === "add") {
-        atomicWrite(ch.absDest, ch.newContent, ch.oldMode || 0o644);
-        undo.push(() => ch.destExisted ? atomicWrite(ch.absDest, ch.destOldContent, ch.destOldMode) : rmSync(ch.absDest, { force: true }));
-        added.push(ch.op.path);
-      } else if (ch.op.kind === "delete") {
-        rmSync(ch.absPath);
-        undo.push(() => atomicWrite(ch.absPath, ch.oldContent, ch.oldMode)); deleted.push(ch.op.path);
-      } else {
-        atomicWrite(ch.absDest, ch.newContent, ch.oldMode);
-        if (ch.absDest !== ch.absPath) {
-          undo.push(() => ch.destExisted ? atomicWrite(ch.absDest, ch.destOldContent, ch.destOldMode) : rmSync(ch.absDest, { force: true }));
-          rmSync(ch.absPath); undo.push(() => atomicWrite(ch.absPath, ch.oldContent, ch.oldMode)); modified.push(ch.op.moveTo);
-        } else { undo.push(() => atomicWrite(ch.absPath, ch.oldContent, ch.oldMode)); modified.push(ch.op.path); }
-      }
-    }
-  } catch (cause) {
-    const failures: string[] = [];
-    for (const fn of undo.reverse()) try { fn(); } catch (e) { failures.push(String(e)); }
-    if (failures.length) throw new Error(`apply failed (${String(cause)}); rollback failures: ${failures.join("; ")} — inspect these paths`);
-    throw cause;
-  }
-  return "Success. Updated the following files:\n" +
-    added.map(p => `A ${p}\n`).join("") + modified.map(p => `M ${p}\n`).join("") + deleted.map(p => `D ${p}\n`).join("");
+  return { ops, workspace, cwd };
 }
 
-/** Consume the latest forge-compatible snapshot for a path. */
 export async function undoFile(path: string, workspacePath = process.cwd()): Promise<string> {
   const abs = resolve(path), dir = join(resolve(workspacePath), ".swarm", "snapshots");
   if (!existsSync(dir)) throw new Error(`no snapshot found for ${abs} (no edits have been tracked yet)`);
   const prefix = `${basename(abs)}-`;
-  const entries = (await import("node:fs")).readdirSync(dir).filter(n => n.startsWith(prefix) && n.endsWith(".bak"))
+  const entries = readdirSync(dir).filter(n => n.startsWith(prefix) && /^\d+\.bak$/.test(n.slice(prefix.length)))
     .map(name => ({ name, ts: BigInt(name.slice(prefix.length, -4)) })).sort((a, b) => a.ts > b.ts ? -1 : a.ts < b.ts ? 1 : 0);
   if (!entries.length) throw new Error(`no snapshot found for ${abs}`);
   const bak = join(dir, entries[0].name), ctxPath = bak.slice(0, -4) + ".ctx.json";

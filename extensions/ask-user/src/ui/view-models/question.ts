@@ -185,10 +185,13 @@ function getOptionPrefix(
 	_option: AskDisplayOption,
 	answered: boolean
 ): string {
-	if (questionType !== "multi") {
-		return "";
+	if (questionType === "multi") {
+		return `[${answered ? "x" : " "}] `;
 	}
-	return `[${answered ? "x" : " "}] `;
+	if (questionType === "single") {
+		return `(${answered ? "•" : " "}) `;
+	}
+	return "";
 }
 
 function getOptionColor(

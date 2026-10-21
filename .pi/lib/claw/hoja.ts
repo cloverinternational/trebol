@@ -2,8 +2,13 @@
  *  never placed in errors, logs or results. Project names decide the team: every Hoja project belongs to
  *  exactly one team, and the assignee must be a member of that team. */
 export type FetchLike = (url: string, init: { method: string; headers: Record<string, string>; body: string; signal?: AbortSignal; redirect?: "error" }) => Promise<{ status: number; text(): Promise<string> }>;
-/** Only locally authored errors may cross the tool boundary. Never echo server bodies. */
-export class HojaRequestError extends Error {}
+/** Only locally authored errors may cross the tool boundary. Never echo server bodies.
+ *  `ambiguous` means a write may have been applied even though no usable answer arrived (timeout, dropped connection,
+ *  non-200, unreadable body). Only a GraphQL error with no data is a definitive rejection: nothing was committed. */
+export class HojaRequestError extends Error {
+	readonly ambiguous: boolean;
+	constructor(message: string, ambiguous = false) { super(message); this.ambiguous = ambiguous; }
+}
 export type Resolved = {
 	teamId: string; teamKey: string; projectId: string; project: string; assigneeId: string; assignee: string;
 	states: Record<string, string>;
@@ -41,7 +46,7 @@ export class HojaClient {
 		let timer: ReturnType<typeof setTimeout> | undefined;
 		const deadline = new Promise<never>((_, reject) => {
 			timer = setTimeout(() => {
-				reject(new HojaRequestError("Hoja request timed out; outcome unknown for writes. Read state before retrying."));
+				reject(new HojaRequestError("Hoja request timed out; outcome unknown for writes. Read state before retrying.", true));
 				controller.abort();
 			}, this.timeoutMs);
 		});
@@ -54,16 +59,17 @@ export class HojaClient {
 					headers: { Authorization: this.token, "Content-Type": "application/json" },
 					body: JSON.stringify({ query, variables }),
 				});
-				if (res.status !== 200) throw new HojaRequestError(`Hoja HTTP ${Number(res.status)}`);
+				if (res.status !== 200) throw new HojaRequestError(`Hoja HTTP ${Number(res.status)}`, true);
 				const body = await res.text();
 				const parsed = JSON.parse(body);
-				if (parsed.errors?.length) throw new HojaRequestError("Hoja GraphQL request failed; no result accepted.");
-				if (!parsed.data || typeof parsed.data !== "object") throw new HojaRequestError("Hoja returned no valid data.");
+				if (parsed.errors?.length && !parsed.data) throw new HojaRequestError("Hoja GraphQL request failed; no result accepted.");
+				if (parsed.errors?.length) throw new HojaRequestError("Hoja GraphQL returned errors with data; outcome unknown.", true);
+				if (!parsed.data || typeof parsed.data !== "object") throw new HojaRequestError("Hoja returned no valid data.", true);
 				return parsed.data as T;
 			})()]);
 		} catch (error) {
 			if (error instanceof HojaRequestError) throw error;
-			throw new HojaRequestError("Hoja request failed; check connectivity and configuration. No server details exposed.");
+			throw new HojaRequestError("Hoja request failed; check connectivity and configuration. No server details exposed.", true);
 		} finally {
 			clearTimeout(timer);
 		}
@@ -132,9 +138,10 @@ export class HojaClient {
 		};
 	}
 
-	/** Reconciliation after a crash: an issue already created for this run carries its marker in the description. */
+	/** Reconciliation after a crash: an issue already created for this run carries its marker in the description.
+	 *  Uses the server-side description filter, so the lookup is exact and not limited to a page of recent issues. */
 	async findIssueByMarker(marker: string): Promise<IssueRef | undefined> {
-		const d = await this.gql<any>(`{ issues(first: 250) { nodes { id identifier description } } }`);
+		const d = await this.gql<any>(`{ issues(first: 50, filter: { description: { contains: ${JSON.stringify(marker)} } }) { nodes { id identifier description } } }`);
 		const hit = (d.issues?.nodes ?? []).find((n: { description?: string }) => n.description?.includes(marker));
 		return hit ? { id: hit.id, identifier: hit.identifier } : undefined;
 	}

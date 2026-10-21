@@ -11,6 +11,7 @@ Tests: `.pi/test/claw/claw.test.ts`.
 - Routing while on (`.pi/lib/claw/mode.ts`): the single `Agent` tool routes to Claw spawn (`project` required). `Subagent`, `BackgroundTask`, `Delegate`, `DelegateOutput`, `SubagentOutput`, `TaskOutput`, `AgentControl`, `wait_for_agent`, `multi_agent_wait` are removed from the active set and refused at `tool_call`. Orchestrator tools (`claw_spawn|list|read|send|cancel|trigger`) are active only while on. Off restores the prior active set captured at `/claw on`; a session shutdown restores it too and does not change the store control (triggers keep firing).
 - Worker launch is plain terminal pi: the command sets `PI_TERN_UI=0` (the documented bypass of the Tern shell dispatch, `docs/reference/tern-pi-shell-dispatch.md`). Normal tools stay enabled; `-nt` is not used.
 - `/claw off` — suspend triggers and new runs. Running workers keep running and are still reconciled.
+- Per-chat mode: `/claw on|off` persists `claw-mode` in the session transcript; `/reload`, resume and restart restore the chat's own mode (routing and inbox ownership only, no daemon start, tab rename or store change). A new chat starts off. See `docs/claw/reload-persistence-2026-10-21.md`.
 - `/claw status` — control state, daemon pid, run counts, pending Hoja syncs, triggers.
 - `claw_spawn`, `claw_list`, `claw_read`, `claw_send`, `claw_cancel`, `claw_trigger` (add|list|remove).
 - Worker only: `claw_finish {outcome: completed|failed|needs_user, summary, evidence[]}`. `completed` needs evidence.
@@ -29,6 +30,8 @@ Tests: `.pi/test/claw/claw.test.ts`.
 | cancelled | stopped by `claw_cancel` |
 
 Hoja Done is never set automatically. `agent_settled` is never treated as success.
+
+Cancel maps the Hoja issue to `Canceled` only when the worker pid is gone and its tab is not live (verified). Otherwise the Hoja state is left unchanged and the comment says so. See `docs/claw/acceptance-2026-10-21.md`.
 
 ## Durability
 
@@ -53,7 +56,9 @@ See `docs/claw/e2e-evidence-2026-10-21.md` for run, Hoja, trigger and session ID
 - Permission waits are not detectable from native signals; they appear as `idle`.
 - PID liveness is `kill(pid, 0)` without start-time checks; pid reuse is theoretically possible.
 - Tab naming: `/claw on` renames the pane's tab; outside Tern (`TERN_PANE` unset) or when Tern refuses, the warning says to name it `Claw` manually. Worker tabs whose rename fails are reported with `tabWarning` in `claw_read`.
-- Hoja issue lookup scans the 250 most recent issues for the marker.
+- Marker lookup uses the Hoja description filter (exact). A create that commits after the lookup can still produce a duplicate; not closed (see acceptance doc).
+- Inbox delivery is at-least-once in the crash window after persistence, and can drop an item in the dispatch-to-persist window. Exactly-once is not claimed.
+- A timed-out `claw_spawn` may still start a run; check `claw_list` before retrying.
 - Worker depth 1 is enforced by a `tool_call` block list (`WORKER_BLOCKED_TOOLS`); normal approval gates are unchanged.
 
 ## Verification log (2026-10-21, isolated scratch store)

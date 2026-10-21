@@ -16,6 +16,7 @@ import type { Model } from "@earendil-works/pi-ai";
 import { encodeTspBlob, projectTranscript, type TspMessage, type TspNode, type TspWriter, TernInlineSurface } from "./tsp.ts";
 import { composerNodes, modelDisplayName, type GitFacts } from "./composer-view.ts";
 import { artifactNodes, previewFile, type ArtifactPreview } from "./artifact-previews.ts";
+import { readMcpStatus, subscribeMcpStatus } from "../tools/mcp-status.ts";
 import { STARTUP_CSS, gitDiffNodes, gitDismissNode, gitFileRefs, gitStatusNodes, readRepoStatus, startupBlob, startupNodes, trebolVersion, watchRepo, type GitFileRef, type RepoStatus } from "./startup-card.ts";
 import { readFileDiff, type GitSection } from "./git-status.ts";
 import { patchArtifactPaths } from "../tools/swarm-artifacts.ts";
@@ -28,6 +29,7 @@ import { ASK_OPTIONS_ID, TernAskDialog, type AskEventBus } from "./ask-dialog.ts
 import { TernExtensionUI, UI_PROMPT_LIST_ID } from "./ext-ui.ts";
 import { AUTOCOMPLETE_ID, SlashAutocomplete, type Edit } from "./autocomplete.ts";
 import { expandMentions } from "./mentions.ts";
+import { activityView, currentTaskLine, rowLine, summarizeWorkStep, type CurrentTask } from "./work-summary.ts";
 import { goalLine, isAbortedAssistant, isCancellationError, isFailedAssistant, isTurnBoundary, liveLineText, SETTLED_LABEL, segmentTranscript, summarizeToolGroup } from "./turn-groups.ts";
 import { DraftEditor, isLargePaste } from "./draft-edit.ts";
 import { getNativeClipboard } from "@earendil-works/pi-tui";
@@ -104,6 +106,8 @@ interface Item {
 	took?: number;
 	exit?: number;
 	timedOut?: boolean;
+	// Completion order among finished steps, so "latest" follows what finished last rather than what started last.
+	doneSeq?: number;
 	cancelled?: boolean;
 	turnAborted?: boolean;
 	turnFailed?: boolean;
@@ -250,6 +254,9 @@ export class TranscriptProjector {
 	// Items before this index belong to settled turns; only a group starting at or after it can be live.
 	#turnStart = 0;
 	#seq = 0;
+	// Per-group presentation state set by native toggle, select and the group's bottom controls. Never part of the session.
+	#groupViews = new Map<string, GroupView>();
+	#doneSeq = 0;
 
 	get items(): readonly Item[] {
 		return this.#items;
@@ -261,6 +268,8 @@ export class TranscriptProjector {
 		this.#localUserPending = false;
 		this.#turnOpen = false;
 		this.#turnStart = 0;
+		this.#groupViews.clear();
+		this.#doneSeq = 0;
 		for (const raw of entries) {
 			if (typeof raw !== "object" || raw === null) continue;
 			const entry = raw as { id?: unknown; type?: unknown; message?: unknown };
@@ -297,6 +306,7 @@ export class TranscriptProjector {
 		const details = result.details as { exit_code?: unknown; duration_ms?: unknown } | undefined;
 		item.exit = typeof details?.exit_code === "number" && details.exit_code !== 0 ? details.exit_code : undefined;
 		item.status = result.isError || item.exit !== undefined ? "error" : "ok";
+		item.doneSeq = ++this.#doneSeq;
 		item.took = typeof details?.duration_ms === "number" ? details.duration_ms : undefined;
 		const text = messageText(result);
 		if (item.status === "error") item.errorText = text;
@@ -411,6 +421,7 @@ export class TranscriptProjector {
 					item.exit = typeof details?.exit_code === "number" && details.exit_code !== 0 ? details.exit_code : failureExit ? Number(failureExit) : undefined;
 					item.timedOut = details?.timed_out === true || (bashFailure && /^Error executing bash: command timed out after \d+s/.test(resultBody));
 					item.status = event.isError || item.exit !== undefined ? "error" : "ok";
+					item.doneSeq = ++this.#doneSeq;
 					if (item.status === "error") item.errorText = resultBody;
 					if (item.name === "TaskManage") item.batch = taskManageBatch(event.result);
 					item.text = `tool ${String(event.toolName)} ${item.status}`;
@@ -448,7 +459,7 @@ export class TranscriptProjector {
 		this.#items.push({ id: `n${++this.#seq}`, role, text });
 	}
 
-	nodes(outputExpanded = false): TspNode[] {
+	nodes(outputExpanded = false, options: { currentTask?: CurrentTask } = {}): TspNode[] {
 		const out: TspNode[] = [];
 		const segments = segmentTranscript(this.#items);
 		// Only the newest turn can still be running; an earlier group is settled once a user message follows it.
@@ -472,10 +483,9 @@ export class TranscriptProjector {
 		let goal = "";
 		segments.forEach((segment, i) => {
 			if (segment.kind === "tools") {
-				out.push(...[toolGroupNode(segment.items, goal, outputExpanded, i === openGroup)].flat());
-				if (i === openGroup && tail && !outputExpanded) {
-					out.push({ id: `g-${segment.items[0]?.id ?? "empty"}-tail`, k: "text", p: { role: "tern.work-tail", tone: "muted", wrap: "none", truncate: "end", text: tail } });
-				}
+				const turnOpen = i === openGroup;
+				// toolGroupNode labels the current task only in the live (running) group.
+				out.push(...toolGroupNode(segment.items, { goal, tail: turnOpen ? tail : "", outputExpanded, turnOpen, view: this.#groupViews.get(groupId(segment.items)), currentTask: options.currentTask }));
 				return;
 			}
 			const { item } = segment;
@@ -487,9 +497,25 @@ export class TranscriptProjector {
 				out.push({ id: `msg-${item.id}`, k: "text", p: { role: "tern.notice", tone: "muted", wrap: "none", truncate: "end", text: goalLine(item.text) } });
 				return;
 			}
-			out.push(...projectTranscript([{ id: item.id, role: item.role as Exclude<Role, "tool">, text: item.text }]));
+			out.push(...projectTranscript([{ id: item.id, role: item.role as Exclude<Role, "tool">, text: item.text, streaming: item.streaming }]));
 		});
 		return out;
+	}
+
+	setGroupCollapsed(groupId: string, collapsed: boolean): void {
+		this.#groupViews.set(groupId, { ...this.#groupViews.get(groupId), minimized: collapsed });
+	}
+
+	setGroupView(groupId: string, view: DetailView): void {
+		this.#groupViews.set(groupId, { ...this.#groupViews.get(groupId), minimized: false, view });
+	}
+
+	selectRow(groupId: string, rowId: string): void {
+		this.#groupViews.set(groupId, { ...this.#groupViews.get(groupId), selected: rowId });
+	}
+
+	clearGroupViews(): void {
+		this.#groupViews.clear();
 	}
 }
 
@@ -512,48 +538,147 @@ function toolCallsOf(message: unknown): Array<{ id: string; name: string; argume
 	return content.filter((part): part is { type: "toolCall"; id: string; name: string; arguments: unknown } => typeof part === "object" && part !== null && (part as { type?: unknown }).type === "toolCall" && typeof (part as { id?: unknown }).id === "string" && typeof (part as { name?: unknown }).name === "string");
 }
 
-// Live: one text line, no children. Settled: one collapsed card whose steps sit behind the fold;
-// ctrl+o (outputExpanded) unfolds every card, a head click folds one card locally in Tern.
-function toolGroupNode(items: Item[], goal: string, outputExpanded: boolean, turnOpen: boolean): TspNode | TspNode[] {
+// Live and settled: one card with the same id and kind. Its body holds factual rows (one list per run of steps,
+// narration kept between runs), the selected row's own renderer beneath it, and a bottom Collapse work control.
+// The fold is host-side: a native toggle or Collapse work sets this group's state; Ctrl+O clears it.
+function groupId(items: readonly Item[]): string {
+	return `g-${items[0]?.id ?? "empty"}`;
+}
+
+// Three presentations per group. Live groups default to the activity panel; settled groups default to compact.
+// Minimize persists through streamed updates; an explicit All steps / Activity choice persists the same way.
+type DetailView = "activity" | "all";
+interface GroupView { minimized?: boolean; view?: DetailView; selected?: string }
+
+interface GroupContext {
+	goal: string;
+	tail: string;
+	outputExpanded: boolean;
+	turnOpen: boolean;
+	view: GroupView | undefined;
+	currentTask: CurrentTask | undefined;
+}
+
+const ACTIVITY_LABEL = "Activity";
+const ALL_STEPS_LABEL = "All steps";
+
+function toolGroupNode(items: Item[], ctx: GroupContext): TspNode[] {
 	const tools = items.filter((item) => item.role === "tool");
 	// Keyed by the group's first member, so the node keeps its id when the first tool starts after narration
 	// (a changed id is a remove plus insert in Tern, which flickers).
-	const id = `g-${items[0]?.id ?? "empty"}`;
+	const id = groupId(items);
 	const summary = summarizeToolGroup(tools);
-	const children = (): TspNode[] => items.flatMap((item): TspNode[] => item.role === "tool" ? [toolRow(item, outputExpanded)]
-		: item.text.trim() ? [{ id: `${item.id}-note`, k: "md", p: { role: "tern.work-note", text: item.text } }] : []);
+	const live = summary.status === "running" || ctx.turnOpen;
+	const minimized = ctx.view?.minimized ?? (!live && !ctx.outputExpanded);
 	const steps = tools.length === 1 ? "1 step" : `${tools.length} steps`;
-	if (summary.status === "running" || turnOpen) {
-		const line = liveLineText(goal, summary.active);
-		// ctrl+o while running: the same work as an open card, its steps and narration streaming in place.
-		// It keeps the group's id and kind when it settles, so only the title and status change.
-		if (outputExpanded) {
-			return {
-				id, k: "tool",
-				p: {
-					role: "tern.work-live", key: id, name: "work", title: line.split(" · ")[0], status: "running", text: line,
-					...(goal ? { target: goal, targetKind: "text" } : {}),
-					frame: "card", collapsible: true, collapsed: false, meta: [steps],
-				},
-				c: children(),
-			};
-		}
-		return { id, k: "text", p: { role: "tern.work-live", tone: "pending", wrap: "none", truncate: "end", text: line } };
+	if (live) {
+		const line = liveLineText(ctx.goal, summary.active);
+		const mode: DetailView = ctx.view?.view ?? (ctx.outputExpanded ? "all" : "activity");
+		// The live header is the settled card's id, key and kind, so it keeps identity through streaming, expansion
+		// and settlement.
+		const card: TspNode = {
+			id, k: "tool",
+			p: {
+				role: "tern.work-live", key: id, name: "work", title: line.split(" · ")[0], status: "running", text: line,
+				...(ctx.goal ? { target: ctx.goal, targetKind: "text" } : {}),
+				frame: "card", collapsible: true, collapsed: minimized, meta: [steps],
+			},
+			c: minimized ? workBody(id, items, ctx.view?.selected, ctx.currentTask, "all") : workBody(id, items, ctx.view?.selected, ctx.currentTask, mode, ctx.goal),
+		};
+		// Only a minimized live group needs the one-line tail; the activity panel already carries narration.
+		const tail: TspNode[] = minimized && ctx.tail ? [{ id: `${id}-tail`, k: "text", p: { role: "tern.work-tail", tone: "muted", wrap: "none", truncate: "end", text: ctx.tail } }] : [];
+		return [card, ...tail];
 	}
 	// Narration whose tool calls never started (the turn ended first) is just what the agent said.
-	if (tools.length === 0) return items.filter((item) => item.text.trim()).flatMap((item) => projectTranscript([{ id: item.id, role: "assistant", text: item.text }]));
+	if (tools.length === 0) return items.filter((item) => item.text.trim()).flatMap((item) => projectTranscript([{ id: item.id, role: "assistant", text: item.text, streaming: item.streaming }]));
 	const status = summary.status === "done" ? "done" : summary.status === "failed" ? "error" : "cancelled";
-	return {
+	return [{
 		id, k: "tool",
 		p: {
 			role: "tern.work", key: id, name: "work", title: SETTLED_LABEL[summary.status], status,
-			...(goal ? { target: goal, targetKind: "text" } : {}),
-			frame: "card", collapsible: true, collapsed: !outputExpanded,
+			...(ctx.goal ? { target: ctx.goal, targetKind: "text" } : {}),
+			frame: "card", collapsible: true, collapsed: minimized,
 			meta: summary.failedSteps > 0 ? [steps, `${summary.failedSteps} failed`] : [steps],
 		},
-		// Steps in order, with the narration written between them; all behind the fold.
-		c: children(),
+		c: workBody(id, items, ctx.view?.selected, undefined, "all"),
+	}];
+}
+
+const workRowId = (item: Item) => `row-${item.id}`;
+
+function workRowNode(item: Item): TspNode {
+	const row = summarizeWorkStep(item);
+	return { id: workRowId(item), k: "item", p: { label: row.label, detail: row.target ?? "", value: row.result, tone: row.tone } };
+}
+
+const textNode = (id: string, role: string, text: string, tone: string, extra: Record<string, unknown> = {}): TspNode => ({ id, k: "text", p: { role, tone, wrap: "none", truncate: "end", text, ...extra } });
+
+// Consecutive steps share one list in call order; narration written between them stays in place as text.
+// The selected row's existing tool renderer opens beneath its list, expanded. The group's bottom controls
+// switch its presentation and Collapse work closes only this group.
+function workBody(groupId: string, items: readonly Item[], selected: string | undefined, currentTask: CurrentTask | undefined, mode: DetailView | "all", goal = ""): TspNode[] {
+	return mode === "activity" ? activityBody(groupId, items, selected, currentTask, goal) : allStepsBody(groupId, items, selected, currentTask, mode === "all" && hasLiveControls(items));
+}
+
+// Settled groups have no activity panel, so they offer only Collapse work.
+function hasLiveControls(items: readonly Item[]): boolean {
+	return items.some((item) => item.role === "tool" && item.status === "running");
+}
+
+function activityBody(groupId: string, items: readonly Item[], selected: string | undefined, currentTask: CurrentTask | undefined, goal: string): TspNode[] {
+	const out: TspNode[] = [];
+	const tools = items.filter((item) => item.role === "tool");
+	const view = activityView(tools, currentTask, goal);
+	if (view.heading) out.push(textNode(`${groupId}-focus`, "tern.work-focus", view.heading, "accent"));
+	// Up to three running steps, plus the selected step so an open detail stays visible when it settles.
+	const running = tools.filter((item) => item.status === "running" && item.cancelled !== true);
+	const keep = new Set(running.slice(0, 3));
+	const chosen = tools.find((item) => workRowId(item) === selected);
+	if (chosen) keep.add(chosen);
+	const listed = tools.filter((item) => keep.has(item));
+	const picked = listed.find((item) => workRowId(item) === selected);
+	if (listed.length > 0) out.push({ id: `${groupId}-rows-0`, k: "list", p: { role: "tern.work-rows", ...(picked ? { selected } : {}) }, c: listed.map(workRowNode) });
+	if (picked) out.push(toolRow(picked, true));
+	if (view.moreActive > 0) out.push(textNode(`${groupId}-overflow`, "tern.work-overflow", `+${view.moreActive} more running`, "muted"));
+	if (view.latest) out.push(textNode(`${groupId}-latest`, "tern.work-latest", `Last · ${rowLine(view.latest)}`, view.latest.tone === "error" ? "error" : "muted"));
+	if (view.failed) out.push(textNode(`${groupId}-failed`, "tern.work-failed", `${view.failed.count} failed · ${rowLine(view.failed.last)}`, "error"));
+	if (view.active.length === 0) out.push(textNode(`${groupId}-preparing`, "tern.work-preparing", "Preparing next action", "muted"));
+	out.push(...controls(groupId, "activity"));
+	return out;
+}
+
+function allStepsBody(groupId: string, items: readonly Item[], selected: string | undefined, currentTask: CurrentTask | undefined, live: boolean): TspNode[] {
+	const out: TspNode[] = [];
+	if (currentTask) out.push(textNode(`${groupId}-focus`, "tern.work-focus", currentTaskLine(currentTask), "accent"));
+	let run: Item[] = [];
+	let lists = 0;
+	const flush = () => {
+		if (run.length === 0) return;
+		const chosen = run.find((item) => workRowId(item) === selected);
+		out.push({ id: `${groupId}-rows-${lists++}`, k: "list", p: { role: "tern.work-rows", ...(chosen ? { selected } : {}) }, c: run.map(workRowNode) });
+		if (chosen) out.push(toolRow(chosen, true));
+		run = [];
 	};
+	for (const item of items) {
+		if (item.role === "tool") {
+			run.push(item);
+			continue;
+		}
+		flush();
+		if (item.text.trim()) out.push({ id: `${item.id}-note`, k: "md", p: { role: "tern.work-note", text: item.text, stream: item.streaming === true } });
+	}
+	flush();
+	out.push(...controls(groupId, live ? "all" : undefined));
+	return out;
+}
+
+// The last control is always Collapse work, which closes only this group.
+function controls(groupId: string, mode: DetailView | undefined): TspNode[] {
+	const out: TspNode[] = [];
+	if (mode === "activity") out.push(textNode(`${groupId}-all`, "tern.work-mode", ALL_STEPS_LABEL, "muted", { actions: { click: `work.all=${groupId}` } }));
+	if (mode === "all") out.push(textNode(`${groupId}-activity`, "tern.work-mode", ACTIVITY_LABEL, "muted", { actions: { click: `work.activity=${groupId}` } }));
+	out.push(textNode(`${groupId}-collapse`, "tern.work-collapse", "Collapse work", "muted", { actions: { click: `work.collapse=${groupId}` } }));
+	return out;
 }
 
 function toolNode(item: Item, outputExpanded: boolean): TspNode {
@@ -736,7 +861,10 @@ export class PiTernBridge {
 	#repoDirty = false;
 	#repoWatch: (() => void) | undefined;
 	#repoWatchKey = "";
+	#mcpUnsubscribe: (() => void) | undefined;
 	#gitView: { mode: "list" } | { mode: "diff"; ref: GitFileRef; text: string } | undefined;
+	// Bumped on every Git view navigation, session change and close; a diff read lands only if it is still the latest.
+	#gitRequest = 0;
 	#gitRefs: GitFileRef[] = [];
 	readonly #onClose?: () => void;
 	readonly #onEventTap?: (event: PiEventLike) => void;
@@ -883,6 +1011,8 @@ export class PiTernBridge {
 		this.#unsubscribe = this.#session.subscribe((event) => this.#onEvent(event));
 		this.#workUnsubscribe?.();
 		this.#workUnsubscribe = onRunningWorkChange(() => this.#render());
+		this.#mcpUnsubscribe?.();
+		this.#mcpUnsubscribe = subscribeMcpStatus(() => this.#render());
 		if (this.#events) {
 			this.#dialog = new TernAskDialog(this.#events, () => this.#render());
 			this.#dialog.start();
@@ -898,6 +1028,7 @@ export class PiTernBridge {
 		const id = sessionIdOf(this.#session);
 		if (id === this.#sessionId) return;
 		this.#sessionId = id;
+		this.#gitRequest++;
 	}
 
 	// Sends picture blobs before re-rendering, so no frame references a blob Tern has not received.
@@ -1034,6 +1165,7 @@ export class PiTernBridge {
 	// The status overlay: a list of changed files, then one file's diff. Clicks carry indexes into the list last rendered.
 	#openGitView(): void {
 		if (!this.#repo?.git) return;
+		this.#gitRequest++;
 		this.#gitView = { mode: "list" };
 		this.#render();
 	}
@@ -1043,16 +1175,26 @@ export class PiTernBridge {
 		if (!repo?.git) return Promise.resolve();
 		const ref = gitFileRefs(repo.snapshot).find((r) => r.section === section && r.entry.path === path);
 		if (!ref) {
+			this.#gitRequest++;
 			this.#gitView = { mode: "list" };
 			this.#render();
 			return Promise.resolve();
 		}
+		const request = ++this.#gitRequest;
+		const current = () => !this.#closed && request === this.#gitRequest;
 		// The diff node is added only with its text: a later text update to an existing diff node is not applied by Tern.
-		return readFileDiff(repo.root, ref.entry, section).then((text) => {
-			if (this.#closed) return;
-			this.#gitView = { mode: "diff", ref, text };
-			this.#render();
-		});
+		return readFileDiff(repo.root, ref.entry, section).then(
+			(text) => {
+				if (!current()) return;
+				this.#gitView = { mode: "diff", ref, text };
+				this.#render();
+			},
+			() => {
+				if (!current()) return;
+				this.#gitView = { mode: "diff", ref, text: "Diff unavailable." };
+				this.#render();
+			},
+		);
 	}
 
 	#refreshGit(): void {
@@ -1255,6 +1397,12 @@ export class PiTernBridge {
 		return [{ id: "background-work", k: "card", p: { head: `Background work · ${live.length} running`, status: "running", tone: "accent", role: "pi.background" }, c: rows }];
 	}
 
+	// The one focused task Pi's task state reports, as a plain value for the work table (no inference from prose).
+	#currentTask(): CurrentTask | undefined {
+		const view = this.#taskView();
+		return view?.status === "ready" && view.focus ? { id: view.focus.id, subject: view.focus.subject } : undefined;
+	}
+
 	#taskTop(): TspNode[] {
 		const view = this.#taskView();
 		if (!view || view.status !== "ready" || !view.focus) return [];
@@ -1311,8 +1459,8 @@ export class PiTernBridge {
 		if (this.#closed) return;
 		this.#syncSession();
 		const focus = this.#ui.focusId ?? (this.#treePickerOpen ? "session-tree-picker" : this.#modelPickerOpen ? "model-picker-sheet" : "composer");
-		const transcript = this.#projector.nodes(this.#toolOutputExpanded);
-		this.#surface.render([...startupNodes(this.#logo, this.#version, this.#repo), ...transcript], this.#dock(), focus, this.#layer(), this.#complete.selectedId);
+		const transcript = this.#projector.nodes(this.#toolOutputExpanded, { currentTask: this.#currentTask() });
+		this.#surface.render([...startupNodes(this.#logo, this.#version, this.#repo, readMcpStatus(this.#session.sessionManager?.getSessionId?.() as string | undefined)), ...transcript], this.#dock(), focus, this.#layer(), this.#complete.selectedId);
 		try { this.#onRenderTap?.(transcript, this.#trigger, this.#busy); } catch { /* tracing never affects the UI */ }
 	}
 
@@ -1320,6 +1468,8 @@ export class PiTernBridge {
 	toggleToolOutput(): void {
 		if (this.#closed) return;
 		this.#toolOutputExpanded = !this.#toolOutputExpanded;
+		// The global state overrides every group's local fold, so Ctrl+O clears them all.
+		this.#projector.clearGroupViews();
 		this.#render();
 	}
 
@@ -1482,6 +1632,7 @@ export class PiTernBridge {
 	// Returns true only when the configured `none` action closes the Tern surface.
 	escape(): boolean {
 		if (this.#gitView) {
+			this.#gitRequest++;
 			this.#gitView = this.#gitView.mode === "diff" ? { mode: "list" } : undefined;
 			this.#lastEligibleEscapeAt = 0;
 			this.#render();
@@ -1548,6 +1699,19 @@ export class PiTernBridge {
 	// Routes one parsed TSP message. Returns the promise of any submitted prompt, for tests.
 	handle(msg: TspMessage): Promise<void> | undefined {
 		if (this.#closed) return undefined;
+		if (msg.verb === "e" && msg.body.ev === "toggle" && typeof msg.body.id === "string" && msg.body.id.startsWith("g-")) {
+			this.#projector.setGroupCollapsed(msg.body.id, msg.body.collapsed === true);
+			this.#render();
+			return undefined;
+		}
+		if (msg.verb === "e" && msg.body.ev === "select" && typeof msg.body.id === "string" && typeof msg.body.item === "string") {
+			const row = /^(g-.+)-rows-\d+$/.exec(msg.body.id);
+			if (row) {
+				this.#projector.selectRow(row[1]!, msg.body.item);
+				this.#render();
+				return undefined;
+			}
+		}
 		if (msg.verb === "e" && msg.body.ev === "resize" && typeof msg.body.cols === "number" && msg.body.cols > 0) { this.#columns = msg.body.cols; if (this.#dialog?.active) this.#render(); }
 		if (msg.verb === "e" && (msg.body.ev === "select" || msg.body.ev === "activate") && msg.body.id === UI_PROMPT_LIST_ID) {
 			this.#ui.pick(msg.body.item, msg.body.ev === "activate");
@@ -1622,6 +1786,16 @@ export class PiTernBridge {
 		}
 		if (act === "close") this.close();
 		if (act === "interrupt") void this.cancel();
+		if (act === "work.collapse" && typeof msg.body.value === "string") {
+			this.#projector.setGroupCollapsed(msg.body.value, true);
+			this.#render();
+			return undefined;
+		}
+		if ((act === "work.all" || act === "work.activity") && typeof msg.body.value === "string") {
+			this.#projector.setGroupView(msg.body.value, act === "work.all" ? "all" : "activity");
+			this.#render();
+			return undefined;
+		}
 		if (act === "tasks.reference" && typeof msg.body.value === "string") this.#referenceTask(msg.body.value);
 		if (act === "tasks.view") {
 			this.#taskBoardMode = !this.#taskBoardMode;
@@ -1632,8 +1806,8 @@ export class PiTernBridge {
 			const ref = this.#gitRefs[Number(msg.body.value)];
 			return ref ? this.#showGitDiff(ref.section, ref.entry.path) : undefined;
 		}
-		if (act === "git.back") { this.#gitView = { mode: "list" }; this.#render(); return undefined; }
-		if (act === "git.close") { this.#gitView = undefined; this.#render(); return undefined; }
+		if (act === "git.back") { this.#gitRequest++; this.#gitView = { mode: "list" }; this.#render(); return undefined; }
+		if (act === "git.close") { this.#gitRequest++; this.#gitView = undefined; this.#render(); return undefined; }
 		if (act === "tasks.collapse" || act === "tasks.expand") {
 			this.#taskQuestionsCollapsed = act === "tasks.collapse";
 			this.#render();
@@ -1978,8 +2152,11 @@ export class PiTernBridge {
 		this.#workUnsubscribe = null;
 		if (this.#closed) return;
 		this.#closed = true;
+		this.#gitRequest++;
 		clearInterval(this.#gitTimer);
 		this.#repoWatch?.();
+		this.#mcpUnsubscribe?.();
+		this.#mcpUnsubscribe = undefined;
 		this.#unsubscribe?.();
 		this.#unsubscribe = null;
 		this.#ui.dispose();

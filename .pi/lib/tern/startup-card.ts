@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, realpathSync, watch, type FSWatcher } from "node:fs";
 import type { ArtifactBlob } from "./artifact-previews.ts";
 import { readGitSnapshot, type GitEntry, type GitSection, type GitSnapshot, type GitStat } from "./git-status.ts";
+import type { McpStatus } from "../tools/mcp-status.ts";
 import type { TspNode } from "./tsp.ts";
 
 const SVG_BYTES = readFileSync(new URL("./assets/trebol-shamrock.svg", import.meta.url));
@@ -150,7 +151,14 @@ function commitsTable(repo: Extract<RepoStatus, { git: true }>): TspNode {
 	};
 }
 
-function infoNodes(repo: RepoStatus | undefined): TspNode[] {
+// Undefined status means unavailable (no MCP state published); an empty list means none connected.
+function mcpNode(mcp: McpStatus | undefined): TspNode {
+	if (!mcp) return { id: "tern-startup-mcp", k: "text", p: { role: "pi.startup.mcp", text: "MCP status unavailable", tone: "muted" } };
+	if (mcp.connected.length === 0) return { id: "tern-startup-mcp", k: "text", p: { role: "pi.startup.mcp", text: "No MCP servers connected", tone: "muted" } };
+	return { id: "tern-startup-mcp", k: "text", p: { role: "pi.startup.mcp", title: "Initialized clients with no observed disconnect; HTTP status reflects the last connection observation, not continuous health checks.", spans: [{ t: "MCP connected", s: "dim" }, { t: "  " }, { t: mcp.connected.join(" · "), s: "accent" }] } };
+}
+
+function infoNodes(repo: RepoStatus | undefined, mcp: McpStatus | undefined): TspNode[] {
 	if (!repo) return [{ id: "tern-startup-reading", k: "text", p: { role: "pi.startup.status", text: "Reading repository…", tone: "muted" } }];
 	if (!repo.git) {
 		return [
@@ -171,10 +179,11 @@ function infoNodes(repo: RepoStatus | undefined): TspNode[] {
 		headerRow(repo),
 		{ id: "tern-startup-path", k: "col", p: { role: "pi.startup.path", gap: "xs" }, c: [{ id: "tern-startup-path-kv", k: "kv", p: { role: "pi.startup.path", items } }] },
 		commits,
+		mcpNode(mcp),
 	];
 }
 
-export function startupNodes(blob: ArtifactBlob, version: string, repo?: RepoStatus): TspNode[] {
+export function startupNodes(blob: ArtifactBlob, version: string, repo?: RepoStatus, mcp?: McpStatus): TspNode[] {
 	return [{
 		id: "tern-startup",
 		k: "row",
@@ -189,7 +198,7 @@ export function startupNodes(blob: ArtifactBlob, version: string, repo?: RepoSta
 					{ id: "tern-startup-version", k: "text", p: { role: "pi.startup.version", text: `v${version}`, tone: "muted", wrap: "none" } },
 				],
 			},
-			{ id: "tern-startup-info", k: "col", p: { role: "pi.startup.info", gap: "md", grow: 1, min: { w: "40ch" } }, c: infoNodes(repo) },
+			{ id: "tern-startup-info", k: "col", p: { role: "pi.startup.info", gap: "md", grow: 1, min: { w: "40ch" } }, c: infoNodes(repo, mcp) },
 		],
 	}];
 }

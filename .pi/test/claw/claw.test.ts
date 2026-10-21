@@ -7,6 +7,7 @@ import { ClawStore, readLines, type Run, type Trigger, type Request } from "../.
 import { validateFinish, recordFinish, recordSettled, lastAssistant, WORKER_BLOCKED_TOOLS } from "../../lib/claw/child.ts";
 import { HojaClient, type IssueView } from "../../lib/claw/hoja.ts";
 import { runMarker, type ClawHoja } from "../../lib/claw/spawn.ts";
+import { findRunBlock } from "../../lib/claw/launcher.ts";
 import clawExtension from "../../../extensions/claw/extension.ts";
 
 type FakeIssue = { id: string; identifier: string; title: string; description: string; state: string; teamId: string; projectId: string; assigneeId: string; comments: string[] };
@@ -240,13 +241,44 @@ describe("claw daemon", () => {
 		expect(tern.opened()).toBe(0);
 	});
 
-	it("a tern failure at tab open records failed with a pointer to check Tern; no automatic retry", async () => {
+	it("a tab whose response is lost after creation is located by its run id and recorded; no second tab", async () => {
+		const created: { block: number; args: string[] }[] = [];
+		deps = { ...deps, tern: async (args: string[]) => {
+			if (args[0] === "inspect") {
+				return JSON.stringify({ sessions: [{ id: 1, tabs: [{ id: 1, name: "Claw", blocks: [{ id: 1, exited: null, live: true }, ...created.map((c) => ({ id: c.block, exited: null, live: true, args: c.args }))] }] }] });
+			}
+			if (args[0] === "new") {
+				created.push({ block: 777, args });
+				throw new Error("harness: response lost after tab creation");
+			}
+			return "{}";
+		} };
+		spawnReq();
+		await tick(deps);
+		await tick(deps);
+		const [run] = runs();
+		expect(run.status).toBe("failed");
+		expect(run.block).toBe(777);
+		expect(run.error).toContain("(block 777) carries this run id");
+		expect(created).toHaveLength(1);
+	});
+
+	it("findRunBlock locates a block by the run id in Tern's shell-escaped command, and not a different run", async () => {
+		const escaped = "/bin/zsh -lic 'exec env PI_TERN_UI=0 PI_CLAW_RUN='\\''run-acc-x1'\\'' pi'";
+		const tern = async () => JSON.stringify({ sessions: [{ id: 1, tabs: [{ id: 5, name: null, blocks: [{ id: 50, command: escaped, args: ["-l", "-c", escaped] }] }] }] });
+		expect(await findRunBlock(tern, "run-acc-x1")).toEqual({ tab: 5, block: 50 });
+		expect(await findRunBlock(tern, "run-acc-x")).toBeUndefined();
+		expect(await findRunBlock(tern, "run-acc-x12")).toBeUndefined();
+	});
+
+	it("a tern failure at tab open records failed, locates no block for the run id, and never retries", async () => {
 		tern.state.failNew = true;
 		spawnReq();
 		await tick(deps);
 		const [run] = runs();
 		expect(run.status).toBe("failed");
-		expect(run.error).toContain("a tab may exist");
+		expect(run.error).toContain("tab open failed (not retried)");
+		expect(run.error).toContain("No Tern block carries this run id");
 		tern.state.failNew = false;
 		await tick(deps);
 		expect(tern.opened()).toBe(1);
@@ -323,7 +355,7 @@ describe("claw daemon", () => {
 		expect(store.getRun(run0.id)!.status).toBe("launching");
 	});
 
-	it("cancel terminates the worker and closes the tab; the run is cancelled, never completed", async () => {
+	it("cancel terminates the worker and closes the tab; the run is cancelled, never completed; Hoja Canceled only once verified gone", async () => {
 		spawnReq();
 		await tick(deps);
 		const [run0] = runs();
@@ -335,7 +367,25 @@ describe("claw daemon", () => {
 		expect(run.status).toBe("cancelled");
 		expect(signals).toEqual([4242]);
 		expect(tern.live.has(run.block!)).toBe(false);
+		// Policy change: a verified cancel of a Claw-owned issue maps to Hoja "Canceled" (never "Done").
+		expect(fh.calls.states).toEqual(["Canceled"]);
+		expect(fh.issues.get(run.hoja!.issueId)!.state).toBe("Canceled");
+	});
+
+	it("a cancel whose worker is still alive is not verified: Hoja state is left unchanged", async () => {
+		spawnReq();
+		await tick(deps);
+		const [run0] = runs();
+		worker(run0, "started", { pid: 4242 });
+		await tick(deps);
+		deps = { ...deps, alive: () => true, cancelVerifyMs: 0 };
+		request({ id: "req-cancel-u", kind: "cancel", runId: run0.id } as any);
+		await tick(deps);
+		const run = store.getRun(run0.id)!;
+		expect(run.status).toBe("cancelled");
 		expect(fh.calls.states).toEqual([]);
+		expect(fh.issues.get(run.hoja!.issueId)!.state).toBe("In Progress");
+		expect(fh.issues.get(run.hoja!.issueId)!.comments.at(-1)).toContain("not confirmed gone");
 	});
 
 	it("control off suspends new runs and triggers, but running workers are still reconciled", async () => {
@@ -470,6 +520,18 @@ describe("claw worker side", () => {
 });
 
 describe("claw Hoja client", () => {
+	it("findIssueByMarker uses the server-side description filter, not a bounded page of recent issues", async () => {
+		const queries: string[] = [];
+		const marker = "<!-- claw-run:run-x1 -->";
+		const client = new HojaClient({ url: "https://hoja.test/graphql", token: "t", fetch: async (_url, init) => {
+			queries.push(JSON.parse(init.body).query);
+			return { status: 200, text: async () => JSON.stringify({ data: { issues: { nodes: [{ id: "i9", identifier: "TREBOL-9", description: `x ${marker}` }, { id: "i8", identifier: "TREBOL-8", description: "no marker" }] } } }) };
+		} });
+		expect(await client.findIssueByMarker(marker)).toEqual({ id: "i9", identifier: "TREBOL-9" });
+		expect(queries[0]).toContain('filter: { description: { contains: "<!-- claw-run:run-x1 -->" } }');
+		expect(queries[0]).not.toContain("first: 250");
+	});
+
 	it("never puts the token in an error message", async () => {
 		const token = "lin_api_SECRET_VALUE_123";
 		const client = new HojaClient({ url: "https://hoja.test/graphql", token, fetch: async () => ({ status: 500, text: async () => `boom ${token}` }) });

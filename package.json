@@ -1,6 +1,6 @@
 {
   "name": "@pi-swarm/integration",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "private": true,
   "type": "module",
   "keywords": [
@@ -46,6 +46,7 @@
       "extensions/tern-browser/index.ts",
       "extensions/tern-resume/index.ts",
       "extensions/hoja-mode/index.ts",
+      "extensions/upgrade-prompt/index.ts",
       "extensions/claw/index.ts",
       "extensions/vault/index.ts",
       "extensions/memory-history/index.ts",

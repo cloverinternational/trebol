@@ -3,8 +3,9 @@ import { TranscriptProjector } from "../../lib/tern/bridge.ts";
 import { segmentTranscript, summarizeToolGroup } from "../../lib/tern/turn-groups.ts";
 import type { TspNode } from "../../lib/tern/tsp.ts";
 
-const steps = (nodes: TspNode[]): TspNode[] => nodes.flatMap((n) => (n.p?.role === "tern.work" || n.p?.role === "tern.work-live" ? (n.c ?? []).filter((c) => c.k === "tool") : [n]));
 const start = (p: TranscriptProjector, toolCallId: string, command = "echo") => p.apply({ type: "tool_execution_start", toolCallId, toolName: "bash", args: { command } });
+// A work group's table rows: one item per tool step, in call order.
+const rowsOf = (group: TspNode | undefined) => (group?.c ?? []).filter((c) => c.k === "list").flatMap((list) => list.c ?? []);
 const end = (p: TranscriptProjector, toolCallId: string, isError = false) => p.apply({ type: "tool_execution_end", toolCallId, toolName: "bash", result: { content: [{ type: "text", text: "ok" }], details: { exit_code: 0, duration_ms: 10 } }, isError });
 
 describe("turn grouping (pure)", () => {
@@ -29,17 +30,21 @@ describe("turn grouping (pure)", () => {
 });
 
 describe("turn grouping in the Tern transcript", () => {
-	it("shows only active steps while running, including parallel steps", () => {
+	it("opens the running card with its running rows by default, and folds to every step, including parallel steps", () => {
 		const p = new TranscriptProjector();
 		p.apply({ type: "message_start", message: { role: "user", content: [{ type: "text", text: "fix login" }] } });
 		start(p, "a");
 		start(p, "b");
 		end(p, "a");
 		const live = p.nodes()[1]!;
-		expect(live.p?.role).toBe("tern.work-live");
-		expect(steps(p.nodes()).filter((n) => n.k === "tool")).toEqual([]);
-		expect(live.c).toBeUndefined();
-		expect(live.p).toMatchObject({ text: "1 running · fix login", wrap: "none", truncate: "end" });
+		expect(live).toMatchObject({ k: "tool", p: { role: "tern.work-live", status: "running", collapsible: true, collapsed: false, meta: ["2 steps"] } });
+		// Activity panel: running steps only; finished step a is named by the "Last" line instead.
+		expect(rowsOf(live).map((r) => r.id)).toEqual(["row-t-b"]);
+		expect(live.p).toMatchObject({ text: "1 running · fix login" });
+		p.setGroupCollapsed(live.id, true);
+		const folded = p.nodes()[1]!;
+		expect(folded).toMatchObject({ k: "tool", p: { role: "tern.work-live", collapsed: true } });
+		expect(rowsOf(folded).map((r) => r.id)).toEqual(["row-t-a", "row-t-b"]);
 	});
 
 	it("collapses a finished turn into one summary holding every step, in order, with the goal", () => {
@@ -49,7 +54,7 @@ describe("turn grouping in the Tern transcript", () => {
 		start(p, "b"); end(p, "b", true);
 		const [summary] = p.nodes().slice(1);
 		expect(summary?.p).toMatchObject({ role: "tern.work", title: "Done", status: "done", target: "fix login", collapsed: true, collapsible: true, meta: ["2 steps", "1 failed"] });
-		expect(summary?.c?.map((c) => c.id)).toEqual(["t-a", "t-b"]);
+		expect(rowsOf(summary).map((r) => r.id)).toEqual(["row-t-a", "row-t-b"]);
 	});
 
 	it("starts a new group after a queued user message", () => {
@@ -84,7 +89,7 @@ describe("turn grouping in the Tern transcript", () => {
 		for (const p of [live, restored]) {
 			const card = p.nodes().find((n) => n.p?.role === "tern.work");
 			expect(card?.p).toMatchObject({ title: "Interrupted", status: "cancelled", meta: ["1 step"] });
-			expect(card?.c?.[0]?.p?.status).toBe("done");
+			expect(rowsOf(card)[0]?.p?.tone).toBe("success");
 		}
 	});
 
@@ -99,7 +104,7 @@ describe("turn grouping in the Tern transcript", () => {
 		p.apply({ type: "agent_end" });
 		const card = p.nodes().find((n) => n.p?.role === "tern.work");
 		expect(card?.p?.title).toBe("Interrupted");
-		expect(card?.c?.map((c) => c.p?.status)).toEqual(["error", "cancelled"]);
+		expect(rowsOf(card).map((r) => r.p?.tone)).toEqual(["error", "muted"]);
 	});
 
 	it("restores persisted tool calls and results, and marks unresolved calls interrupted", () => {
@@ -114,9 +119,9 @@ describe("turn grouping in the Tern transcript", () => {
 		]);
 		const summary = p.nodes().find((n) => n.p?.role === "tern.work");
 		expect(summary?.p).toMatchObject({ role: "tern.work", title: "Interrupted", status: "cancelled", target: "run tests" });
-		const restored = summary?.c ?? [];
-		expect(restored.map((c) => c.p?.status)).toEqual(["done", "cancelled"]);
-		expect(restored[0]?.p).toMatchObject({ took: 300 });
+		const restored = rowsOf(summary);
+		expect(restored.map((r) => r.p?.tone)).toEqual(["success", "muted"]);
+		expect(restored[0]?.p).toMatchObject({ value: "Done · 300 ms" });
 	});
 });
 

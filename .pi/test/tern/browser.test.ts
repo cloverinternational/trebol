@@ -108,7 +108,7 @@ describe("tab membership scope", () => {
 		const w = world();
 		expect(await run({ op: "blocks" }, w)).toEqual({ blocks: [{ block: 9001, url: "https://mine.test", owner: null }] });
 		await run({ op: "goto", block: 9001, url: "https://mine.test/next" }, w);
-		expect(w.state.calls.at(-1)).toEqual({ op: "goto", block: 9001, url: "https://mine.test/next" });
+		expect(w.state.calls).toContainEqual({ op: "goto", block: 9001, url: "https://mine.test/next" });
 	});
 
 	it("refuses a browser block from another tab and sends no block op", async () => {

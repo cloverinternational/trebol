@@ -1,16 +1,24 @@
+import { modeFooter } from "../../.pi/lib/runtime/mode-footer.ts";
 /** /claw v1. Orchestrator session: /claw on|off|status, claw_* tools, and a durable inbox pump that wakes the
  *  owning session. Worker session (PI_CLAW_RUN set): emits started/settled events, the explicit claw_finish
  *  tool, and the depth-1 tool gate. Run and trigger state lives in the daemon (.pi/lib/claw/daemon.ts). */
 import { ClawStore, type RequestBody } from "../../.pi/lib/claw/store.ts";
 import { ensureDaemon, request, statusSummary } from "../../.pi/lib/claw/orchestrator.ts";
+import { pidAlive } from "../../.pi/lib/claw/daemon.ts";
+import { deliveredInboxIds, pumpInbox } from "../../.pi/lib/claw/inbox.ts";
 import { nameClawTab, ownPaneBlock, ternExec, CLAW_TAB, type TernExec } from "../../.pi/lib/claw/launcher.ts";
 import { WORKER_BLOCKED_TOOLS, recordFinish, recordSettled, recordStarted, validateFinish, workerIdentity } from "../../.pi/lib/claw/child.ts";
 import { onAgentSettled } from "../../.pi/lib/runtime/agent-settled.ts";
 import { createSessionWakeup } from "../../.pi/lib/runtime/session-wakeup.ts";
+import { latestSessionModeEntry } from "../../.pi/lib/runtime/session-mode-entry.ts";
 import { CLAW_EXCLUDED_TOOLS, clawModeOn, clawRoutedTools, savedClawTools, setClawAgentRoute, setClawMode, withoutOrchestratorTools } from "../../.pi/lib/claw/mode.ts";
 
 const text = (value: unknown) => ({ content: [{ type: "text" as const, text: typeof value === "string" ? value : JSON.stringify(value, null, 2) }], details: {} });
 const sessionIdOf = (pi: any, ctx: any): string => String(ctx?.sessionManager?.getSessionId?.() ?? ctx?.sessionId ?? pi.getSessionId?.() ?? pi.sessionId ?? "");
+
+/** This chat's Claw mode, persisted as a session entry. savedTools is the pre-Claw tool set that /claw off restores. */
+export const CLAW_ENTRY = "claw-mode";
+type ClawModeEntry = { on: boolean; savedTools?: string[] };
 
 /** Model-facing schema of the single Agent tool while Claw is on. The legacy schema is restored when it goes off. */
 export const CLAW_AGENT_PARAMETERS = { type: "object", required: ["task", "project"], additionalProperties: false, properties: {
@@ -18,6 +26,8 @@ export const CLAW_AGENT_PARAMETERS = { type: "object", required: ["task", "proje
 	project: { type: "string", description: "Exact Hoja project name; it decides the team." },
 	assignee: { type: "string", description: "'me' (default), an exact email, or a name in the project's team." },
 	label: { type: "string", description: "Tab name; defaults to a short form of the task." },
+	provider: { type: "string", description: "Pi provider for this worker, for example anthropic. Needs model. Default: pi's configured provider." },
+	model: { type: "string", description: "Pi model for this worker, for example claude-opus-5-5 or provider/id. Default: pi's configured model." },
 	cwd: { type: "string", description: "Working directory for the worker; defaults to this workspace." },
 } } as const;
 export const CLAW_AGENT_DESCRIPTION = "Start a visible worker tab that runs pi on the task, with a Hoja issue in the project's team. This is the only way to delegate work while Claw is on. Completion is reported to you by the inbox after the worker calls claw_finish.";
@@ -78,30 +88,42 @@ export function registerOrchestrator(pi: any, options: OrchestratorOptions = {})
 	const env = options.env ?? process.env;
 	const ensure = options.ensure ?? ensureDaemon;
 	const wake = createSessionWakeup(pi);
+	const footer = modeFooter("claw", clawModeOn);
 	let timer: ReturnType<typeof setInterval> | undefined;
 	let session = "";
+	let live: { ctx: any; valid: () => boolean } | undefined;
 
-	const isOwner = () => store.readOrchestrator().owner === session;
-	const claim = () => { store.writeOrchestrator({ ...store.readOrchestrator(), owner: session }); };
+	const claim = () => { store.writeOrchestrator({ ...store.readOrchestrator(), owner: session, ownerPid: process.pid }); };
+	/** Persist-before-ack delivery into this session's own transcript; see .pi/lib/claw/inbox.ts. */
 	const pump = async () => {
-		if (!isOwner()) return;
-		const { offset, owner } = store.readOrchestrator();
-		const read = store.readInbox(offset);
-		if (!read.items.length) return;
-		const body = read.items.map((i) => `- [${i.kind}] ${i.text}`).join("\n");
-		const sent = await wake.send({ customType: "claw-inbox", content: `Claw inbox (${read.items.length}):\n${body}`, display: true, details: { count: read.items.length } });
-		if (sent) store.writeOrchestrator({ offset: read.offset, owner });
+		if (!live || !live.valid() || !clawModeOn()) return;
+		const current = live;
+		await pumpInbox({
+			store, session, now: () => Date.now(),
+			delivered: () => deliveredInboxIds(current.ctx.sessionManager.getBranch()),
+			send: (message) => wake.send(message, current.valid),
+		});
 	};
 	const start = (ctx: any) => {
 		session = sessionIdOf(pi, ctx);
-		hideWhileOff();
+		live = { ctx, valid: wake.capture() };
+		// Restore this chat's saved mode only. Restoring routing never starts the daemon, renames tabs or writes store control.
+		const saved = latestSessionModeEntry<ClawModeEntry>(ctx, CLAW_ENTRY);
+		if (saved?.on === true) activate(saved.savedTools);
+		else hideWhileOff();
+		footer.refresh(ctx);
+		// Takeover only when no live process owns the inbox: a dead owner, or this process's previous session.
+		const owner = store.readOrchestrator();
+		if (clawModeOn() && store.readControl().enabled && (!owner.owner || owner.ownerPid === process.pid || (owner.ownerPid !== undefined && !pidAlive(owner.ownerPid)))) claim();
 		if (timer) clearInterval(timer);
 		timer = setInterval(() => { void pump().catch(() => undefined); }, 3000);
 		timer.unref?.();
 		void pump().catch(() => undefined);
 	};
 	pi.on?.("session_start", (_event: unknown, ctx: any) => start(ctx));
-	pi.on?.("session_shutdown", () => { if (timer) clearInterval(timer); timer = undefined; deactivate(); });
+	pi.on?.("session_shutdown", (_event: unknown, ctx: any) => { if (timer) clearInterval(timer); timer = undefined; live = undefined; deactivate(); footer.clear(ctx); });
+	// Persist this chat's choice. Shutdown (reload, resume, new) does not persist: the next session_start restores it.
+	const persistMode = (on: boolean, savedTools?: string[]) => { pi.appendEntry?.(CLAW_ENTRY, on ? { on, savedTools } : { on }); };
 
 	const call = async (body: RequestBody) => {
 		claim();
@@ -114,13 +136,14 @@ export function registerOrchestrator(pi: any, options: OrchestratorOptions = {})
 
 	// Claw routing for this session: one Agent tool (routed), alternate spawners hidden and refused. The tool set
 	// captured at activation is restored on off and on session shutdown; the store control is not touched there.
-	const activate = () => {
+	// `saved` is the pre-Claw tool set persisted by an earlier activation in this chat; restore passes it back.
+	const activate = (saved?: string[]) => {
 		if (clawModeOn()) return;
-		const active = withoutOrchestratorTools(pi.getActiveTools?.() ?? []);
-		setClawMode(true, active);
+		const current = withoutOrchestratorTools(pi.getActiveTools?.() ?? []);
+		setClawMode(true, saved ?? current);
 		const available: string[] = (pi.getAllTools?.() ?? []).map((tool: any) => tool.name);
-		pi.setActiveTools?.(clawRoutedTools(active, available));
-		setClawAgentRoute(async (input: any) => call({ kind: "spawn", input: { task: str(input?.task, "task"), project: str(input?.project, "project"), assignee: input?.assignee, label: input?.label, cwd: input?.cwd } }));
+		pi.setActiveTools?.(clawRoutedTools(current, available));
+		setClawAgentRoute(async (input: any) => call({ kind: "spawn", input: { task: str(input?.task, "task"), project: str(input?.project, "project"), assignee: input?.assignee, label: input?.label, cwd: input?.cwd, provider: input?.provider, model: input?.model } }));
 	};
 	const deactivate = () => {
 		if (!clawModeOn()) return;
@@ -141,13 +164,15 @@ export function registerOrchestrator(pi: any, options: OrchestratorOptions = {})
 		{
 			name: "claw_spawn",
 			label: "Claw spawn",
-			description: "Start a visible worker tab that runs pi on a task. Creates a Hoja issue in the project's team, assigned to the assignee (default: you). Completion is only reported through the worker's claw_finish. Returns the run id and Hoja identifier.",
+			description: "Start a visible worker tab that runs pi on a task. Creates a Hoja issue in the project's team, assigned to the assignee (default: you). Completion is only reported through the worker's claw_finish. Returns state: done (run id and Hoja identifier), not_started (nothing started; safe to retry), or pending (may still start: do not submit again; read claw_read on runId or claw_list).",
 			parameters: { type: "object", required: ["task", "project"], additionalProperties: false, properties: {
 				task: { type: "string" }, project: { type: "string", description: "Exact Hoja project name; it decides the team." },
 				assignee: { type: "string", description: "'me' (default), an exact email, or a name in the project's team." },
 				label: { type: "string", description: "Tab name; defaults to a short form of the task." }, cwd: { type: "string" },
+				provider: { type: "string", description: "Pi provider for this worker, for example anthropic. Needs model. Default: pi's configured provider." },
+				model: { type: "string", description: "Pi model for this worker, for example claude-opus-5-5 or provider/id. Default: pi's configured model." },
 			} },
-			execute: async (_id: string, p: any) => text(await call({ kind: "spawn", input: { task: str(p.task, "task"), project: str(p.project, "project"), assignee: p.assignee, label: p.label, cwd: p.cwd } })),
+			execute: async (_id: string, p: any) => text(await call({ kind: "spawn", input: { task: str(p.task, "task"), project: str(p.project, "project"), assignee: p.assignee, label: p.label, cwd: p.cwd, provider: p.provider, model: p.model } })),
 		},
 		{
 			name: "claw_list",
@@ -229,12 +254,16 @@ export function registerOrchestrator(pi: any, options: OrchestratorOptions = {})
 				}
 				store.writeControl(true, pane);
 				activate();
+				persistMode(true, savedClawTools());
+				footer.refresh(ctx);
 				const pid = ensure(store, workspace);
 				return notify(`Claw on. Daemon ${pid ? `already running (pid ${pid})` : "starting"}. ${tabNote}`, tabNote.startsWith("Tab not named") ? "warning" : "info");
 			}
 			if (sub === "off") {
 				store.writeControl(false, store.readControl().pane);
 				deactivate();
+				persistMode(false);
+				footer.refresh(ctx);
 				return notify("Claw off: triggers and new runs are suspended, and the normal tool set is restored. Running workers keep running and are still reconciled.");
 			}
 			if (sub === "status") return notify(JSON.stringify(statusSummary(store), null, 2));
