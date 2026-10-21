@@ -288,3 +288,80 @@ describe("tabs and closing", () => {
 		expect(w.deps.owned.blocks.has(made.block)).toBe(false);
 	});
 });
+
+describe("send to agent-created terminals", () => {
+	it("types one-line text then presses Enter in a block this agent created", async () => {
+		const w = world();
+		const made = (await run({ op: "new_tab" }, w)) as { block: number };
+		await expect(run({ op: "send", block: made.block, text: "pi" }, w)).resolves.toEqual({ sent: made.block, chars: 2, mode: "text", enter: true });
+		expect(w.state.terns.slice(-2)).toEqual([
+			["send", String(made.block), "text", "pi"],
+			["send", String(made.block), "keys", "Enter"],
+		]);
+	});
+
+	it("pastes multi-line text as one unit and can skip Enter", async () => {
+		const w = world();
+		const made = (await run({ op: "new_tab" }, w)) as { block: number };
+		await run({ op: "send", block: made.block, text: "line one\nline two", enter: false }, w);
+		expect(w.state.terns.at(-1)).toEqual(["send", String(made.block), "paste", "line one\nline two"]);
+		expect(w.state.terns.some((a) => a[0] === "send" && a[2] === "keys")).toBe(false);
+	});
+
+	it("refuses the caller's pane, the user's blocks and blocks outside this tab", async () => {
+		const w = world();
+		await expect(run({ op: "send", block: 201, text: "ls" }, w)).rejects.toThrow(/was not created by this agent/);
+		await expect(run({ op: "send", block: 200, text: "ls" }, w)).rejects.toThrow(/was not created by this agent/);
+		await expect(run({ op: "send", block: 100, text: "ls" }, w)).rejects.toThrow(/not in this pane's tab/);
+		expect(w.state.terns.some((args) => args[0] === "send")).toBe(false);
+	});
+
+	it("refuses escape/control characters, oversize or empty text without typing anything", async () => {
+		const w = world();
+		const made = (await run({ op: "split", direction: "down" }, w)) as { block: number };
+		await expect(run({ op: "send", block: made.block, text: "a\u0003" }, w)).rejects.toThrow(/control characters/);
+		await expect(run({ op: "send", block: made.block, text: "\u001b[2J" }, w)).rejects.toThrow(/control characters/);
+		await expect(run({ op: "send", block: made.block, text: "a\rb" }, w)).rejects.toThrow(/control characters/);
+		await expect(run({ op: "send", block: made.block, text: "x".repeat(20_001) }, w)).rejects.toThrow(/control characters/);
+		await expect(run({ op: "send", block: made.block }, w)).rejects.toThrow(/text is required/);
+		expect(w.state.terns.some((args) => args[0] === "send")).toBe(false);
+	});
+});
+
+describe("read terminal text", () => {
+	const withScreen = (screens: string[]) => {
+		const w = world();
+		const base = w.deps.tern;
+		let i = 0;
+		w.deps.tern = async (args) => {
+			if (args[0] === "capture") {
+				w.state.terns.push(args);
+				return screens[Math.min(i++, screens.length - 1)];
+			}
+			return base(args);
+		};
+		return w;
+	};
+
+	it("answers the last N lines of a reachable block", async () => {
+		const w = withScreen(["a\nb\nc\nd\n\n"]);
+		await expect(run({ op: "read", block: 200, lines: 2 }, w)).resolves.toEqual({ block: 200, text: "c\nd" });
+		expect(w.state.terns).toContainEqual(["capture", "200"]);
+	});
+
+	it("polls until the literal text appears", async () => {
+		const w = withScreen(["$ pi", "$ pi\nloading", "$ pi\nready >"]);
+		await expect(run({ op: "read", block: 200, until: "ready >" }, w)).resolves.toMatchObject({ matched: true, text: "$ pi\nready >" });
+	});
+
+	it("gives up after timeout with matched false", async () => {
+		const w = withScreen(["still loading"]);
+		const out = (await run({ op: "read", block: 200, until: "never", timeout: 3 }, w)) as { matched: boolean };
+		expect(out.matched).toBe(false);
+		expect(w.state.terns.filter((a) => a[0] === "capture").length).toBe(4);
+	});
+
+	it("refuses a block outside this tab", async () => {
+		await expect(run({ op: "read", block: 100 }, withScreen(["x"]))).rejects.toThrow(/not in this pane's tab/);
+	});
+});

@@ -12,7 +12,7 @@ import { promisify } from "node:util";
 
 const run = promisify(execFile);
 
-export const OPS = ["list", "new_tab", "rename_tab", "open", "blocks", "goto", "snapshot", "act", "capture", "close", "split", "focus"] as const;
+export const OPS = ["list", "new_tab", "rename_tab", "open", "blocks", "goto", "snapshot", "act", "capture", "close", "split", "focus", "send", "read"] as const;
 export const ACTIONS = ["click", "fill", "press", "select", "check", "uncheck", "hover", "scroll"] as const;
 export const DIRECTIONS = ["right", "down"] as const;
 
@@ -31,6 +31,14 @@ export type Params = {
 	keys?: string;
 	dy?: number;
 	direction?: (typeof DIRECTIONS)[number];
+	/** send: press Enter after the text (default true). */
+	enter?: boolean;
+	/** read: last N lines of the terminal (default 60, max 400). */
+	lines?: number;
+	/** read: poll until the terminal text contains this literal string. */
+	until?: string;
+	/** read with until: give up after this many seconds (default 30, max 120). */
+	timeout?: number;
 };
 type TabBlock = { id: number; title?: string; cwd?: string; program?: string };
 type Tab = { id: number; name: string | null; sessionId: number | null; blocks: TabBlock[] };
@@ -43,7 +51,7 @@ export const createOwnership = (): Ownership => ({ tabs: new Set(), blocks: new 
 export const TERN_TOOL = {
 	name: "tern",
 	label: "Tern",
-	description: "Drive Tern from this pane. Regular signed-in browsers: open (url; optional block = pane to open beside, default this pane; answers the new block), blocks, goto (block, url), snapshot (block; tree with element refs), act (block, ref from snapshot, action click|fill|press|select|check|uncheck|hover|scroll, text|keys|dy), capture (block; PNG under artifacts/tern-browser). Panes and tabs: list (tabs and panes you can reach), new_tab (optional cwd absolute directory; answers tab, block), rename_tab (block in a tab you created, name), split (direction right|down, optional block, default this pane; answers the new block), focus (block), close (block you created with open, split or new_tab; never this pane). Only this pane's tab and tabs you created are reachable. Refs go stale after navigation; snapshot again. URLs must be http or https. Commands run with no shell and no arbitrary program.",
+	description: "Drive Tern from this pane. Regular signed-in browsers: open (url; optional block = pane to open beside, default this pane; answers the new block), blocks, goto (block, url), snapshot (block; tree with element refs), act (block, ref from snapshot, action click|fill|press|select|check|uncheck|hover|scroll, text|keys|dy), capture (block; PNG under artifacts/tern-browser). Terminals: send (block you created with new_tab or split; text, multi-line allowed and pasted as one unit; enter default true presses Enter after), read (block; answers the terminal's last `lines` lines as text; with `until` it polls until that literal text appears or `timeout` seconds pass, answering matched true|false). Panes and tabs: list (tabs and panes you can reach), new_tab (optional cwd absolute directory; answers tab, block), rename_tab (block in a tab you created, name), split (direction right|down, optional block, default this pane; answers the new block), focus (block), close (block you created with open, split or new_tab; never this pane). Typical agent launch: new_tab -> send text 'pi' -> read until a prompt marker -> send the task -> read until done. Only this pane's tab and tabs you created are reachable; send only reaches blocks you created. Refs go stale after navigation; snapshot again. URLs must be http or https. Commands run with no shell and no arbitrary program.",
 	parameters: {
 		type: "object",
 		required: ["op"],
@@ -62,6 +70,10 @@ export const TERN_TOOL = {
 			keys: { type: "string" },
 			dy: { type: "integer" },
 			direction: { type: "string", enum: [...DIRECTIONS] },
+			enter: { type: "boolean" },
+			lines: { type: "integer", minimum: 1, maximum: 400 },
+			until: { type: "string" },
+			timeout: { type: "integer", minimum: 1, maximum: 120 },
 		},
 	},
 } as const;
@@ -280,6 +292,43 @@ export async function runTern(p: Params, deps: Deps): Promise<unknown> {
 			reach(s, block);
 			await focusBlock(block, deps);
 			return { focused: block };
+		}
+		case "send": {
+			const s = await current();
+			const block = required(p.block, "block");
+			reach(s, block);
+			if (!deps.owned.blocks.has(block)) throw new Error(`block ${block} was not created by this agent; only blocks it created can receive input`);
+			const text = required(p.text, "text");
+			// Newlines and tabs are allowed and delivered as one bracketed paste; every other control character
+			// (escape sequences, Ctrl-C, bells) is refused so a send can't drive the terminal outside its text.
+			if (text.length > 20_000 || /[\u0000-\u0008\u000b-\u001f\u007f]/.test(text)) {
+				throw new Error("text must be 1-20000 characters; newlines and tabs allowed, no other control characters");
+			}
+			const multiLine = /[\n\t]/.test(text);
+			await deps.tern(["send", String(block), multiLine ? "paste" : "text", text]);
+			const enter = p.enter !== false;
+			if (enter) await deps.tern(["send", String(block), "keys", "Enter"]);
+			return { sent: block, chars: text.length, mode: multiLine ? "paste" : "text", enter };
+		}
+		case "read": {
+			const s = await current();
+			const block = required(p.block, "block");
+			reach(s, block);
+			const lines = Math.min(Math.max(p.lines ?? 60, 1), 400);
+			const tail = async () => {
+				const all = (await deps.tern(["capture", String(block)])).replace(/\s+$/, "").split("\n");
+				return all.slice(-lines).join("\n");
+			};
+			if (p.until === undefined) return { block, text: await tail() };
+			const until = required(p.until, "until");
+			const deadline = Math.min(Math.max(p.timeout ?? 30, 1), 120) * 1000;
+			let text = await tail();
+			for (let waited = 0; !text.includes(until) && waited < deadline; waited += 1000) {
+				throwIfAborted(deps.signal);
+				await deps.delay(1000);
+				text = await tail();
+			}
+			return { block, text, matched: text.includes(until) };
 		}
 		default:
 			throw new Error(`unknown op: ${String(p.op)}`);
