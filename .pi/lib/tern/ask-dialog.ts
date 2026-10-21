@@ -19,6 +19,9 @@ export const ASK_NODE_PREFIX = "ask-";
 const OPTION_PREFIX = "ask-opt:";
 export const ASK_SUBMIT_ID = "ask-submit";
 export const ASK_CANCEL_ID = "ask-cancel";
+// Tab strip: `ask-tab-<question index>` per question, and `ask-tab-submit` for the review tab.
+const TAB_PREFIX = "ask-tab-";
+export const ASK_SUBMIT_TAB_ID = "ask-tab-submit";
 // Native list of the current question's options. Its item ids are `ask-opt:<question>:<option>`.
 export const ASK_OPTIONS_ID = "ask-options";
 // Below this width the tab strip becomes a progress line and the flow is one question per screen.
@@ -208,10 +211,23 @@ export class TernAskDialog {
 		if (!id.startsWith(ASK_NODE_PREFIX)) return false;
 		if (id === ASK_SUBMIT_ID) this.submit();
 		else if (id === ASK_CANCEL_ID) this.cancel();
+		else if (id.startsWith(TAB_PREFIX)) this.#goToTab(id === ASK_SUBMIT_TAB_ID ? undefined : Number(id.slice(TAB_PREFIX.length)));
 		else if (id.startsWith(OPTION_PREFIX)) {
 			const [qi, oi] = id.slice(OPTION_PREFIX.length).split(":").map(Number);
 			this.toggle(qi, oi);
 		}
+		return true;
+	}
+
+	// Tab tap: moves to that question, or to the review tab when index is undefined. Unknown indexes are ignored.
+	#goToTab(index: number | undefined): boolean {
+		const flow = this.#editable();
+		if (!flow) return false;
+		const target = index ?? flow.questions.length;
+		if (!Number.isInteger(target) || target < 0 || target > flow.questions.length) return false;
+		flow.tab = target;
+		flow.error = undefined;
+		this.#onChange();
 		return true;
 	}
 
@@ -416,12 +432,13 @@ export class TernAskDialog {
 				role: "pi.ask.tab",
 				text: `${isAnswered(flow, question) ? "✓ " : ""}${question.label}`,
 				...(qi === flow.tab ? { tone: "accent" } : {}),
+				actions: { click: `ask-tab-${qi}` },
 			},
 		}));
 		tabs.push({
-			id: "ask-tab-submit",
+			id: ASK_SUBMIT_TAB_ID,
 			k: "text",
-			p: { role: "pi.ask.tab", text: "Submit", ...(flow.tab === flow.questions.length ? { tone: "accent" } : {}) },
+			p: { role: "pi.ask.tab", text: "Submit", ...(flow.tab === flow.questions.length ? { tone: "accent" } : {}), actions: { click: ASK_SUBMIT_TAB_ID } },
 		});
 		return { id: "ask-tabs", k: "row", p: { role: "pi.ask.tabs" }, c: tabs };
 	}
