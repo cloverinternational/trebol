@@ -103,7 +103,7 @@ export const isAmbiguous = (error: unknown): boolean => error instanceof HojaReq
 const now = (deps: LaunchDeps) => (deps.now ? deps.now() : new Date());
 const pastDeadline = (run: Run, deps: LaunchDeps) => run.deadline !== undefined && now(deps).getTime() > Date.parse(run.deadline);
 
-function failRun(run: Run, deps: LaunchDeps, error: string): Run {
+export function failRun(run: Run, deps: LaunchDeps, error: string): Run {
 	const { store } = deps;
 	run.status = "failed";
 	run.error = error.slice(0, 500);

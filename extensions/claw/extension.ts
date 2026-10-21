@@ -3,7 +3,7 @@ import { modeFooter } from "../../.pi/lib/runtime/mode-footer.ts";
  *  owning session. Worker session (PI_CLAW_RUN set): emits started/settled events, the explicit claw_finish
  *  tool, and the depth-1 tool gate. Run and trigger state lives in the daemon (.pi/lib/claw/daemon.ts). */
 import { ClawStore, type RequestBody } from "../../.pi/lib/claw/store.ts";
-import { ensureDaemon, request, statusSummary } from "../../.pi/lib/claw/orchestrator.ts";
+import { ensureDaemon, request, runListing, statusSummary } from "../../.pi/lib/claw/orchestrator.ts";
 import { pidAlive } from "../../.pi/lib/claw/daemon.ts";
 import { deliveredInboxIds, pumpInbox } from "../../.pi/lib/claw/inbox.ts";
 import { nameClawTab, ownPaneBlock, ternExec, CLAW_TAB, type TernExec } from "../../.pi/lib/claw/launcher.ts";
@@ -179,7 +179,7 @@ export function registerOrchestrator(pi: any, options: OrchestratorOptions = {})
 			label: "Claw list",
 			description: "List Claw runs and triggers with status, Hoja identifiers, and daemon state. Read-only.",
 			parameters: { type: "object", additionalProperties: false, properties: {} },
-			execute: async () => text({ ...statusSummary(store), runs: store.listRuns().map((r) => ({ id: r.id, label: r.label, status: r.status, phase: r.phase, identifier: r.hoja?.identifier, error: r.error })) }),
+			execute: async () => text({ ...statusSummary(store), runs: runListing(store.listRuns(), Date.now()) }),
 		},
 		{
 			name: "claw_read",

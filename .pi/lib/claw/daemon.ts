@@ -5,9 +5,9 @@ import { spawn as spawnChild } from "node:child_process";
 import { openSync, rmSync, writeFileSync } from "node:fs";
 import { nextCronTime, validateCron } from "../../../packages/tools/schedule/src/cron.ts";
 import type { LaunchDeps } from "./spawn.ts";
-import { continueRun, findByKey, queueComment, queueState, runMarker, startRun, opMarker } from "./spawn.ts";
-import { liveBlocks, closeBlock, sendToBlock } from "./launcher.ts";
-import { ClawStore, readJson, TERMINAL, type ClawEvent, type Request, type Response, type Run, type Trigger, type SpawnInput } from "./store.ts";
+import { continueRun, failRun, findByKey, queueComment, queueState, runMarker, startRun, opMarker } from "./spawn.ts";
+import { liveBlocks, closeBlock, isBlockGone, sendToBlock, type TernExec } from "./launcher.ts";
+import { ClawStore, readJson, TERMINAL, type ClawEvent, type Request, type Response, type Run, type RunStatus, type Trigger, type SpawnInput } from "./store.ts";
 import { validateFinish } from "./child.ts";
 
 export const TICK_MS = 1000;
@@ -15,6 +15,10 @@ export const IDLE_EXIT_MS = 120_000;
 export const LOST_GRACE_MS = 60_000;
 export const TRIGGER_RETRY_MS = 60_000;
 export const CANCEL_VERIFY_MS = 5_000;
+/** A run still "launching" this long after creation has no worker: it is failed with a reason, never left silent. */
+export const LAUNCH_TIMEOUT_MS = 5 * 60_000;
+/** Worker tabs of these runs are closed by the daemon. `lost` is not listed: its tab state is unknown. */
+export const CLOSE_ON_END: readonly RunStatus[] = ["completed", "cancelled", "failed"];
 
 export type DaemonDeps = LaunchDeps & {
 	now: () => Date;
@@ -72,6 +76,22 @@ export function releaseLock(store: ClawStore): void {
 const summary = (r: Run) => ({ id: r.id, label: r.label, status: r.status, phase: r.phase, project: r.project, assignee: r.assignee, identifier: r.hoja?.identifier, block: r.block, pid: r.pid, error: r.error, finish: r.finish });
 export const isActive = (r: Run) => !TERMINAL.includes(r.status) && r.status !== "awaiting_user";
 
+/** Closes a run's worker tab once. A block Tern no longer has is already closed, not an error. Only blocks the daemon
+ *  recorded from its own tab launch or run-id lookup ever reach this. */
+export async function closeRunTab(run: Run, tern: TernExec): Promise<void> {
+	if (run.block === undefined || run.tabClosedAt) return;
+	try { await closeBlock(tern, run.block); }
+	catch (error) { if (!isBlockGone(error)) throw error; }
+	run.tabClosedAt = new Date().toISOString();
+	run.tabCloseError = undefined;
+}
+
+/** What `claw send` says when a run cannot take input. Always names the next step. */
+export function sendRefusal(run: Run): string {
+	if (run.status === "awaiting_user") return `run ${run.id} is awaiting_user and its tab is gone; relaunch with claw_spawn using the summary from claw_read`;
+	return `run ${run.id} is ${run.status}; it cannot take input. Start a new run with claw_spawn if more work is needed`;
+}
+
 export async function handleRequest(req: Request, deps: DaemonDeps): Promise<unknown> {
 	const { store, tern } = deps;
 	const control = store.readControl();
@@ -83,16 +103,22 @@ export async function handleRequest(req: Request, deps: DaemonDeps): Promise<unk
 		case "send": {
 			const run = store.getRun(req.runId);
 			if (!run) throw new Error(`no run ${req.runId}`);
-			if (!isActive(run) || run.block === undefined) throw new Error(`run ${run.id} is ${run.status}; only an active worker with a tab accepts input`);
+			// awaiting_user keeps its tab: input re-activates the run instead of refusing it.
+			let reactivated = false;
+			if (run.status === "awaiting_user" && run.block !== undefined) {
+				const live = await liveBlocks(tern).catch(() => new Set<number>());
+				if (live.has(run.block)) { run.status = "running"; store.saveRun(run); reactivated = true; }
+			}
+			if (!isActive(run) || run.block === undefined) throw new Error(sendRefusal(run));
 			await sendToBlock(tern, run.block, req.text);
-			return { sent: run.id };
+			return { sent: run.id, reactivated };
 		}
 		case "cancel": {
 			const run = store.getRun(req.runId);
 			if (!run) throw new Error(`no run ${req.runId}`);
 			if (TERMINAL.includes(run.status)) return summary(run);
 			if (run.pid && deps.alive(run.pid)) deps.signal(run.pid, "SIGTERM");
-			if (run.block !== undefined) await closeBlock(tern, run.block).catch((e) => { run.error = `tab close failed: ${(e as Error).message}`.slice(0, 300); });
+			await closeRunTab(run, tern).catch((e) => { run.error = `tab close failed: ${(e as Error).message}`.slice(0, 300); });
 			const verified = await verifyCancelled(run, deps);
 			run.status = "cancelled";
 			if (!run.hoja) {
@@ -176,11 +202,13 @@ export function applyEvent(run: Run, ev: ClawEvent, store: ClawStore): void {
 	if (ev.type === "settled") {
 		run.settles++;
 		run.finalText = ev.text;
-		// After a terminal finish, the worker's last turn settling is expected; it is not an idle run.
-		if (TERMINAL.includes(run.status)) return;
+		// Only a launching or running worker goes idle. Terminal, awaiting_user and idle runs get no new notice: a
+		// settle there is expected (after claw_finish) or already reported.
+		if (run.status !== "launching" && run.status !== "running") return;
 		// A settled turn is not a result: it may be idle, waiting for a permission or a question, or done without a report.
-		if (run.status === "launching" || run.status === "running") run.status = "idle";
-		store.appendInbox({ kind: "run_idle", runId: run.id, text: `${run.label} settled a turn without claw_finish (not a completion)`, key });
+		// The notice belongs to the transition, so it is keyed by the run and its settle count, not by the event.
+		run.status = "idle";
+		store.appendInbox({ kind: "run_idle", runId: run.id, text: `${run.label} settled a turn without claw_finish (not a completion)`, key: `idle:${run.id}:${run.settles}` });
 		return;
 	}
 	// finish
@@ -267,6 +295,13 @@ export async function reconcileRun(run: Run, deps: DaemonDeps, live: Set<number>
 				store.appendInbox({ kind: "run_lost", runId: run.id, text: `${run.label} lost: ${run.error}`, key: `lost:${run.id}` });
 			}
 		}
+	}
+	if (run.status === "launching" && deps.now().getTime() - Date.parse(run.createdAt) > LAUNCH_TIMEOUT_MS) {
+		const unknown = run.phase === "create_dispatched" ? "; the Hoja create outcome was unknown, so a late issue carrying the run marker may exist and needs a manual check" : "";
+		failRun(run, deps, `launch timed out after ${LAUNCH_TIMEOUT_MS / 1000}s in phase ${run.phase} with no worker started event${unknown}`);
+	}
+	if (CLOSE_ON_END.includes(run.status) && live !== undefined && run.block !== undefined && !run.tabClosedAt) {
+		await closeRunTab(run, deps.tern).catch((e) => { run.tabCloseError = `tab close failed: ${(e as Error).message}`.slice(0, 300); });
 	}
 	if (run.outbox.some((o) => !o.done)) await flushOutbox(run, deps);
 	if (JSON.stringify(run) !== before) store.saveRun(run);

@@ -1,7 +1,7 @@
 /** Orchestrator-side client: every mutation is a request file the daemon answers. Reads go straight to the store. */
 import { existsSync } from "node:fs";
-import { ClawStore, readJson, TERMINAL, type Request, type RequestBody, type Response } from "./store.ts";
-import { pidAlive, startDaemonProcess } from "./daemon.ts";
+import { ClawStore, readJson, TERMINAL, type Request, type RequestBody, type Response, type Run } from "./store.ts";
+import { LAUNCH_TIMEOUT_MS, pidAlive, startDaemonProcess } from "./daemon.ts";
 import { runIdFor } from "./spawn.ts";
 
 export const DAEMON_MAIN = new URL("./daemon-main.ts", import.meta.url).pathname;
@@ -97,4 +97,13 @@ export function statusSummary(store: ClawStore) {
 		unreadInbox: store.readInbox(store.readOrchestrator().offset).items.length,
 		logExists: existsSync(store.logPath),
 	};
+}
+
+/** Run rows for `claw list`. `ageSeconds` is time since creation; a launching run also shows seconds left before it times out. */
+export function runListing(runs: Run[], nowMs: number) {
+	return runs.map((r) => {
+		const ageSeconds = Math.max(0, Math.round((nowMs - Date.parse(r.createdAt)) / 1000));
+		const launchTimeoutInSeconds = r.status === "launching" ? Math.max(0, Math.round(LAUNCH_TIMEOUT_MS / 1000) - ageSeconds) : undefined;
+		return { id: r.id, label: r.label, status: r.status, phase: r.phase, identifier: r.hoja?.identifier, ageSeconds, launchTimeoutInSeconds, error: r.error };
+	});
 }
