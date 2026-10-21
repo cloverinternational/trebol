@@ -45,6 +45,8 @@
       "extensions/taskmanage/index.ts",
       "extensions/tern-browser/index.ts",
       "extensions/tern-resume/index.ts",
+      "extensions/hoja-mode/index.ts",
+      "extensions/claw/index.ts",
       "extensions/vault/index.ts",
       "extensions/memory-history/index.ts",
       "extensions/project-context/index.ts",

@@ -200,7 +200,7 @@ When changing discovery, preserve these invariants:
 | `00-runtime` | `cache-telemetry`, `swarm-update`, `hooks`, `swarm-runtime`, `swarm-transport-parity` |
 | `10-context` | `autogenskills`, `prompt-context-configure`, `swarm-plan-mode`, `swarm-prompt`, `swarm-auto`, `swarm-skills`, `swarm-thinking`, `system-inspector`, `system-prompts` |
 | `20-policy` | `swarm-disk-hooks`, `project-init` |
-| `30-tools` | `annoyed/`, `control-task-tools`, `history-search`, `ask-user/`, `paseo`, `project-context`, `research-tools`, `swarm-goal`, `swarm-agent-tools`, `swarm-background-bash`, `swarm-bash`, `swarm-fs-tools`, `swarm-history-vault-tools`, `taskmanage`, `vault` |
+| `30-tools` | `annoyed/`, `control-task-tools`, `history-search`, `ask-user/`, `hoja-mode`, `claw`, `paseo`, `project-context`, `research-tools`, `swarm-goal`, `swarm-agent-tools`, `swarm-background-bash`, `swarm-bash`, `swarm-fs-tools`, `swarm-history-vault-tools`, `taskmanage`, `vault` |
 | `40-state` | `memory-history`, `task-candidate-capture`, `knowledge-enrichment`, `candidate-memory-review`, `jev-knowledge-audit`, `memory-maintenance`, `swarm-conversation-metadata` |
 | `50-ui` | `control-panel`, `supervisor`, `conversation-metrics`, `swarm-themes`, `swarm-tools-status`, `swarm-btw`, `swarm-image-paste`, `swarm-program-status` (through `.trebol-guards/` wrappers) |
 
