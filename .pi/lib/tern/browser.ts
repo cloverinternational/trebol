@@ -12,7 +12,7 @@ import { promisify } from "node:util";
 
 const run = promisify(execFile);
 
-export const OPS = ["list", "new_tab", "rename_tab", "open", "blocks", "goto", "snapshot", "act", "capture", "close", "split", "focus"] as const;
+export const OPS = ["list", "new_tab", "rename_tab", "open", "blocks", "goto", "snapshot", "act", "capture", "close", "split", "focus", "send", "read"] as const;
 export const ACTIONS = ["click", "fill", "press", "select", "check", "uncheck", "hover", "scroll"] as const;
 export const DIRECTIONS = ["right", "down"] as const;
 
@@ -31,6 +31,14 @@ export type Params = {
 	keys?: string;
 	dy?: number;
 	direction?: (typeof DIRECTIONS)[number];
+	/** send: press Enter after the text (default true). */
+	enter?: boolean;
+	/** read: last N lines of the terminal (default 60, max 400). */
+	lines?: number;
+	/** read: poll until the terminal text contains this literal string. */
+	until?: string;
+	/** read with until: give up after this many seconds (default 30, max 120). */
+	timeout?: number;
 };
 type TabBlock = { id: number; title?: string; cwd?: string; program?: string };
 type Tab = { id: number; name: string | null; sessionId: number | null; blocks: TabBlock[] };
@@ -43,7 +51,7 @@ export const createOwnership = (): Ownership => ({ tabs: new Set(), blocks: new 
 export const TERN_TOOL = {
 	name: "tern",
 	label: "Tern",
-	description: "Drive Tern from this pane. Regular signed-in browsers: open (url; optional block = pane to open beside, default this pane; answers the new block), blocks, goto (block, url), snapshot (block; tree with element refs), act (block, ref from snapshot, action click|fill|press|select|check|uncheck|hover|scroll, text|keys|dy), capture (block; PNG under artifacts/tern-browser). Panes and tabs: list (tabs and panes you can reach), new_tab (optional cwd absolute directory; answers tab, block), rename_tab (block in a tab you created, name), split (direction right|down, optional block, default this pane; answers the new block), focus (block), close (block you created with open, split or new_tab; never this pane). Only this pane's tab and tabs you created are reachable. Refs go stale after navigation; snapshot again. URLs must be http or https. Commands run with no shell and no arbitrary program.",
+	description: "Drive Tern from this pane. Regular signed-in browsers: open (url; optional block = pane to open beside, default this pane; answers the new block), blocks, goto (block, url), snapshot (block; tree with element refs), act (block, ref from snapshot, action click|fill|press|select|check|uncheck|hover|scroll, text|keys|dy), capture (block; PNG under artifacts/tern-browser). Terminals: send (block you created with new_tab or split; text, multi-line allowed and pasted as one unit; enter default true presses Enter after), read (block; answers the terminal's last `lines` lines as text; with `until` it polls until that literal text appears or `timeout` seconds pass, answering matched true|false). Panes and tabs: list (tabs and panes you can reach), new_tab (optional cwd absolute directory; answers tab, block), rename_tab (block in a tab you created, name), split (direction right|down, optional block, default this pane; answers the new block), focus (block), close (block you created with open, split or new_tab; never this pane). Typical agent launch: new_tab -> send text 'pi' -> read until a prompt marker -> send the task -> read until done. Only this pane's tab and tabs you created are reachable; send only reaches blocks you created. Refs go stale after navigation; snapshot again. URLs must be http or https. Commands run with no shell and no arbitrary program.",
 	parameters: {
 		type: "object",
 		required: ["op"],
@@ -62,6 +70,10 @@ export const TERN_TOOL = {
 			keys: { type: "string" },
 			dy: { type: "integer" },
 			direction: { type: "string", enum: [...DIRECTIONS] },
+			enter: { type: "boolean" },
+			lines: { type: "integer", minimum: 1, maximum: 400 },
+			until: { type: "string" },
+			timeout: { type: "integer", minimum: 1, maximum: 120 },
 		},
 	},
 } as const;
@@ -84,6 +96,9 @@ export type Deps = {
 
 type Scope = { caller: Tab; tabs: Tab[]; reachable: Tab[]; reachableBlocks: Set<number> };
 
+/** Shown when the Tern session daemon no longer knows this agent's pane (closed, or the daemon restarted under it). */
+export const DEAD_PANE_HINT = "this agent's Tern pane is gone from the session daemon (it closed, or the daemon restarted). Start the agent again from a live Tern pane.";
+
 function allTabs(inspect: Inspect): Tab[] {
 	return inspect.sessions.flatMap((s) => s.tabs.map((t) => ({ id: t.id, name: t.name, sessionId: s.id ?? null, blocks: t.blocks })));
 }
@@ -92,7 +107,7 @@ function allTabs(inspect: Inspect): Tab[] {
 function scopeOf(paneId: number, inspect: Inspect, owned: Ownership): Scope {
 	const tabs = allTabs(inspect);
 	const caller = tabs.find((t) => t.blocks.some((b) => b.id === paneId));
-	if (!caller) throw new Error(`pane ${paneId} is not in any Tern tab`);
+	if (!caller) throw new Error(`pane ${paneId} is not in any Tern tab; ${DEAD_PANE_HINT}`);
 	const live = new Set(tabs.flatMap((t) => t.blocks.map((b) => b.id)));
 	for (const id of [...owned.blocks]) if (!live.has(id)) owned.blocks.delete(id);
 	for (const id of [...owned.tabs]) if (!tabs.some((t) => t.id === id)) owned.tabs.delete(id);
@@ -130,6 +145,37 @@ function reach(scope: Scope, block: number): void {
 
 function throwIfAborted(signal?: AbortSignal): void {
 	if (signal?.aborted) throw new Error("cancelled");
+}
+
+export const NAV_START_MS = 3_000;
+export const NAV_LOAD_MS = 30_000;
+const POLL_MS = 250;
+
+type PageState = { url: string; title?: string | null; loading: boolean };
+const pageState = (deps: Deps, block: number): Promise<PageState> => deps.browser({ op: "state", block });
+
+/** Polls until the page stops loading or the budget runs out. `loaded` is false only when the budget ran out first. */
+async function waitForLoad(deps: Deps, block: number, budgetMs: number): Promise<PageState & { loaded: boolean }> {
+	let s = await pageState(deps, block);
+	for (let waited = 0; s.loading && waited < budgetMs; waited += POLL_MS) {
+		throwIfAborted(deps.signal);
+		await deps.delay(POLL_MS);
+		s = await pageState(deps, block);
+	}
+	return { ...s, loaded: !s.loading };
+}
+
+/** After an action a navigation can start a moment later: wait briefly for it to start, then for it to finish. */
+async function settleAfterAction(deps: Deps, block: number, before: string) {
+	let s = await pageState(deps, block);
+	for (let waited = 0; !s.loading && s.url === before && waited < NAV_START_MS; waited += POLL_MS) {
+		throwIfAborted(deps.signal);
+		await deps.delay(POLL_MS);
+		s = await pageState(deps, block);
+	}
+	const navigated = s.loading || s.url !== before;
+	const page = navigated ? await waitForLoad(deps, block, NAV_LOAD_MS) : { ...s, loaded: true };
+	return { navigated, url: page.url, title: page.title ?? null, loaded: page.loaded };
 }
 
 async function browserBlocks(deps: Deps): Promise<BrowserBlock[]> {
@@ -175,6 +221,44 @@ async function openRegularBrowser(address: string, target: number, deps: Deps): 
 	if (landed.id !== targetTabId) throw new Error(`new browser block ${block} landed outside the target tab; left open, not tracked`);
 	deps.owned.blocks.add(block);
 	return { block, url: address, tab: landed.id };
+}
+
+/** TEMPORARY WORKAROUND, remove once fixed upstream (stencil-hq/tern-sdk#133). The native `act click` sends CSS
+ *  coordinates without scaling by devicePixelRatio, so clicks land off target and navigated stays false.
+ *  Here the element's center (CSS px) is scaled by dpr and clicked through the `input` op instead. */
+export function dprScaledPoint(rect: { x: number; y: number; width: number; height: number }, dpr: number): { x: number; y: number } {
+	return { x: (rect.x + rect.width / 2) * dpr, y: (rect.y + rect.height / 2) * dpr };
+}
+
+/** The accessible name of the snapshot node carrying `ref`, or null when the tree has no such node. */
+export function refName(node: any, ref: string): string | null {
+	if (!node || typeof node !== "object") return null;
+	if (node.ref === ref) return typeof node.name === "string" ? node.name : null;
+	for (const child of node.children ?? []) {
+		const found = refName(child, ref);
+		if (found !== null) return found;
+	}
+	return null;
+}
+
+/** TEMPORARY WORKAROUND (see dprScaledPoint). Resolves the click point for a snapshot ref by matching its name against
+ *  visible links and buttons in the page; null when the element can't be resolved, so the caller falls back to native act. */
+async function dprClickPoint(deps: Deps, block: number, ref: string): Promise<{ x: number; y: number } | null> {
+	const snap = await deps.browser({ op: "snapshot", block, format: "tree" });
+	const name = refName(snap?.tree, ref);
+	if (name === null) return null;
+	const found = await deps.browser({
+		op: "eval",
+		block,
+		function: `() => { const want = ${JSON.stringify(name)};
+			const el = [...document.querySelectorAll("a,button,[role=link],[role=button]")].find((e) => (e.textContent || "").trim() === want);
+			if (!el) return null;
+			const r = el.getBoundingClientRect();
+			if (r.width === 0 || r.height === 0 || r.bottom < 0 || r.top > innerHeight) return null;
+			return { x: r.x, y: r.y, width: r.width, height: r.height, dpr: window.devicePixelRatio }; }`,
+	});
+	const hit = found?.value;
+	return hit ? dprScaledPoint(hit, hit.dpr) : null;
 }
 
 export async function runTern(p: Params, deps: Deps): Promise<unknown> {
@@ -231,7 +315,10 @@ export async function runTern(p: Params, deps: Deps): Promise<unknown> {
 		}
 		case "goto": {
 			const s = await current();
-			return deps.browser({ op: "goto", block: await requireBrowser(deps, s, required(p.block, "block")), url: webUrl(required(p.url, "url")) });
+			const block = await requireBrowser(deps, s, required(p.block, "block"));
+			const answer = await deps.browser({ op: "goto", block, url: webUrl(required(p.url, "url")) });
+			const page = await waitForLoad(deps, block, NAV_LOAD_MS);
+			return { ...answer, url: page.url, title: page.title ?? null, loaded: page.loaded };
 		}
 		case "snapshot": {
 			const s = await current();
@@ -241,7 +328,17 @@ export async function runTern(p: Params, deps: Deps): Promise<unknown> {
 			const s = await current();
 			const block = await requireBrowser(deps, s, required(p.block, "block"));
 			if (!p.action || !(ACTIONS as readonly string[]).includes(p.action)) throw new Error(`unknown action: ${p.action}`);
-			return deps.browser({ op: "act", block, action: p.action, ref: required(p.ref, "ref"), text: p.text, keys: p.keys, dy: p.dy });
+			const before = (await pageState(deps, block)).url;
+			if (p.action === "click") {
+				const point = await dprClickPoint(deps, block, required(p.ref, "ref"));
+				if (point) {
+					const at = { type: "mouse", x: point.x, y: point.y, button: "left" };
+					await deps.browser({ op: "input", block, events: [{ ...at, action: "down" }, { ...at, action: "up" }] });
+					return { done: true, clickedAt: point, ...(await settleAfterAction(deps, block, before)) };
+				}
+			}
+			const answer = await deps.browser({ op: "act", block, action: p.action, ref: required(p.ref, "ref"), text: p.text, keys: p.keys, dy: p.dy });
+			return { ...answer, ...(await settleAfterAction(deps, block, before)) };
 		}
 		case "capture": {
 			const s = await current();
@@ -281,6 +378,43 @@ export async function runTern(p: Params, deps: Deps): Promise<unknown> {
 			await focusBlock(block, deps);
 			return { focused: block };
 		}
+		case "send": {
+			const s = await current();
+			const block = required(p.block, "block");
+			reach(s, block);
+			if (!deps.owned.blocks.has(block)) throw new Error(`block ${block} was not created by this agent; only blocks it created can receive input`);
+			const text = required(p.text, "text");
+			// Newlines and tabs are allowed and delivered as one bracketed paste; every other control character
+			// (escape sequences, Ctrl-C, bells) is refused so a send can't drive the terminal outside its text.
+			if (text.length > 20_000 || /[\u0000-\u0008\u000b-\u001f\u007f]/.test(text)) {
+				throw new Error("text must be 1-20000 characters; newlines and tabs allowed, no other control characters");
+			}
+			const multiLine = /[\n\t]/.test(text);
+			await deps.tern(["send", String(block), multiLine ? "paste" : "text", text]);
+			const enter = p.enter !== false;
+			if (enter) await deps.tern(["send", String(block), "keys", "Enter"]);
+			return { sent: block, chars: text.length, mode: multiLine ? "paste" : "text", enter };
+		}
+		case "read": {
+			const s = await current();
+			const block = required(p.block, "block");
+			reach(s, block);
+			const lines = Math.min(Math.max(p.lines ?? 60, 1), 400);
+			const tail = async () => {
+				const all = (await deps.tern(["capture", String(block)])).replace(/\s+$/, "").split("\n");
+				return all.slice(-lines).join("\n");
+			};
+			if (p.until === undefined) return { block, text: await tail() };
+			const until = required(p.until, "until");
+			const deadline = Math.min(Math.max(p.timeout ?? 30, 1), 120) * 1000;
+			let text = await tail();
+			for (let waited = 0; !text.includes(until) && waited < deadline; waited += 1000) {
+				throwIfAborted(deps.signal);
+				await deps.delay(1000);
+				text = await tail();
+			}
+			return { block, text, matched: text.includes(until) };
+		}
 		default:
 			throw new Error(`unknown op: ${String(p.op)}`);
 	}
@@ -292,13 +426,20 @@ function bounded(text: string): string {
 	return t.length > MAX_ERROR ? `${t.slice(0, MAX_ERROR)}...` : t;
 }
 
+/** The error for a failed `tern` command. A pane the daemon has never heard of, or has dropped, gets the actionable hint. */
+export function ternFailure(command: string, text: string): Error {
+	if (/no such pane/.test(text)) return new Error(`tern ${command}: ${DEAD_PANE_HINT}`);
+	return new Error(`tern ${command} failed: ${bounded(text)}`);
+}
+
 /** Runs `tern ARGS` with no shell. Rejects with the bounded stderr; `stdout` is attached for JSON error answers. */
 async function execTern(args: string[], signal?: AbortSignal): Promise<string> {
 	try {
 		return (await run("tern", args, { timeout: 60_000, maxBuffer: 128 * 1024 * 1024, signal })).stdout;
 	} catch (err: any) {
 		if (signal?.aborted) throw new Error(`tern ${args[0]} cancelled`);
-		throw Object.assign(new Error(`tern ${args[0]} failed: ${bounded(String(err.stderr || err.message))}`), {
+		const text = String(err.stderr || err.message);
+		throw Object.assign(ternFailure(args[0], text), {
 			stdout: typeof err.stdout === "string" ? err.stdout : "",
 		});
 	}

@@ -151,6 +151,17 @@ describe("TernInlineSurface", () => {
 		expect(sent[1].ops).toEqual([["text", "a", "append", "lo"]]);
 	});
 
+	it("patches status without resending local collapse state and still clears removed props", () => {
+		const before = { id: "work", k: "tool", p: { collapsed: true, status: "running", title: "Working", note: "old" } };
+		const after = { id: "work", k: "tool", p: { collapsed: true, status: "done", title: "Done" } };
+		expect(diffChildren("main", [before], [after])).toEqual([
+			["set", "work", { note: null, status: "done", title: "Done" }],
+		]);
+		expect(diffChildren("main", [after], [{ ...after, p: { ...after.p, collapsed: false } }])).toEqual([
+			["set", "work", { collapsed: false }],
+		]);
+	});
+
 	it("appends a new keyed child and deletes removed tail children without touching the rest", () => {
 		const { writes, write } = capture();
 		const surface = new TernInlineSurface(write, "pi1", 1000);
@@ -246,7 +257,7 @@ describe("projectTranscript", () => {
 		]);
 		expect(nodes).toEqual([
 			{ id: "msg-1", k: "card", p: { role: "pi.user", tone: "user" }, c: [{ id: "msg-1.body", k: "md", p: { text: "hi" } }] },
-			{ id: "msg-2", k: "col", p: { role: "pi.assistant" }, c: [{ id: "msg-2.body", k: "md", p: { text: "hello **there**", stream: true } }] },
+			{ id: "msg-2", k: "col", p: { role: "pi.assistant" }, c: [{ id: "msg-2.body", k: "md", p: { text: "hello **there**", stream: false } }] },
 		]);
 		expect(new Set(nodes.map((n) => n.id)).size).toBe(nodes.length);
 	});

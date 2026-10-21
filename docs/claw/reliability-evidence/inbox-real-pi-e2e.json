@@ -1,0 +1,78 @@
+{
+  "steps": [
+    {
+      "at": "2026-10-21T18:39:02.315Z",
+      "step": "started session A",
+      "pid": 71665
+    },
+    {
+      "at": "2026-10-21T18:40:02.476Z",
+      "step": "timeout",
+      "label": "session file"
+    },
+    {
+      "at": "2026-10-21T18:40:02.479Z",
+      "step": "owner",
+      "owner": "01a15fc2-7727-7578-854c-a1c09683d1e9",
+      "ownerPid": 71665
+    },
+    {
+      "at": "2026-10-21T18:40:10.000Z",
+      "step": "k1 persisted in transcript",
+      "count": 1,
+      "offset": 93,
+      "inflight": null
+    },
+    {
+      "at": "2026-10-21T18:40:10.000Z",
+      "step": "killed session A with SIGKILL",
+      "pid": 71665
+    },
+    {
+      "at": "2026-10-21T18:40:10.002Z",
+      "step": "reconnect 1: session B",
+      "pid": 75645,
+      "file": "/tmp/claw-rel/sess-inbox/2026-10-21T18-39-02-439Z_01a15fc2-7727-7578-854c-a1c09683d1e9.jsonl"
+    },
+    {
+      "at": "2026-10-21T18:40:11.010Z",
+      "step": "k2 persisted after reconnect 1",
+      "k1": 1,
+      "k2": 1,
+      "offset": 93,
+      "inflight": {
+        "ids": [
+          "k2"
+        ],
+        "endOffset": 225,
+        "sentAt": "2026-10-21T18:40:10.679Z",
+        "session": "01a15fc2-7727-7578-854c-a1c09683d1e9"
+      }
+    },
+    {
+      "at": "2026-10-21T18:40:11.011Z",
+      "step": "reconnect 2: session C",
+      "pid": 75852
+    },
+    {
+      "at": "2026-10-21T18:40:24.016Z",
+      "step": "after reconnect 2 (no new items)",
+      "k1": 1,
+      "k2": 1,
+      "offset": 225,
+      "inflight": null,
+      "owner": "01a15fc2-7727-7578-854c-a1c09683d1e9"
+    },
+    {
+      "at": "2026-10-21T18:40:24.018Z",
+      "step": "done",
+      "sessionFile": "/tmp/claw-rel/sess-inbox/2026-10-21T18-39-02-439Z_01a15fc2-7727-7578-854c-a1c09683d1e9.jsonl"
+    }
+  ],
+  "sessionFile": "/tmp/claw-rel/sess-inbox/2026-10-21T18-39-02-439Z_01a15fc2-7727-7578-854c-a1c09683d1e9.jsonl",
+  "piLogs": [
+    "/tmp/claw-rel/pi-71665.log",
+    "/tmp/claw-rel/pi-75645.log",
+    "/tmp/claw-rel/pi-75852.log"
+  ]
+}

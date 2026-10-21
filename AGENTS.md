@@ -84,6 +84,7 @@ path, and preserve native tools and unrelated extensions while disabled.
 | `packages/context/` | `prompt` (canonical prompt markdown and provenance), `skills` (loader, registry, builtins), `autogenskills` (generated-skill lifecycle). |
 | `packages/policy/` | `policy` (capability, workspace, mutation, network, approval). |
 | `packages/tools/` | `agents`, `taskmanage`, `mcp`, `schedule`. |
+| `tools/experiments/patch-parity/` | Runs the pinned upstream apply-patch scenario corpus (`fixtures/scenarios`, openai/codex `430a16799d90e296fb27b1e94f206023902b7e56`) against Trebol: `node --experimental-strip-types tools/experiments/patch-parity/runner.ts standalone\|agent`. `oracle` mode needs `CODEX_APPLY_PATCH_BIN` pointing at a built upstream binary and otherwise reports BLOCKED. Fixture expectations are upstream-authored and were not produced by executing the oracle. |
 | `tools/experiments/bootstrap-agent/` | Opt-in bootstrap experiments; `planning-contract.mjs` provides experimental prompt variants and strict plan validation. Private history replays stay in ignored artifacts; planning scores do not prove execution or memory retrieval. |
 | `tools/integration/` | Postgres integration runner and cache dogfood. |
 | `tools/install/` | `doctor.mjs`: global-install health check (`npm run doctor`). |
@@ -200,7 +201,7 @@ When changing discovery, preserve these invariants:
 | `00-runtime` | `cache-telemetry`, `swarm-update`, `hooks`, `swarm-runtime`, `swarm-transport-parity` |
 | `10-context` | `autogenskills`, `prompt-context-configure`, `swarm-plan-mode`, `swarm-prompt`, `swarm-auto`, `swarm-skills`, `swarm-thinking`, `system-inspector`, `system-prompts` |
 | `20-policy` | `swarm-disk-hooks`, `project-init` |
-| `30-tools` | `annoyed/`, `control-task-tools`, `history-search`, `ask-user/`, `paseo`, `project-context`, `research-tools`, `swarm-goal`, `swarm-agent-tools`, `swarm-background-bash`, `swarm-bash`, `swarm-fs-tools`, `swarm-history-vault-tools`, `taskmanage`, `vault` |
+| `30-tools` | `annoyed/`, `control-task-tools`, `history-search`, `ask-user/`, `hoja-mode`, `claw`, `paseo`, `project-context`, `research-tools`, `swarm-goal`, `swarm-agent-tools`, `swarm-background-bash`, `swarm-bash`, `swarm-fs-tools`, `swarm-history-vault-tools`, `taskmanage`, `vault` |
 | `40-state` | `memory-history`, `task-candidate-capture`, `knowledge-enrichment`, `candidate-memory-review`, `jev-knowledge-audit`, `memory-maintenance`, `swarm-conversation-metadata` |
 | `50-ui` | `control-panel`, `supervisor`, `conversation-metrics`, `swarm-themes`, `swarm-tools-status`, `swarm-btw`, `swarm-image-paste`, `swarm-program-status` (through `.trebol-guards/` wrappers) |
 
@@ -222,7 +223,7 @@ belongs in `packages/policy/policy`, and rendering belongs in the extension/rend
 | Tool(s) | Pi registration | Owning implementation / seam |
 | --- | --- | --- |
 | `bash` | `extensions/swarm-bash/extension.ts` | `.pi/lib/tools/swarm-bash.ts`; policy must gate execution separately. |
-| `Read`, `apply_patch`, `Undo` | `extensions/swarm-fs-tools/extension.ts` | `.pi/lib/tools/swarm-apply-patch.ts`, `.pi/lib/tools/swarm-read-image.ts`; filesystem boundary is an explicit decoupling seam. |
+| `Read`, `apply_patch`, `Undo` | `extensions/swarm-fs-tools/extension.ts` | `.pi/lib/tools/swarm-apply-patch.ts`, `.pi/lib/tools/swarm-read-image.ts`; filesystem boundary is an explicit decoupling seam. `apply_patch` follows pinned upstream Codex V4A semantics (parse, then validate with no writes, then sequential execution with no rollback; first-match context; per-line endings). Snapshots and `Undo` are a Trebol extension. Known exclusions and the oracle status are in `docs/parity/codex-apply-patch-audit.md`. Do not reintroduce atomicity or ambiguity-rejection claims. |
 | `Agent`, `AgentControl` | `extensions/swarm-agent-tools/extension.ts` | `packages/tools/agents/src/index.ts`, `packages/tools/agents/src/general-agent-adapter.ts`; child runner/session isolation lives in `packages/tools/agents`. |
 | `task_create`, `task_update`, `task_get`, `task_list`, `task_delete`, `task_claim`, `task_note`, `task_plan`, `task_complete`, `task_reopen`, `task_block`, `task_unblock`, `task_focus`, `task_unfocus`, `task_status`, `run_status` | `extensions/taskmanage/extension.ts`, `extensions/control-task-tools/extension.ts` | `packages/tools/taskmanage/src/task-manage.ts`, `packages/tools/taskmanage/src/workflow.ts`, `packages/tools/taskmanage/src/persistence.ts`, `packages/runtime/runtime-contracts/src/control-task.ts`; do not duplicate task state in extensions. |
 | `HistorySearch`, `HistoryGet` | `extensions/swarm-history-vault-tools/extension.ts` and `extensions/history-search/extension.ts` | `.pi/lib/tools/swarm-history-tools.ts` with shared `history-reader.ts`, `history-matching.ts`, and `history-admission.ts`; streaming history is read-only, resource-budgeted, redacted, and reports incomplete scans. See `docs/reference/history-search.md`. |
@@ -888,3 +889,19 @@ identity and preserved host-adapter constraints. Install source parsing shares
 one Git identity parser with doctor; migration preview covers top-level extension
 paths as well as package filters. Host lookup supports Windows npm shim layout
 with suffix tests; live Windows verification remains separate.
+
+### Tern MCP connection list
+
+The startup card (`.pi/lib/tern/startup-card.ts`) shows MCP status below Recent
+commits. `extensions/mcp-fallback/extension.ts` publishes session-ID-scoped,
+name-only snapshots through `.pi/lib/tools/mcp-status.ts`; the Tern bridge
+subscribes and reads only its current session. No configuration/tool-name
+inference is used. `MCPManager.connectedServers()` means initialize and tool
+listing succeeded with no subsequent observed disconnect. Stdio exit/error and
+observed HTTP transport failure invalidate the entry; HTTP is last-observed
+readiness, not a continuously probed health guarantee. No background health
+requests are added. Adapter-owned/unobservable state is unavailable, not empty.
+Session replacement/shutdown clear ownership and bridge close unsubscribes.
+Tests: `.pi/test/tern/{startup-card-mcp,mcp-bridge}.test.ts`,
+`.pi/test/tools/{mcp-status,mcp-fallback-status}.test.ts`, and
+`packages/tools/mcp/test/index.test.ts`.

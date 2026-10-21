@@ -1,0 +1,12 @@
+{
+  "issues": [
+    { "identifier": "TEST-1", "title": "Fix rate limit on quotes endpoint", "state": "In Progress", "priority": 2, "assignee": "Alice", "project": "Pentest" },
+    { "identifier": "TEST-2", "title": "Rotate expired API key", "state": "In Progress", "priority": 0, "assignee": "Alice", "project": "Infra" },
+    { "identifier": "TEST-3", "title": "Document CRM integration endpoints", "state": "In Review", "priority": 0, "assignee": "Bob", "project": "CRM" },
+    { "identifier": "TEST-4", "title": "Migrate legacy server", "state": "Backlog", "priority": 0, "assignee": "Bob", "project": "Infra" },
+    { "identifier": "TEST-5", "title": "Waiting on DNS owner", "state": "Blocked", "priority": 1, "assignee": "Alice", "project": "Infra" },
+    { "identifier": "TEST-6", "title": "Confirm project owner", "state": "Todo", "priority": 0, "assignee": null, "project": "Marketing" },
+    { "identifier": "TEST-7", "title": "Remove secrets from production bundle", "state": "In Progress", "priority": 3, "assignee": "Alice", "project": "Pentest" },
+    { "identifier": "TEST-8", "title": "Old onboarding checklist", "state": "Done", "priority": 0, "assignee": "Bob", "project": "Ops" }
+  ]
+}

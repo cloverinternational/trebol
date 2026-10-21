@@ -6,7 +6,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PiTernBridge, TranscriptProjector, type PiEventLike, type PiSessionLike } from "../../lib/tern/bridge.ts";
-import { ESC, parseTspMessages, type TspNode } from "../../lib/tern/tsp.ts";
+import { diffChildren, ESC, parseTspMessages, type TspNode } from "../../lib/tern/tsp.ts";
 import { isTurnBoundary, summaryText } from "../../lib/tern/turn-groups.ts";
 import { patchRunningWork, removeRunningWork, setRunningWork } from "../../lib/ui/running-work-store.ts";
 
@@ -63,7 +63,7 @@ describe("replay corpus", () => {
 			// The user turn: its card, then its final answer; the wakeup turn: its card, then its answer.
 			expect(roles.slice(roles.lastIndexOf("pi.user"))).toEqual(["pi.user", "tern.work", "pi.assistant", "tern.notice", "tern.work", "pi.assistant"]);
 			const cards = nodes.filter((n) => n.p?.role === "tern.work");
-			expect(cards.at(-2)!.c!.filter((c) => c.k !== "md").map((c) => c.p?.name)).toEqual(["TaskManage", "Subagent", "Subagent"]);
+			expect(cards.at(-2)!.c!.filter((c) => c.k === "list").flatMap((list) => (list.c ?? []).map((row) => row.p?.label))).toEqual(["Tasks", "Subagent", "Subagent"]);
 		}
 		expect(workView(restored.nodes())).toEqual(workView(live.nodes()));
 	});
@@ -237,10 +237,10 @@ describe("turn-work properties", () => {
 		for (const { label, events } of sources) {
 			for (const { index, items, nodes } of liveStates(events)) {
 				const groups = nodes.filter((n) => n.p?.role === "tern.work" || n.p?.role === "tern.work-live");
-				// A live line names its group by id (g-<first call>); it has no children, so its members are the
-				// turn's tool items from that call up to the next user message.
+				// A live card's activity panel lists only running steps, so its members come from the turn's items:
+				// the tool items from its first call (g-<first call>) up to the next user message. Settled cards list all steps.
 				const members = groups.flatMap((g) => {
-					if (g.c) return g.c.filter((c) => c.k !== "md").map((c) => c.id.replace(/-group$/, ""));
+					if (g.c && g.p?.role === "tern.work") return g.c.filter((c) => c.k === "list").flatMap((list) => (list.c ?? []).map((row) => row.id.replace(/^row-/, "")));
 					const from = items.findIndex((i) => i.id === String(g.id).slice(2));
 					const out: string[] = [];
 					for (let k = from; k >= 0 && k < items.length && (k === from || !isTurnBoundary(items[k]!)); k++) if (items[k]!.role === "tool") out.push(items[k]!.id);
@@ -253,7 +253,7 @@ describe("turn-work properties", () => {
 		}
 	});
 
-	it("a running turn renders its work as one line with no tool children", () => {
+	it("a running turn renders one live card, opened to its activity panel, with no step renderers beneath it", () => {
 		for (const seed of SEEDS) {
 			const { events, checkpoints } = generate(seed);
 			const states = [...liveStates(events)];
@@ -265,14 +265,16 @@ describe("turn-work properties", () => {
 				const live = nodes.filter((n) => n.p?.role === "tern.work-live");
 				expect(live.length, `seed ${seed} @${index}`).toBe(turnHasTools ? 1 : 0);
 				for (const n of live) {
-					expect(n.k).toBe("text");
-					expect(n.c).toBeUndefined();
-					expect(n.p).toMatchObject({ wrap: "none", truncate: "end" });
+					// Native card: opened by default; its activity panel holds rows, not step renderers.
+					expect(n.k).toBe("tool");
+					expect(n.c?.length, `seed ${seed} @${index}`).toBeGreaterThan(0);
+					expect(n.p).toMatchObject({ key: n.id, status: "running", collapsible: true, collapsed: false });
+					expect(n.c?.some((c) => c.k === "tool"), `seed ${seed} @${index}`).toBe(false);
 					expect(String(n.p?.text)).not.toContain("\n");
 				}
-				// Nothing rendered after the turn's user message is a tool row.
+				// Nothing rendered after the turn's user message is a tool row outside the live card.
 				const after = nodes.slice(nodes.findLastIndex(isBoundaryNode) + 1);
-				expect(after.filter((n) => n.k === "tool"), `seed ${seed} @${index}`).toEqual([]);
+				expect(after.filter((n) => n.k === "tool" && n.p?.role !== "tern.work-live"), `seed ${seed} @${index}`).toEqual([]);
 			}
 		}
 	});
@@ -305,7 +307,7 @@ describe("turn-work properties", () => {
 				}
 				if (n.p?.role === "tern.work") {
 					turnCards++;
-					turnTools += (n.c ?? []).filter((c) => c.k !== "md").length;
+					turnTools += (n.c ?? []).flatMap((c) => (c.k === "list" ? c.c ?? [] : [])).length;
 					expect(n.p).toMatchObject({ collapsible: true, collapsed: true });
 				}
 			}
@@ -395,6 +397,23 @@ describe("turn line and running-work bar announce each piece of work once", () =
 	});
 });
 
+describe("live card identity", () => {
+	it("the work card keeps its id through streaming, expansion and settlement: never removed or re-added by a patch", () => {
+		const isWork = (n: TspNode) => n.p?.role === "tern.work" || n.p?.role === "tern.work-live";
+		for (const seed of SEEDS) {
+			let prev: TspNode[] = [];
+			for (const { nodes } of liveStates(generate(seed).events)) {
+				const ops = diffChildren("main", prev, nodes) as unknown[][];
+				const next = new Set(nodes.filter(isWork).map((n) => n.id));
+				for (const id of prev.filter(isWork).map((n) => n.id).filter((id) => next.has(id))) {
+					expect(ops.filter((op) => (op[0] === "del" || op[0] === "add") && op[1] === id), `seed ${seed}`).toEqual([]);
+				}
+				prev = nodes;
+			}
+		}
+	});
+});
+
 describe("expansion", () => {
 	it("ctrl+o (outputExpanded) unfolds settled summaries and their steps, and opens a running turn in place", () => {
 		const { events } = corpus.find((c) => c.name.startsWith("2026-10-18T19-29"))!;
@@ -413,16 +432,24 @@ describe("expansion", () => {
 		running.apply({ type: "tool_execution_start", toolCallId: "a", toolName: "bash", args: { command: "x" } });
 		running.apply({ type: "message_start", message: { role: "assistant", content: [] } });
 		running.apply({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "Now checking the\nbuild log" } });
-		// Folded: one line plus the streaming tail (the last line written so far); no steps.
-		expect(running.nodes(false).slice(1).map((n) => [n.k, n.p?.role, n.p?.text, n.c])).toEqual([
-			["text", "tern.work-live", "1 running · go", undefined],
-			["text", "tern.work-tail", "build log", undefined],
+		// Open by default: the activity panel, with no narration tail (the tail belongs to a folded card).
+		const open1 = running.nodes(false).slice(1);
+		expect(open1.map((n) => [n.k, n.p?.role, n.p?.status, n.p?.collapsed, n.p?.text])).toEqual([["tool", "tern.work-live", "running", false, "1 running · go"]]);
+		// Folded by the user: the same card with every step and its narration as children, plus the streaming tail.
+		running.setGroupCollapsed("g-t-a", true);
+		const folded2 = running.nodes(false).slice(1);
+		expect(folded2.map((n) => [n.k, n.p?.role, n.p?.status, n.p?.collapsed, n.p?.text])).toEqual([
+			["tool", "tern.work-live", "running", true, "1 running · go"],
+			["text", "tern.work-tail", undefined, undefined, "build log"],
 		]);
-		// Unfolded: the same id as an open running card with the step and the narration streaming inside; no tail.
+		expect(folded2[0]!.c?.map((c) => c.id)).toEqual(["g-t-a-rows-0", "m2-note", "g-t-a-activity", "g-t-a-collapse"]);
+		// Ctrl+O clears local folds: the same card (id and key) opens in place in All steps, narration inside, no tail.
+		running.clearGroupViews();
 		const open2 = running.nodes(true).slice(1);
-		expect(open2.map((n) => [n.id, n.k, n.p?.role, n.p?.status, n.p?.collapsed])).toEqual([[running.nodes(false)[1]!.id, "tool", "tern.work-live", "running", false]]);
-		expect(open2[0]!.c?.map((c) => [c.k, c.p?.role ?? c.p?.name, c.p?.text ?? c.p?.status])).toEqual([["tool", "omp.tool.bash", "running"], ["md", "tern.work-note", "Now checking the\nbuild log"]]);
+		expect(open2.map((n) => [n.id, n.k, n.p?.role, n.p?.status, n.p?.collapsed, n.p?.key])).toEqual([[folded2[0]!.id, "tool", "tern.work-live", "running", false, folded2[0]!.id]]);
+		expect(open2[0]!.c?.map((c) => [c.k, c.p?.role, c.p?.text])).toEqual([["list", "tern.work-rows", undefined], ["md", "tern.work-note", "Now checking the\nbuild log"], ["text", "tern.work-mode", "Activity"], ["text", "tern.work-collapse", "Collapse work"]]);
 		running.apply({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: " now" } });
+		running.setGroupCollapsed("g-t-a", true);
 		expect(running.nodes(false).at(-1)?.p?.text).toBe("build log now");
 		// Settling keeps the id: the open card becomes the Done card.
 		running.apply({ type: "tool_execution_end", toolCallId: "a", toolName: "bash", result: { content: [] }, isError: false });

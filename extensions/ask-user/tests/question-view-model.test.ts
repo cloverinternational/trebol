@@ -76,6 +76,44 @@ test("question view model marks multi custom answer as checked", () => {
 	assert.equal(model.rows[1]?.detail?.kind, "custom-text");
 });
 
+test("question view model marks multi options with checkboxes and single options with radio markers", () => {
+	const multi = createInitialState({
+		questions: [
+			{
+				id: "m",
+				prompt: "Pick many",
+				type: "multi",
+				options: [
+					{ value: "a", label: "A" },
+					{ value: "b", label: "B" },
+				],
+			},
+		],
+	});
+	const multiSelected = applyNumberShortcut(multi, 1);
+	const multiModel = buildQuestionScreenModel(buildContext(multiSelected));
+	assert.equal(multiModel.rows[0]?.prefix, "[x] ");
+	assert.equal(multiModel.rows[1]?.prefix, "[ ] ");
+
+	const single = createInitialState({
+		questions: [
+			{
+				id: "s",
+				prompt: "Pick one",
+				type: "single",
+				options: [
+					{ value: "a", label: "A" },
+					{ value: "b", label: "B" },
+				],
+			},
+		],
+	});
+	const singleSelected = applyNumberShortcut(single, 1);
+	const singleModel = buildQuestionScreenModel(buildContext(singleSelected));
+	assert.equal(singleModel.rows[0]?.prefix, "(•) ");
+	assert.equal(singleModel.rows[1]?.prefix, "( ) ");
+});
+
 test("question view model exposes saved question notes", () => {
 	let state = enterQuestionNoteMode(
 		createInitialState({
