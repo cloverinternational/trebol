@@ -6,12 +6,8 @@ import { openSync, rmSync, writeFileSync } from "node:fs";
 import { nextCronTime, validateCron } from "../../../packages/tools/schedule/src/cron.ts";
 import type { LaunchDeps } from "./spawn.ts";
 import { continueRun, failRun, findByKey, queueComment, queueState, runMarker, startRun, opMarker } from "./spawn.ts";
-<<<<<<< HEAD
 import { liveBlocks, closeBlock, sendToBlock, findRunBlock } from "./launcher.ts";
-=======
-import { liveBlocks, closeBlock, isBlockGone, sendToBlock, type TernExec } from "./launcher.ts";
 import { describeSource } from "./preflight.ts";
->>>>>>> origin/main
 import { ClawStore, readJson, TERMINAL, type ClawEvent, type Request, type Response, type Run, type RunStatus, type Trigger, type SpawnInput } from "./store.ts";
 import { validateFinish } from "./child.ts";
 import { CLOSE_ON_END, DEFAULT_SLO, closeRunTab, flushDigest, sloFrom, superviseRun, supervisionPending, type SloConfig } from "./supervisor.ts";
@@ -431,13 +427,10 @@ export async function reconcileRun(run: Run, deps: DaemonDeps, live: Set<number>
 	if (run.status === "launching" && deps.now().getTime() - Date.parse(run.createdAt) > LAUNCH_TIMEOUT_MS) {
 		const unknown = run.phase === "create_dispatched" ? "; the Hoja create outcome was unknown, so a late issue carrying the run marker may exist and needs a manual check" : "";
 		const captured = startupFailureReason(store.readWorkerLog(run.id));
-<<<<<<< HEAD
-		failRun(run, deps, `launch timed out after ${LAUNCH_TIMEOUT_MS / 1000}s in phase ${run.phase} with no worker started event${captured ? `; worker stderr: ${captured}` : ""}${unknown}`);
-		run.failureClass = "launch";
-=======
 		const source = run.source ? `; source checkout ${describeSource(run.source)}` : "";
 		failRun(run, deps, `launch timed out after ${LAUNCH_TIMEOUT_MS / 1000}s in phase ${run.phase} with no worker started event${captured ? `; worker stderr: ${captured}` : ""}${unknown}${source}`);
->>>>>>> origin/main
+		// A launch failure with a known issue and no tab is the one case the supervisor may retry (SLO S6).
+		run.failureClass = "launch";
 	}
 	// Self-supervision owns terminal tab close, the idle/stall bound, decision reminders and bounded recovery. It gets
 	// the Tern snapshot even when it is undefined (a failed snapshot must not silently cancel the close).

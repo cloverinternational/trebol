@@ -13,11 +13,8 @@ import { basename, isAbsolute, resolve } from "node:path";
 import { HojaRequestError, type HojaClient, type IssueRef, type IssueView, type Resolved } from "./hoja.ts";
 import { clawSession, findRunBlock, launchTab, tabLabel, type TernExec } from "./launcher.ts";
 import { describePlan, type LaunchPlan } from "./launch-plan.ts";
-<<<<<<< HEAD
-import { recordAttempt, remedyKey } from "./remedy.ts";
-=======
 import { describeSource, preflightLaunch, snapshotSource, type Preflight } from "./preflight.ts";
->>>>>>> origin/main
+import { recordAttempt, remedyKey } from "./remedy.ts";
 import { TERMINAL, type ClawStore, type Run, type SpawnInput, type OutboxOp } from "./store.ts";
 
 export const MAX_INTENT_ATTEMPTS = 5;
