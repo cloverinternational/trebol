@@ -71,6 +71,9 @@ function fakeTern() {
 	return { exec, live, calls, opened: () => calls.filter((c) => c[0] === "new").length };
 }
 
+/** Specifiers written *into* fixtures must not look like this file's own imports to `tools/repo/rewrite-imports.mjs`. */
+const spec = (name: string) => ["." , name].join("/");
+
 const git = (dir: string, args: string[]) => execFileSync("git", ["-C", dir, "-c", "user.email=claw@example.com", "-c", "user.name=Claw Test", ...args], { encoding: "utf8" });
 
 /** A minimal pi package in its own git checkout: manifest entry point plus a module it imports. */
@@ -79,7 +82,7 @@ function gitFixture(): string {
 	mkdirSync(join(dir, "extensions/ok"), { recursive: true });
 	writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "claw-source-fixture", pi: { extensions: ["extensions/ok/index.ts"] } }, null, 2));
 	writeFileSync(join(dir, "extensions/ok/lib.ts"), "export const lib = 2 as number;\n");
-	writeFileSync(join(dir, "extensions/ok/index.ts"), 'import { lib } from "./lib.ts";\n\nexport const ok = lib;\n');
+	writeFileSync(join(dir, "extensions/ok/index.ts"), `import { lib } from "${spec("lib.ts")}";\n\nexport const ok = lib;\n`);
 	execFileSync("git", ["init", "-q", "-b", "main", dir]);
 	git(dir, ["add", "."]);
 	git(dir, ["commit", "-qm", "fixture"]);
@@ -299,7 +302,7 @@ describe("launch gate in the run lifecycle", () => {
 
 	it("refuses a worker tab when tracked extension source was edited between create and launch", async () => {
 		deps.preflight = async (input) => {
-			writeFileSync(join(source, "extensions/ok/index.ts"), 'import { lib } from "./lib.ts";\n\nexport const ok = lib +;\n');
+			writeFileSync(join(source, "extensions/ok/index.ts"), `import { lib } from "${spec("lib.ts")}";\n\nexport const ok = lib +;\n`);
 			return defaultPreflight(input);
 		};
 		const run = await spawn();
