@@ -12,6 +12,7 @@ import { join } from "node:path";
 
 import type { Resolved } from "./hoja.ts";
 import type { ClawGoal, GoalEvent, GoalSpec } from "./goal.ts";
+import type { SourceState } from "./preflight.ts";
 
 /** awaiting_decision: the worker opened its own ask modal and its turn is suspended until a human answers or cancels
  *  in that worker's tab. It is not a report, not a result, and not the terminal `needs_user` outcome (awaiting_user). */
@@ -53,6 +54,15 @@ export type Run = {
 	tabClosedAt?: string;
 	/** Last failed attempt to close the worker tab; retried while the run is terminal and Tern answers. */
 	tabCloseError?: string;
+	/** The checkout this run was created from (HEAD, branch, fingerprint of tracked changes). The launch gate refuses a
+	 *  worker tab when that checkout has moved or gained tracked edits since, so a worker cannot load a different tree. */
+	source?: SourceState;
+	/** The same checkout as it was immediately before the worker tab opened. */
+	sourceAtLaunch?: SourceState;
+	/** Non-fatal launch-gate findings (a source that was already dirty, a source this gate cannot inspect). */
+	launchWarning?: string;
+	/** Attempts the last launch gate used: 1 means the source was healthy on the first try. */
+	launchAttempts?: number;
 	/** The worker's own question modal. Absent when the worker never asked (legacy runs keep their plain needs_user). */
 	ask?: RunAsk;
 	/** The always-on completion goal: derived from the task at spawn, established by the worker after launch, and

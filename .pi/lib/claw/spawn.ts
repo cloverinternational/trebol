@@ -14,6 +14,7 @@ import { HojaRequestError, type HojaClient, type IssueRef, type IssueView, type 
 import { clawSession, findRunBlock, launchTab, tabLabel, type TernExec } from "./launcher.ts";
 import { describePlan, type LaunchPlan } from "./launch-plan.ts";
 import { goalSpecOf, startGoal } from "./goal.ts";
+import { describeSource, preflightLaunch, snapshotSource, type Preflight } from "./preflight.ts";
 import { TERMINAL, type ClawStore, type Run, type SpawnInput, type OutboxOp } from "./store.ts";
 
 export const MAX_INTENT_ATTEMPTS = 5;
@@ -21,7 +22,16 @@ export const RECONCILE_MS = 15_000;
 export const HOJA_START_STATE = "In Progress";
 export type ClawHoja = Pick<HojaClient, "resolve" | "createIssue" | "readIssue" | "findIssueByMarker" | "comment" | "setState">;
 /** `planLaunch` decides how the worker loads extensions; absent means Pi's own package discovery. */
-export type LaunchDeps = { store: ClawStore; hoja: ClawHoja; tern: TernExec; workspace: string; now?: () => Date; planLaunch?: (cwd: string) => LaunchPlan };
+export type LaunchDeps = {
+	store: ClawStore; hoja: ClawHoja; tern: TernExec; workspace: string; now?: () => Date;
+	planLaunch?: (cwd: string) => LaunchPlan;
+	/** The launch gate. Defaults to the real extension-source check; tests inject a scripted one. */
+	preflight?: Preflight;
+	/** Waits between launch-gate attempts. Defaults to a real timer; tests record the delays instead of waiting. */
+	sleep?: (ms: number) => Promise<void>;
+	/** Jitter source for the retry backoff. Defaults to Math.random. */
+	random?: () => number;
+};
 
 /** The worker's model choice. Both unset means pi's configured default. pi's --provider only searches for --model, so a provider needs one. */
 export function workerModel(input: { provider?: string; model?: string }): { provider?: string; model?: string } {
@@ -156,13 +166,16 @@ export async function startRun(input: SpawnInput, deps: LaunchDeps, key: { reque
 	const { provider, model } = workerModel(input);
 	// Validation only: no run and no side effect exists yet if this throws.
 	await deps.hoja.resolve(input.project, input.assignee);
+	// Record the checkout this run is planned against, before anything leaves the process. The launch gate compares the
+	// checkout with this snapshot, so a branch switch or an in-place edit between create and tab is refused, not executed.
+	const source = await snapshotSource(cwd);
 	const at = now(deps).toISOString();
 	const id = key.requestId ? runIdFor(key.requestId) : deps.store.newId("run");
 	const run: Run = {
 		id, label, task, cwd, status: "launching", phase: "intent", createdAt: at, updatedAt: at,
 		project: input.project.trim(), requestedAssignee: input.assignee ?? "me", provider, model,
 		requestId: key.requestId, fireKey: key.fireKey, trigger: key.trigger, deadline: key.deadline,
-		eventsOffset: 0, settles: 0, attempts: 0, outbox: [], seen: [],
+		eventsOffset: 0, settles: 0, attempts: 0, outbox: [], seen: [], source,
 	};
 	// Always on: the goal is derived and recorded before any side effect, so it is auditable even if the launch fails.
 	run.goal = startGoal(id, task, at);
@@ -299,6 +312,22 @@ export async function continueRun(run: Run, deps: LaunchDeps): Promise<Run> {
 	if (run.phase === "issue_created") {
 		// Once the Hoja issue exists, the launch is still refused if its deadline passed: no worker starts after expiry.
 		if (pastDeadline(run, deps)) return failRun(run, deps, `deadline passed before the worker tab; not launched. Hoja ${run.hoja?.identifier} remains In Progress and needs a human decision`);
+		// Launch gate. A worker's first act is loading the extension source under its cwd, so a source caught mid-write
+		// kills the tab before any run event exists. Retrying here — before a tab is opened — keeps the failure actionable
+		// instead of leaving a dead tab and a silent `lost` run. See .pi/lib/claw/preflight.ts.
+		const gate = await preflightLaunch(
+			{ cwd: run.cwd, workspace: deps.workspace, recorded: run.source },
+			{ check: deps.preflight, sleep: deps.sleep, random: deps.random },
+		);
+		run.launchAttempts = gate.attempts;
+		if (!gate.ok) {
+			const tried = gate.attempts > 1 ? ` after ${gate.attempts} attempts` : "";
+			const where = run.source ? ` The run was created from ${describeSource(run.source)}.` : "";
+			return failRun(run, deps, `launch gate refused the worker tab${tried}: ${gate.error}.${where} No tab was opened; fix the source, then spawn a new run. Hoja ${run.hoja?.identifier ?? "(none)"} remains In Progress and needs a human decision`);
+		}
+		run.sourceAtLaunch = gate.source;
+		run.launchWarning = gate.warnings.length ? gate.warnings.join("; ").slice(0, 400) : undefined;
+		store.saveRun(run);
 		let session: number;
 		try {
 			session = await clawSession(tern, store.readControl().pane);
