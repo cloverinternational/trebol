@@ -443,6 +443,11 @@ async function relaunchLaunch(run: Run, deps: DaemonDeps, reason: string): Promi
 	run.tabCloseError = undefined;
 	run.block = undefined;
 	run.tab = undefined;
+	// The dead worker's identity must not survive the restart: `pid` would be read as a dead worker on the next tick and
+	// the fresh tab would be closed as a corpse. Its session file stays for inspection, in the record and the notice.
+	run.pid = undefined;
+	run.idleSince = undefined;
+	run.stalledAt = undefined;
 }
 
 export async function reconcileRun(run: Run, deps: DaemonDeps, live: Set<number> | undefined): Promise<void> {

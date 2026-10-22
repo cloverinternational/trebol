@@ -86,6 +86,8 @@ export interface WorkspaceContext { cwd: string; os: string; shell: string; home
 export interface ContextFile { path: string; content: string; }
 export interface PromptAssemblyOptions {
   cwd?: string;
+  /** Pi session id; scopes the workspace snapshot so a session never sees the census change. */
+  sessionKey?: string;
   userPrompt?: string;
   tools?: Array<string | { name: string; guidance: string }>;
   toolGuidance?: Record<string, string>;
@@ -174,10 +176,33 @@ export function fetchWorkspaceExtensions(cwd: string): string {
   return `${block}</workspace_extensions>\n`;
 }
 
-export function resolveWorkspace(cwd = process.cwd()): WorkspaceContext {
+/**
+ * Workspace snapshots, keyed by `<session>|<cwd>`, so the census cannot change
+ * inside one session. The `<workspace_extensions files="N">` digit is emitted
+ * ~500 bytes into the system prompt, so re-running `git ls-files` mid-session
+ * re-bills the whole downstream prompt: a single changed digit drops a 100%
+ * prompt-cache hit to 0 on fireworks/DeepSeek (measured: 5,692 cached -> 0 for
+ * one changed digit). Swarm itself renders this once at startup
+ * (sdk_integration_config.go LoadAndInjectContext); re-rendering per request was
+ * the deviation. Fresh sessions still get a fresh census because the key
+ * carries the session id.
+ */
+const workspaceSnapshots = new Map<string, WorkspaceContext>();
+
+/** Drop every remembered census. Tests and explicit resets only. */
+export function resetWorkspaceContextCache(): void {
+  workspaceSnapshots.clear();
+}
+
+export function resolveWorkspace(cwd = process.cwd(), sessionKey = ""): WorkspaceContext {
   const root = resolve(cwd);
+  const key = `${sessionKey}|${root}`;
+  const snapshot = workspaceSnapshots.get(key);
+  if (snapshot) return snapshot;
   // os.Getwd / os.UserHomeDir / $SHELL with Go's "/bin/sh" fallback.
-  return { cwd: root, os: goos(process.platform), shell: process.env.SHELL || "/bin/sh", home: process.env.HOME || "", extensions: fetchWorkspaceExtensions(root) };
+  const created = { cwd: root, os: goos(process.platform), shell: process.env.SHELL || "/bin/sh", home: process.env.HOME || "", extensions: fetchWorkspaceExtensions(root) };
+  workspaceSnapshots.set(key, created);
+  return created;
 }
 
 /** settings/workspace_context.go RenderWorkspaceContext, byte for byte. */
@@ -314,7 +339,7 @@ export function currentContextBlocks(cwd: string, noContextFiles = cliIsolation(
  * Forge text and <swarm_flow_capability>. Reproduced literally.
  */
 export function assembleForgePrompt(_base: string, options: PromptAssemblyOptions = {}): PromptAssembly {
-  const workspace = resolveWorkspace(options.cwd);
+  const workspace = resolveWorkspace(options.cwd, options.sessionKey);
   const root = workspace.cwd;
   const max = options.maxContextFileBytes ?? DEFAULT_MAX_EXPLICIT_FILE_BYTES;
   const provenance: PromptProvenance[] = [];
@@ -443,6 +468,10 @@ export function registerSwarmPrompt(pi: PromptExtensionAPI): void {
     const embeddedCwd = event.systemPrompt.match(/<current_working_directory>([^<]+)<\/current_working_directory>/)?.[1];
     const cwd = ctx.cwd ?? event.systemPromptOptions?.cwd ?? embeddedCwd ?? process.cwd();
     const interactive = (ctx as { hasUI?: boolean }).hasUI === true;
+    // Scopes the workspace census snapshot. A new session must re-read it, so
+    // the Pi session id (when present) is part of the key.
+    const sessionId = (ctx as { sessionManager?: { getSessionId?: () => unknown } }).sessionManager?.getSessionId?.();
+    const sessionKey = typeof sessionId === "string" ? sessionId : "";
     const assemble = () => {
     const isolation = cliIsolation();
     const config = loadPromptContextConfig(cwd, undefined, { persistMigration: false });
@@ -468,7 +497,7 @@ export function registerSwarmPrompt(pi: PromptExtensionAPI): void {
     if (promptModeMatches) return undefined;
     // Modes takes the custom-prompt path (as benchmarked) with its {{workspace}} block rendered here.
     const selectedBase = selected.kind === "pi" ? event.systemPrompt : selected.kind === "custom" ? selected.content
-      : selected.kind === "modes" ? selected.content.replace("{{workspace}}", renderWorkspaceContext(resolveWorkspace(cwd))) : undefined;
+      : selected.kind === "modes" ? selected.content.replace("{{workspace}}", renderWorkspaceContext(resolveWorkspace(cwd, sessionKey))) : undefined;
     if (selectedBase !== undefined) {
       const enabled = isolation.noContextFiles ? Object.fromEntries(PROJECT_MEMORY_SOURCES.map((id) => [id, false])) : config.context?.enabledSources;
       const base = injectSwarmContext(selectedBase, { workDir: cwd, enabled, files: isolation.noContextFiles ? undefined : config.context?.files });
@@ -484,7 +513,7 @@ export function registerSwarmPrompt(pi: PromptExtensionAPI): void {
     if (alreadyAssembled && ((interactive && alreadyAssembled === "interactive") || (!interactive && alreadyAssembled === "headless")) && !forgePrompt) {
       return undefined;
     }
-    const assembly = assembleForgePrompt(event.systemPrompt, { cwd, interactive, headlessForge: !interactive, discoverContextFiles: !isolation.noContextFiles, contextEnabled: config.context?.enabledSources, contextFiles: config.context?.files, autogenSkills: interactive ? [] : getSwarmSkillRegistry(pi as any, { cwd }).list(), ...event.swarmPrompt });
+    const assembly = assembleForgePrompt(event.systemPrompt, { cwd, sessionKey, interactive, headlessForge: !interactive, discoverContextFiles: !isolation.noContextFiles, contextEnabled: config.context?.enabledSources, contextFiles: config.context?.files, autogenSkills: interactive ? [] : getSwarmSkillRegistry(pi as any, { cwd }).list(), ...event.swarmPrompt });
     const systemPrompt = withSkillCatalog(assembly.prompt, catalog);
     assembledPromptKinds.set(hash(systemPrompt), interactive ? "interactive" : "headless");
     return { systemPrompt };

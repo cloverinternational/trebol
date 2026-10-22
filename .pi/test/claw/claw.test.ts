@@ -317,7 +317,7 @@ describe("claw daemon", () => {
 		expect(runs()).toHaveLength(1);
 	});
 
-	it("a worker whose process vanished without finish is lost, not completed", async () => {
+	it("a worker whose process vanished without finish is reported lost, never completed, then restarted once", async () => {
 		spawnReq();
 		await tick(deps);
 		const [run0] = runs();
@@ -328,9 +328,14 @@ describe("claw daemon", () => {
 		pids.delete(7777);
 		await tick(deps);
 		const run = store.getRun(run0.id)!;
-		expect(run.status).toBe("lost");
-		expect(run.error).toContain("without claw_finish");
+		// The loss is reported before anything is retried, and it is never dressed up as a result.
 		expect(store.readInbox(0).items.some((i) => i.kind === "run_lost")).toBe(true);
+		expect(run.finish).toBeUndefined();
+		expect(run.status).not.toBe("completed");
+		// A worker that produced no settled turn is then restarted on the same run and the same issue (SLO S6).
+		expect(run.relaunchCount).toBe(1);
+		expect(run.status).toBe("launching");
+		expect(store.readInbox(0).items.some((i) => i.kind === "run_recovered")).toBe(true);
 	});
 
 	it("a worker that never reached session_start is failed with the reason it wrote, not reported lost", async () => {

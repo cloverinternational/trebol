@@ -348,18 +348,21 @@ describe("claw self-supervision", () => {
 	});
 
 	describe("fault injection end to end", () => {
-		it("a worker killed mid-run becomes lost, is reported once, and its tab is closed", async () => {
+		it("a worker killed before any settle is lost, its tab closed, then relaunched once on the same issue", async () => {
 			tern.live.add(400);
-			const run = makeRun({ status: "running", pid: 4242, block: 400 });
+			const run = makeRun({ status: "running", pid: 4242, block: 400, hoja: { issueId: "iss-kill", identifier: "TREBOL-950", teamKey: "TREBOL", project: "Hoja", assignee: "Luis" } });
 			deps.alive = () => false;
 			await reconcileRun(run, deps, new Set(tern.live));
 			const after = store.getRun(run.id)!;
-			expect(after.status).toBe("lost");
-			expect(after.error).toMatch(/worker stopped without claw_finish/);
-			expect(inbox("run_lost")).toHaveLength(1);
-			await reconcileRun(store.getRun(run.id)!, deps, new Set(tern.live));
-			expect(store.getRun(run.id)!.tabClosedAt).toBeDefined();
+			expect(inbox("run_lost")).toHaveLength(1);          // the loss itself is reported once
+			expect(after.tabClosedAt).toBeDefined();            // the corpse tab is closed first
 			expect(tern.closes(400)).toBe(1);
+			expect(inbox("run_recovered")).toHaveLength(1);     // then the run is restarted, not left dead
+			expect(after.relaunchCount).toBe(1);
+			expect(after.status).toBe("launching");
+			expect(after.phase).toBe("issue_created");          // same run, same Hoja issue, tab step redone
+			expect(after.pid).toBeUndefined();                  // the dead worker's pid cannot survive the restart
+			expect(hoja.calls.create).toBe(0);
 		});
 
 		it("a source file truncated mid-read really fails to load, and that worker's state ends truthful", async () => {
@@ -405,6 +408,78 @@ describe("claw self-supervision", () => {
 			expect(after.status).toBe("failed");
 			expect(after.error).toMatch(/gave up after 5 attempts; not started/);
 			expect(hoja.calls.create).toBe(0);
+		});
+	});
+
+	describe("the supervisor acts: recovery, explicit budget records, dedupe, and leaving healthy runs alone", () => {
+		/** A run that failed at the tab step with a known Hoja issue and no tab: the one recovery-safe shape. */
+		const failedLaunch = (over: Partial<Run> = {}) => makeRun({
+			status: "failed", failureClass: "launch", phase: "issue_created", attempts: 1,
+			hoja: { issueId: "iss-9", identifier: "TREBOL-909", teamKey: "TREBOL", project: "Hoja", assignee: "Luis" },
+			error: "tab open failed: tern refused", ...over,
+		});
+
+		it("worker killed before any settle: restarted once on the same issue, with one loss notice and one recovery notice", async () => {
+			tern.live.add(500);
+			const run = makeRun({ status: "running", pid: 5150, block: 500, hoja: { issueId: "iss-9", identifier: "TREBOL-909", teamKey: "TREBOL", project: "Hoja", assignee: "Luis" } });
+			deps.alive = () => false;
+			await reconcileRun(run, deps, new Set(tern.live));
+			await reconcileRun(store.getRun(run.id)!, deps, new Set(tern.live));
+			expect(inbox("run_lost")).toHaveLength(1);
+			expect(inbox("run_recovered")).toHaveLength(1);
+			expect(store.getRun(run.id)!.relaunchCount).toBe(1);
+			expect(hoja.calls.create).toBe(0);
+			expect(store.getRun(run.id)!.status).toBe("launching");
+		});
+
+		it("stuck past its deadline: not restarted (no worker starts after expiry), failed with the reason, and the spent budget is recorded once", async () => {
+			const run = failedLaunch({ deadline: new Date(clock.getTime() - 60_000).toISOString() });
+			await reconcileRun(run, deps, new Set(tern.live));
+			await reconcileRun(store.getRun(run.id)!, deps, new Set(tern.live));
+			const after = store.getRun(run.id)!;
+			expect(after.status).toBe("failed");
+			expect(after.relaunchCount).toBeUndefined();
+			const spent = inbox("run_budget_spent");
+			expect(spent).toHaveLength(1);
+			expect(spent[0].text).toContain("deadline");
+			expect(spent[0].text).toContain("no worker starts after expiry");
+			expect(after.remedies!["relaunch:once"]).toMatchObject({ attempts: 1, exhausted: true });
+			expect(after.remedies!["relaunch:once"].note).toContain("deadline");
+		});
+
+		it("the same unrecoverable failure on repeated ticks is recorded once, not once per tick", async () => {
+			const run = failedLaunch({ deadline: new Date(clock.getTime() - 60_000).toISOString() });
+			for (let i = 0; i < 12; i++) { advance(5_000); await reconcileRun(store.getRun(run.id)!, deps, new Set(tern.live)); }
+			expect(inbox("run_budget_spent")).toHaveLength(1);
+			expect(store.getRun(run.id)!.remedies!["relaunch:once"].attempts).toBe(1);
+		});
+
+		it("a spent retry budget leaves an explicit record with the reason, and stops retrying", async () => {
+			tern.faults.close = new Error("tern close: no answer");
+			const run = makeRun({ status: "completed", block: 501 });
+			const tight = { ...deps, slo: { ...deps.slo, tabCloseBudget: 2, tabCloseBaseMs: 500, tabCloseCapMs: 500 } };
+			for (let i = 0; i < 10; i++) { advance(2_000); await reconcileRun(store.getRun(run.id)!, tight, new Set(tern.live)); }
+			const after = store.getRun(run.id)!;
+			expect(tern.closes(501)).toBe(2);
+			expect(inbox("run_tab_orphan")).toHaveLength(1);
+			expect(inbox("run_tab_orphan")[0].text).toContain("no answer");
+			expect(after.remedies!["tab-close"]).toMatchObject({ attempts: 2, exhausted: true });
+			expect(after.remedies!["tab-close"].note).toContain("no answer");
+			expect(hasWork(store)).toBe(false);
+		});
+
+		it("near miss: a healthy run is left completely untouched (no notice, no act, no ledger entry)", async () => {
+			tern.live.add(502);
+			const run = makeRun({ status: "running", pid: 6060, block: 502, settles: 1, hoja: { issueId: "iss-9", identifier: "TREBOL-909", teamKey: "TREBOL", project: "Hoja", assignee: "Luis" } });
+			deps.alive = (pid) => pid === 6060;
+			const before = JSON.stringify(store.getRun(run.id)!);
+			await reconcileRun(run, deps, new Set(tern.live));
+			const after = store.getRun(run.id)!;
+			expect(after.status).toBe("running");
+			expect(after.remedies).toBeUndefined();
+			expect(inbox()).toHaveLength(0);
+			expect(store.readNotices(0).items).toHaveLength(0);
+			expect(JSON.stringify({ ...after, updatedAt: undefined })).toBe(JSON.stringify({ ...JSON.parse(before), updatedAt: undefined }));
 		});
 	});
 

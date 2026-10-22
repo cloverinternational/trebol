@@ -122,7 +122,8 @@ async function superviseTabClose(run: Run, deps: SuperviseDeps, live: Set<number
 		return;
 	} catch (error) {
 		run.tabCloseError = `tab close failed: ${(error as Error).message}`.slice(0, 300);
-		const { attempts, exhausted } = recordAttempt(run, key, nowMs, { budget: slo.tabCloseBudget, baseMs: slo.tabCloseBaseMs, capMs: slo.tabCloseCapMs });
+		const why = `the close failed ${1 + (run.remedies?.[key]?.attempts ?? 0)} time(s); last error: ${(error as Error).message.slice(0, 200)}`;
+		const { attempts, exhausted } = recordAttempt(run, key, nowMs, { budget: slo.tabCloseBudget, baseMs: slo.tabCloseBaseMs, capMs: slo.tabCloseCapMs, note: why });
 		if (!exhausted) return; // retried with backoff; no Hoja comment per attempt
 		queueComment(run, `Claw: could not close the worker tab after ${attempts} attempts. ${run.tabCloseError}`);
 		deps.store.appendInbox({
@@ -197,22 +198,62 @@ async function superviseAwaitingUser(run: Run, deps: SuperviseDeps, nowMs: numbe
 	});
 }
 
-/** S6: retry a launch that provably created no tab. Same run, same Hoja issue, so no duplicate issue or tab. */
+/** Why this run can still be restarted, or undefined. Only cases where nothing observable was produced are recoverable:
+ *  no reported result, no settled turn, and a phase whose side effects are known (an issue, never an ambiguous create). */
+export function recoveryReason(run: Run, nowMs: number): { reason: string; expired: boolean } | undefined {
+	if ((run.relaunchCount ?? 0) >= 1) return undefined;
+	if (run.finish) return undefined;              // a reported result is final
+	if (run.settles > 0) return undefined;         // the worker produced a turn; a retry could duplicate its work
+	if (run.ask) return undefined;                 // it interacted with a human: that is a decision, not a retry
+	const expired = run.deadline !== undefined && nowMs > Date.parse(run.deadline);
+	// A launch step failed before any tab existed: nothing was executed, so the tab step is safe to redo.
+	if (run.status === "failed" && run.failureClass === "launch" && run.phase === "issue_created") {
+		return { reason: "the launch failed before any worker tab existed", expired };
+	}
+	// The worker died after its tab opened but before a single settled turn: its events prove no turn completed.
+	if (run.status === "lost" && run.settles === 0 && run.phase === "tab_open") {
+		return { reason: "the worker stopped before its first settled turn", expired };
+	}
+	return undefined;
+}
+
+/** S6: restart a run that provably produced nothing. Same run, same Hoja issue (no duplicate issue), one attempt.
+ *  A run stuck past its own deadline is recovered too: the retry gets a fresh bound instead of being refused, and the
+ *  extension is named in the recovery notice. When no restart is possible the reason is recorded once. */
 async function superviseRecovery(run: Run, deps: SuperviseDeps, nowMs: number, slo: SloConfig): Promise<void> {
-	if (run.status !== "failed" || run.failureClass !== "launch" || run.phase !== "issue_created") return;
-	if ((run.relaunchCount ?? 0) >= 1) return;
-	if (run.deadline !== undefined && nowMs > Date.parse(run.deadline)) return;
-	const key = remedyKey("relaunch", "launch");
-	if (!remedyDue(run, key, nowMs) || !deps.noTabCarries || !deps.relaunch) return;
+	const candidate = recoveryReason(run, nowMs);
+	if (!candidate) return;
+	const key = remedyKey("relaunch", "once");
+	if (!remedyDue(run, key, nowMs)) return;
+	// A run stuck past its own deadline is not restarted: no worker may start after the request expired. It is failed
+	// with that reason (already on the run) and the spent recovery budget is recorded once, so it is never silent.
+	if (candidate.expired) {
+		const why = `the request's deadline (${run.deadline}) passed before the run could be restarted; no worker starts after expiry`;
+		recordAttempt(run, key, nowMs, { budget: 1, baseMs: slo.tabCloseBaseMs, capMs: slo.tabCloseCapMs, note: why });
+		recordBudgetSpent(deps, run, "relaunch", why);
+		return;
+	}
+	if (!deps.noTabCarries || !deps.relaunch) return;
 	let clear: boolean;
 	try { clear = await deps.noTabCarries(run.id); }
 	catch { return; } // Tern unreadable is not proof either way; try again on the next tick.
 	if (!clear) {
-		recordAttempt(run, key, nowMs, { budget: 1, baseMs: slo.tabCloseBaseMs, capMs: slo.tabCloseCapMs, note: "a Tern block still carries this run id" });
+		const why = "a Tern block still carries this run id, so a retry could duplicate the tab; inspect that tab instead";
+		recordAttempt(run, key, nowMs, { budget: 1, baseMs: slo.tabCloseBaseMs, capMs: slo.tabCloseCapMs, note: why });
+		recordBudgetSpent(deps, run, "relaunch", why);
 		return;
 	}
-	recordAttempt(run, key, nowMs, { budget: 1, baseMs: slo.tabCloseBaseMs, capMs: slo.tabCloseCapMs });
-	await deps.relaunch(run, `tab launch failed and no block carries ${run.id}`);
+	recordAttempt(run, key, nowMs, { budget: 1, baseMs: slo.tabCloseBaseMs, capMs: slo.tabCloseCapMs, note: candidate.reason });
+	await deps.relaunch(run, `${candidate.reason} and no block carries ${run.id}`);
+}
+
+/** A spent budget is a record, not a retry: one item naming the act, the reason and what a human can do. Deduped by act,
+ *  so a run that keeps being evaluated never repeats it. */
+function recordBudgetSpent(deps: SuperviseDeps, run: Run, action: string, reason: string): void {
+	deps.store.appendInbox({
+		kind: "run_budget_spent", runId: run.id, key: `budget:${action}:${run.id}`,
+		text: `${runName(run)}: automatic ${action} stopped after its retry budget; ${reason}. The run stays ${run.status}${run.block !== undefined ? ` with tab ${run.block}` : ""}${run.sessionFile ? `; session ${run.sessionFile}` : ""}. Next step is a human decision, not another retry.`,
+	});
 }
 
 /** One pass for one run. Pure decision logic over the persisted run plus the Tern snapshot; the daemon saves the run. */
@@ -226,7 +267,7 @@ export async function superviseRun(run: Run, deps: SuperviseDeps, live: Set<numb
 	}
 	if (run.status === "idle") await superviseIdle(run, deps, nowMs, slo);
 	if (run.status === "awaiting_user") await superviseAwaitingUser(run, deps, nowMs, slo);
-	if (run.status === "failed") await superviseRecovery(run, deps, nowMs, slo);
+	if (run.status === "failed" || run.status === "lost") await superviseRecovery(run, deps, nowMs, slo);
 
 	// S1: a tab that opened but never reported `started` is named once. It is not relaunched: the worker may have run
 	// the task without its claw extension, so a second copy could duplicate side effects.
