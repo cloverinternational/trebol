@@ -8,9 +8,10 @@ import type { LaunchDeps } from "./spawn.ts";
 import { continueRun, failRun, findByKey, queueComment, queueState, runMarker, startRun, opMarker } from "./spawn.ts";
 import { liveBlocks, closeBlock, isBlockGone, sendToBlock, type TernExec } from "./launcher.ts";
 import { describeSource } from "./preflight.ts";
-import { ClawStore, readJson, TERMINAL, type ClawEvent, type Request, type Response, type Run, type RunStatus, type Trigger, type SpawnInput } from "./store.ts";
+import { ClawStore, readJson, TERMINAL, type ClawEvent, type DaemonLock, type Request, type Response, type Run, type RunStatus, type Trigger, type SpawnInput } from "./store.ts";
 import { validateFinish } from "./child.ts";
 import { ENDED_GOAL, GOAL_LONG_MS, applyGoalEvent, endGoal, goalRow, type ClawGoalEndReason } from "./goal.ts";
+import { compareFingerprint } from "./fingerprint.ts";
 
 export const TICK_MS = 1000;
 export const IDLE_EXIT_MS = 120_000;
@@ -24,6 +25,9 @@ export const CLOSE_ON_END: readonly RunStatus[] = ["completed", "cancelled", "fa
 /** How long an open worker question may stay unanswered before the orchestrator is reminded once. It is a reminder,
  *  not a timeout: the run stays `awaiting_decision` (active) because its worker tab is still alive and waiting. */
 export const ASK_STALE_MS = 30 * 60 * 1000;
+/** How often a running daemon re-checks that it still runs the code on disk. The orchestrator also re-checks on every
+ *  request and on /reload; this is the backstop for a branch switch nobody told the session about. */
+export const CODE_CHECK_MS = 10_000;
 
 export type DaemonDeps = LaunchDeps & {
 	now: () => Date;
@@ -51,26 +55,33 @@ export async function verifyCancelled(run: Run, deps: DaemonDeps): Promise<boole
 	return true;
 }
 
-/** Singleton claim. A live owner blocks; a dead owner's lock is reclaimed; the write is re-read to confirm ownership. */
-export function claimLock(store: ClawStore, alive: (pid: number) => boolean = pidAlive): boolean {
+/** Singleton claim. A live owner blocks; a dead owner's lock is reclaimed; the write is re-read to confirm ownership.
+ *  `fingerprint` is the code key this daemon runs, stamped so any later reader can tell whether this process is stale. */
+export function claimLock(store: ClawStore, alive: (pid: number) => boolean = pidAlive, fingerprint?: string): boolean {
 	for (let attempt = 0; attempt < 2; attempt++) {
 		try {
-			writeFileSync(store.lockPath, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString(), heartbeat: Date.now() }), { flag: "wx" });
+			const lock: DaemonLock = { pid: process.pid, startedAt: new Date().toISOString(), heartbeat: Date.now() };
+			if (fingerprint) lock.fingerprint = fingerprint;
+			writeFileSync(store.lockPath, JSON.stringify(lock), { flag: "wx" });
 		} catch {
-			const current = readJson<{ pid: number }>(store.lockPath);
+			const current = readJson<DaemonLock>(store.lockPath);
 			if (current && current.pid !== process.pid && alive(current.pid)) return false;
 			rmSync(store.lockPath, { force: true });
 			continue;
 		}
-		return readJson<{ pid: number }>(store.lockPath)?.pid === process.pid;
+		return readJson<DaemonLock>(store.lockPath)?.pid === process.pid;
 	}
 	return false;
 }
 
-export function heartbeat(store: ClawStore): boolean {
-	const current = readJson<{ pid: number }>(store.lockPath);
+/** Rewrites the lock this process owns, keeping `startedAt` and the code stamp it claimed the lock with. */
+export function heartbeat(store: ClawStore, fingerprint?: string): boolean {
+	const current = readJson<DaemonLock>(store.lockPath);
 	if (current?.pid !== process.pid) return false;
-	writeFileSync(store.lockPath, JSON.stringify({ pid: process.pid, startedAt: readJson<{ startedAt: string }>(store.lockPath)?.startedAt, heartbeat: Date.now() }));
+	const lock: DaemonLock = { pid: process.pid, startedAt: current.startedAt, heartbeat: Date.now() };
+	const code = current.fingerprint ?? fingerprint;
+	if (code) lock.fingerprint = code;
+	writeFileSync(store.lockPath, JSON.stringify(lock));
 	return true;
 }
 
@@ -530,21 +541,48 @@ export function hasWork(store: ClawStore): boolean {
 	return store.listRuns().some(isActive) || store.listTriggers().some((t) => t.enabled) || store.listRequests().length > 0;
 }
 
-export async function runDaemon(deps: DaemonDeps, options: { tickMs?: number; idleExitMs?: number; log?: (line: string) => void; stopSignal?: AbortSignal } = {}): Promise<void> {
+/** Why the loop ended. `stale-code` is the intended restart path, not a failure: the process exits so the next call
+ *  starts a daemon from the code that is now on disk. */
+export type DaemonExit = "stopped" | "idle" | "lock-lost" | "stale-code";
+
+export async function runDaemon(deps: DaemonDeps, options: {
+	tickMs?: number; idleExitMs?: number; log?: (line: string) => void; stopSignal?: AbortSignal;
+	/** The code key this process runs right now. When it stops matching the lock's stamp, the daemon exits. */
+	codeKey?: () => string | undefined; checkEveryMs?: number;
+} = {}): Promise<DaemonExit> {
 	const { store } = deps;
 	const log = options.log ?? (() => undefined);
 	let idleSince = deps.now().getTime();
+	let codeCheckedAt = deps.now().getTime();
+	let unreadable = false;
 	while (!options.stopSignal?.aborted) {
-		if (!heartbeat(store)) { log("lock lost to another daemon; exiting"); return; }
+		if (!heartbeat(store)) { log("lock lost to another daemon; exiting"); return "lock-lost"; }
+		// A supervisor that outlives its code is the stale-PID bug: /reload, a branch switch or a merge replaced the
+		// sources under it. Exit cleanly and let the next call start a fresh daemon. Workers are untouched: they are
+		// separate processes in their own tabs and their runs are reconciled from the store by whoever supervises next.
+		if (options.codeKey && deps.now().getTime() - codeCheckedAt >= (options.checkEveryMs ?? CODE_CHECK_MS)) {
+			codeCheckedAt = deps.now().getTime();
+			const comparison = compareFingerprint(readJson<DaemonLock>(store.lockPath)?.fingerprint, options.codeKey());
+			// Only a stamp that named other code is evidence enough to stop serving. An unstamped lock is this process
+			// itself when it started while the tree was unreadable: it cannot prove a change, so it stays up and logs.
+			if (comparison.state === "stale") {
+				releaseLock(store);
+				log(`code changed under this daemon (${comparison.detail}); exiting so a daemon from the current code takes over`);
+				return "stale-code";
+			}
+			// Reported once, not on every check: an unreadable tree must not look like a code change.
+			if (comparison.state === "unknown" && !unreadable) { unreadable = true; log(`cannot fingerprint the Claw code (${comparison.detail}); staying up`); }
+		}
 		try {
 			await tick(deps);
 		} catch (error) {
 			log(`tick failed: ${(error as Error).message}`);
 		}
 		if (hasWork(store)) idleSince = deps.now().getTime();
-		else if (deps.now().getTime() - idleSince >= (options.idleExitMs ?? IDLE_EXIT_MS)) { releaseLock(store); log("idle; exiting"); return; }
+		else if (deps.now().getTime() - idleSince >= (options.idleExitMs ?? IDLE_EXIT_MS)) { releaseLock(store); log("idle; exiting"); return "idle"; }
 		await new Promise((resolve) => setTimeout(resolve, options.tickMs ?? TICK_MS));
 	}
+	return "stopped";
 }
 
 /** Starts the daemon detached so it outlives the orchestrator. Losing the singleton claim just makes it exit. */

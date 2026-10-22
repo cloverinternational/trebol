@@ -6,6 +6,7 @@ import { modeFooter } from "../../.pi/lib/runtime/mode-footer.ts";
 import { ClawStore, type RequestBody } from "../../.pi/lib/claw/store.ts";
 import { ensureDaemon, request, runListing, statusSummary } from "../../.pi/lib/claw/orchestrator.ts";
 import { pidAlive } from "../../.pi/lib/claw/daemon.ts";
+import { refreshDaemon } from "../../.pi/lib/claw/lifecycle.ts";
 import { deliveredInboxIds, pumpInbox } from "../../.pi/lib/claw/inbox.ts";
 import { nameClawTab, ownPaneBlock, ternExec, CLAW_TAB, type TernExec } from "../../.pi/lib/claw/launcher.ts";
 import { WORKER_BLOCKED_TOOLS, askFromCompleted, askFromStarted, recordAsk, recordFinish, recordGoal, recordResumed, recordSettled, recordStarted, validateFinish, workerIdentity } from "../../.pi/lib/claw/child.ts";
@@ -190,6 +191,24 @@ export function registerOrchestrator(pi: any, options: OrchestratorOptions = {})
 	let live: { ctx: any; valid: () => boolean } | undefined;
 
 	const claim = () => { store.writeOrchestrator({ ...store.readOrchestrator(), owner: session, ownerPid: process.pid }); };
+	/** A supervisor that could not be stopped or started is not a silent failure: it is shown in this session and kept
+	 *  in the store's inbox, so `/claw status` and the next session still see it. */
+	const reportLifecycle = (note: string, ctx?: any) => {
+		try { (ctx ?? live?.ctx)?.ui?.notify?.(`Claw daemon: ${note}`, "error"); } catch { /* the session may already be gone */ }
+		try { store.appendInbox({ kind: "error", text: `claw daemon: ${note}`, key: `daemon:${Date.now()}` }); } catch { /* a read-only store must not break shutdown */ }
+	};
+	/** Compares the supervisor's recorded code with the code on disk. Stops a stale one; never starts or signals on a
+	 *  guess. Workers are separate processes in their own tabs and are not touched. */
+	const checkDaemonCode = async (ctx: any, start = false) => {
+		try {
+			const outcome = await refreshDaemon(store, workspace, { start });
+			if (outcome.blocked) reportLifecycle(outcome.note, ctx);
+			return outcome;
+		} catch (error) {
+			reportLifecycle(`code check failed: ${(error as Error).message}`, ctx);
+			return undefined;
+		}
+	};
 	/** Persist-before-ack delivery into this session's own transcript; see .pi/lib/claw/inbox.ts. */
 	const pump = async () => {
 		if (!live || !live.valid() || !clawModeOn()) return;
@@ -215,9 +234,20 @@ export function registerOrchestrator(pi: any, options: OrchestratorOptions = {})
 		timer = setInterval(() => { void pump().catch(() => undefined); }, 3000);
 		timer.unref?.();
 		void pump().catch(() => undefined);
+		// A daemon left behind by another session, an earlier branch or a merge is replaced before it supervises
+		// anything in this session. Starting one here is /claw on's job; this only stops what runs older code.
+		void checkDaemonCode(ctx);
 	};
 	pi.on?.("session_start", (_event: unknown, ctx: any) => start(ctx));
-	pi.on?.("session_shutdown", (_event: unknown, ctx: any) => { if (timer) clearInterval(timer); timer = undefined; live = undefined; deactivate(); footer.clear(ctx); });
+	pi.on?.("session_shutdown", async (event: any, ctx: any) => {
+		if (timer) clearInterval(timer); timer = undefined; live = undefined; deactivate(); footer.clear(ctx);
+		// Pi fires this with reason "reload" on the OLD extension instance before it loads the new code
+		// (@earendil-works/pi-coding-agent dist/core/agent-session.js AgentSession.reload). A detached daemon would keep
+		// running the code this instance loaded, so a supervisor from other sources is stopped here; the next Claw call
+		// starts one from the current code. A quit/new/resume/fork leaves it detached on purpose (triggers keep firing),
+		// and the daemon's own code check plus the next request cover a branch switch afterwards.
+		if (event?.reason === "reload") await checkDaemonCode(ctx);
+	});
 	// Persist this chat's choice. Shutdown (reload, resume, new) does not persist: the next session_start restores it.
 	const persistMode = (on: boolean, savedTools?: string[]) => { pi.appendEntry?.(CLAW_ENTRY, on ? { on, savedTools } : { on }); };
 
@@ -352,8 +382,14 @@ export function registerOrchestrator(pi: any, options: OrchestratorOptions = {})
 				activate();
 				persistMode(true, savedClawTools());
 				footer.refresh(ctx);
+				// Never hand new work to a daemon from other sources: replace it first, then start if none is left.
+				const freshness = await checkDaemonCode(ctx);
+				if (freshness?.blocked) return notify(`Claw on, but the daemon could not be replaced: ${freshness.note}`, "error");
 				const pid = ensure(store, workspace);
-				return notify(`Claw on. Daemon ${pid ? `already running (pid ${pid})` : "starting"}. ${tabNote}`, tabNote.startsWith("Tab not named") ? "warning" : "info");
+				const daemonNote = pid
+					? `Daemon already running (pid ${pid}, current code).`
+					: freshness?.action === "stopped" ? "Daemon from older code stopped; starting one from the current code." : "Daemon starting.";
+				return notify(`Claw on. ${daemonNote} ${tabNote}`, tabNote.startsWith("Tab not named") ? "warning" : "info");
 			}
 			if (sub === "off") {
 				store.writeControl(false, store.readControl().pane);

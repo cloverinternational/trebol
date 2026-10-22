@@ -163,6 +163,11 @@ model) remains the deeper manual check for registration-time failures such as a 
 - One daemon per workspace (`.swarm/claw/daemon.lock`, pid-checked; a dead owner is reclaimed). Started detached via
   `node --experimental-strip-types daemon-main.ts`; logs to `.swarm/claw/daemon.log`. Exits after 120 s with no active
   run, enabled trigger or pending request; the next client request restarts it.
+- The daemon also refuses to outlive its own code: it stamps a code fingerprint (`git rev-parse HEAD` plus a sha256 of
+  `.pi/lib/claw` sources) in `daemon.lock`, re-checks it every 10 s and exits when the code on disk changes; `/reload`
+  stops a daemon whose stamp differs on the old extension instance, and `/claw on` / the next request replace it. Only
+  the supervisor is signalled — workers keep running in their tabs and their runs reconcile from the store. See
+  `docs/claw/daemon-reload-2026-10-22.md`.
 - Single writer: only the daemon writes `runs/` and `triggers/`. Clients write `requests/`; the daemon writes `responses/`.
   A response file marks a request served, so replays are no-ops.
 - Launch phases `intent -> issue_created -> tab_opening -> tab_open` are persisted before side effects.

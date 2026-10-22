@@ -65,15 +65,15 @@ const CASES = [
   {
     name: "claw_finish clears the goal before reporting",
     file: "extensions/claw/extension.ts",
-    from: '\t\t\t\tclearGoal(host, "finish");\n\t\t\trecordFinish(store, identity.runId, finish);',
-    to: '\t\t\trecordFinish(store, identity.runId, finish);\n\t\t\t\tclearGoal(host, "finish");',
+    from: '\t\t\tclearGoal(host, finish.outcome === "needs_user" ? "needs_user" : "finish");\n\t\t\trecordFinish(store, identity.runId, finish);',
+    to: '\t\t\trecordFinish(store, identity.runId, finish);\n\t\t\tclearGoal(host, finish.outcome === "needs_user" ? "needs_user" : "finish");',
     test: "claw_finish clears the goal BEFORE reporting",
   },
   {
     name: "claw_finish clears the goal at all",
     file: "extensions/claw/extension.ts",
-    from: '\t\t\t\tclearGoal(host, "finish");',
-    to: "\t\t\t\t/* mutation: goal left running */",
+    from: '\t\t\tclearGoal(host, finish.outcome === "needs_user" ? "needs_user" : "finish");',
+    to: "\t\t\t/* mutation: goal left running */",
     test: "claw_finish clears the goal BEFORE reporting",
   },
   {
