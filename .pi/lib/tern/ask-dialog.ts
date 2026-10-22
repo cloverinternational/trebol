@@ -231,7 +231,8 @@ export class TernAskDialog {
 		return true;
 	}
 
-	// Native list selection: a click toggles the option; a double-click (activate) confirms it and advances.
+	// Native list selection: a click answers like a single tap (single-choice advances); a
+	// double-click (activate) always confirms and advances.
 	handleSelect(item: string, activate: boolean): boolean {
 		if (!item.startsWith(OPTION_PREFIX)) return false;
 		const [qi = NaN, oi = NaN] = item.slice(OPTION_PREFIX.length).split(":").map(Number);
@@ -243,7 +244,8 @@ export class TernAskDialog {
 		return this.#act(flow, activate ? "confirm" : "click");
 	}
 
-	// Click on an option: moves the tab and cursor there, then toggles it (no auto-advance).
+	// Tap/click on an option row: moves the tab and cursor there, then answers. A single-choice
+	// row advances like a digit key; a multi-choice row just toggles.
 	toggle(questionIndex: number, optionIndex: number): boolean {
 		const flow = this.#editable();
 		if (!flow || !Number.isInteger(questionIndex) || !Number.isInteger(optionIndex)) return false;
@@ -345,21 +347,21 @@ export class TernAskDialog {
 		}
 		if (question.type !== "multi") flow.custom.delete(question.id);
 		const current = new Set(flow.selected.get(question.id) ?? []);
-		const toggling = trigger === "toggle" || trigger === "click";
 		if (question.type === "multi") {
 			if (trigger !== "confirm") {
 				if (current.has(option.value)) current.delete(option.value);
 				else current.add(option.value);
 			}
-		} else if (toggling && current.has(option.value)) {
+		} else if (trigger === "toggle" && current.has(option.value)) {
+			// Space on the answer already chosen clears it; a tap or a digit always answers.
 			current.clear();
 		} else {
 			current.clear();
 			current.add(option.value);
 		}
 		flow.selected.set(question.id, current);
-		// Enter always advances; a single-choice digit advances; Space and clicks never do.
-		if (trigger === "confirm" || (trigger === "digit" && question.type !== "multi")) this.#advance(flow);
+		// Enter always advances, as does a single-choice digit or row tap; Space and multi-choice taps stay put.
+		if (trigger === "confirm" || ((trigger === "digit" || trigger === "click") && question.type !== "multi")) this.#advance(flow);
 		flow.error = undefined;
 		this.#onChange();
 		return true;
@@ -460,8 +462,13 @@ export class TernAskDialog {
 	}
 
 	// One list row. Text is never wrapped by Tern, so the free-form draft and description go in `detail`.
+	// The row's own click action replaces Tern's `select`, so a tap or click routes back through
+	// handleAction with this row's id: single-choice rows answer and advance, multi rows toggle.
 	#optionItem(flow: PendingFlow, question: DialogQuestion, qi: number, oi: number, cursor: number, selected: Set<string> | undefined, sending: boolean): TspNode {
 		const option = question.options[oi]!;
+		const id = `${OPTION_PREFIX}${qi}:${oi}`;
+		// Disabled rows take no pointer events, so in-flight submits advertise no action.
+		const click = sending ? {} : { actions: { click: id } };
 		const cursorMark = oi === cursor ? "›" : " ";
 		const hint = oi < 9 ? [String(oi + 1)] : undefined;
 		if (option.freeform) {
@@ -469,15 +476,15 @@ export class TernAskDialog {
 			const draft = flow.drafts.get(question.id);
 			const body = flow.editing && oi === cursor ? `${draft ?? ""}▏` : (saved ?? draft);
 			return {
-				id: `${OPTION_PREFIX}${qi}:${oi}`,
+				id,
 				k: "item",
-				p: { role: "pi.ask.option", label: `${cursorMark} ${option.label}`, detail: body ?? "", tone: saved ? "accent" : "muted", hint, disabled: sending },
+				p: { role: "pi.ask.option", label: `${cursorMark} ${option.label}`, detail: body ?? "", tone: saved ? "accent" : "muted", hint, disabled: sending, ...click },
 			};
 		}
 		const on = selected?.has(option.value) ?? false;
 		const mark = question.type === "multi" ? (on ? "[x]" : "[ ]") : on ? "(•)" : "( )";
 		return {
-			id: `${OPTION_PREFIX}${qi}:${oi}`,
+			id,
 			k: "item",
 			p: {
 				role: "pi.ask.option",
@@ -486,6 +493,7 @@ export class TernAskDialog {
 				tone: on ? "accent" : "muted",
 				hint,
 				disabled: sending,
+				...click,
 			},
 		};
 	}

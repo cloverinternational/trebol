@@ -1742,7 +1742,13 @@ export class PiTernBridge {
 			this.#render();
 			return undefined;
 		}
-		if (msg.verb === "e" && msg.body.ev === "action" && typeof msg.body.id === "string" && this.#dialog?.handleAction(msg.body.id)) return undefined;
+		// Ask-dialog pointer actions: `act` names the action and `id` the node it ran on. A text
+		// node such as a tab reports the same string twice; a list row's own click action can
+		// report the list id, so try the action name first and fall back to the node id.
+		if (msg.verb === "e" && msg.body.ev === "action") {
+			if (typeof msg.body.act === "string" && this.#dialog?.handleAction(msg.body.act)) return undefined;
+			if (typeof msg.body.id === "string" && this.#dialog?.handleAction(msg.body.id)) return undefined;
+		}
 		if (msg.verb === "e" && (msg.body.ev === "select" || msg.body.ev === "activate") && msg.body.id === ASK_OPTIONS_ID && typeof msg.body.item === "string" && this.#dialog?.handleSelect(msg.body.item, msg.body.ev === "activate")) return undefined;
 		if (msg.verb === "e" && (msg.body.ev === "select" || msg.body.ev === "activate") && typeof msg.body.id === "string" && msg.body.id.startsWith(`${AUTOCOMPLETE_ID}.`)) {
 			if (typeof msg.body.item === "string") this.#complete.select(msg.body.item, msg.body.ev === "activate");
