@@ -370,13 +370,15 @@ describe("claw self-supervision", () => {
 			writeFileSync(join(scratch, "lib", "remedy.ts"), src.slice(0, Math.floor(src.length / 2)));
 			await expect(import(pathToFileURL(join(scratch, "lib", "remedy.ts")).href)).rejects.toThrow(/Unexpected|SyntaxError|not defined|expected/i);
 
-			// What the daemon sees afterwards: a tab that opened, no started event, and a dead block.
+			// What the daemon sees afterwards: a tab that opened, no started event, a dead block, and the loader's
+			// stderr in the worker log. A worker that died before session_start is a failure with the reason, not "lost".
 			const run = makeRun({ status: "launching", phase: "tab_open", block: 401, pid: undefined, settles: 0, createdAt: new Date(clock.getTime() - 70_000).toISOString() });
+			writeFileSync(store.workerLogPath(run.id), "Error: Failed to load extension .pi/lib/claw/remedy.ts: Unexpected end of input\n");
 			await reconcileRun(run, deps, new Set(tern.live));
 			const after = store.getRun(run.id)!;
-			expect(after.status).toBe("lost");
-			expect(after.error).toBe("worker stopped without claw_finish (process or tab gone)");
-			expect(inbox("run_lost")).toHaveLength(1);
+			expect(after.status).toBe("failed");
+			expect(after.error).toContain("worker exited before session_start: Error: Failed to load extension");
+			expect(inbox("run_failed")).toHaveLength(1);
 			expect(after.finish).toBeUndefined();
 		});
 

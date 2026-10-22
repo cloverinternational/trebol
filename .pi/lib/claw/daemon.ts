@@ -18,6 +18,9 @@ export const TRIGGER_RETRY_MS = 60_000;
 export const CANCEL_VERIFY_MS = 5_000;
 /** A run still "launching" this long after creation has no worker: it is failed with a reason, never left silent. */
 export const LAUNCH_TIMEOUT_MS = 5 * 60_000;
+/** How long an open worker question may stay unanswered before the orchestrator is reminded once. It is a reminder,
+ *  not a timeout: the run stays `awaiting_decision` (active) because its worker tab is still alive and waiting. */
+export const ASK_STALE_MS = 30 * 60 * 1000;
 
 export type DaemonDeps = LaunchDeps & {
 	now: () => Date;
@@ -74,7 +77,7 @@ export function releaseLock(store: ClawStore): void {
 	if (readJson<{ pid: number }>(store.lockPath)?.pid === process.pid) rmSync(store.lockPath, { force: true });
 }
 
-const summary = (r: Run) => ({ id: r.id, label: r.label, status: r.status, phase: r.phase, project: r.project, assignee: r.assignee, identifier: r.hoja?.identifier, block: r.block, pid: r.pid, error: r.error, finish: r.finish });
+const summary = (r: Run) => ({ id: r.id, label: r.label, status: r.status, phase: r.phase, project: r.project, assignee: r.assignee, identifier: r.hoja?.identifier, block: r.block, pid: r.pid, error: r.error, launchNote: r.launchNote, finish: r.finish });
 export const isActive = (r: Run) => !TERMINAL.includes(r.status) && r.status !== "awaiting_user";
 
 export { closeRunTab };
@@ -96,6 +99,9 @@ export async function handleRequest(req: Request, deps: DaemonDeps): Promise<unk
 		case "send": {
 			const run = store.getRun(req.runId);
 			if (!run) throw new Error(`no run ${req.runId}`);
+			// A modal is a dialog in the worker's own tab: typing text into it would answer or corrupt it on the
+			// user's behalf. This refusal comes first, before any reactivation path, so nothing is ever typed into it.
+			if (run.ask?.state === "open") throw new Error(`run ${run.id} has a question open in its own tab (${run.ask.questionIds.length || "some"} question(s)); answer it in that tab so the same run continues. claw_send is refused while a modal is open.`);
 			// awaiting_user keeps its tab: input re-activates the run instead of refusing it.
 			let reactivated = false;
 			if (run.status === "awaiting_user" && run.block !== undefined) {
@@ -184,6 +190,28 @@ export async function processRequests(deps: DaemonDeps): Promise<void> {
 	}
 }
 
+/** No event means the worker never reached `session_start`: it died while pi was still starting. */
+const neverStarted = (run: Run): boolean => run.pid === undefined && run.eventsOffset === 0 && run.phase === "tab_open";
+
+/** The first actionable line of a worker's captured stderr. pi prints one line per startup failure. */
+export function startupFailureReason(log: string): string | undefined {
+	const line = log.split("\n").map((entry) => entry.trim()).find((entry) => entry.length > 0
+		&& /Failed to load extension|conflicts with|Unknown option|Cannot find module|ERR_MODULE_NOT_FOUND|SyntaxError|EACCES|EISDIR|ENOENT/i.test(entry));
+	if (!line) return undefined;
+	return line.replace(/\s+/g, " ").slice(0, 300);
+}
+
+/** A worker that died before its first session event is failed with the reason, never reported as "lost". */
+function failStartup(run: Run, deps: DaemonDeps): void {
+	const reason = startupFailureReason(deps.store.readWorkerLog(run.id));
+	run.status = "failed";
+	run.error = (reason
+		? `worker exited before session_start: ${reason}`
+		: `worker exited before session_start and wrote no reason (stderr log: ${deps.store.workerLogPath(run.id)})`).slice(0, 500);
+	queueComment(run, `Claw: ${run.error}. No completion is implied.`);
+	deps.store.appendInbox({ kind: "run_failed", runId: run.id, text: `${run.label} failed: ${run.error}`, key: `fail:${run.id}` });
+}
+
 export function applyEvent(run: Run, ev: ClawEvent, store: ClawStore): void {
 	if (run.seen.includes(ev.eid)) return;
 	run.seen = [...run.seen, ev.eid].slice(-500);
@@ -202,19 +230,75 @@ export function applyEvent(run: Run, ev: ClawEvent, store: ClawStore): void {
 	if (ev.type === "settled") {
 		run.settles++;
 		run.finalText = ev.text;
+		// A turn cannot settle while the worker's own modal is still open. If it does, the close event was lost:
+		// stop presenting the question as still waiting.
+		if (run.ask?.state === "open") run.ask = { ...run.ask, state: "unresolved", closedAt: ev.at };
 		// Only a launching or running worker goes idle. Terminal, awaiting_user and idle runs get no new notice: a
-		// settle there is expected (after claw_finish) or already reported.
-		if (run.status !== "launching" && run.status !== "running") return;
+		// settle there is expected (after claw_finish) or already reported. awaiting_decision is included because a
+		// settle there means the modal vanished without closing: the run must not stay waiting.
+		if (run.status !== "launching" && run.status !== "running" && run.status !== "awaiting_decision") return;
 		// A settled turn is not a result: it may be idle, waiting for a permission or a question, or done without a report.
 		// The notice belongs to the transition, so it is keyed by the run and its settle count, not by the event.
 		run.status = "idle";
+		// The stall clock starts at this transition; `claw_send` clears it and the supervisor acts on it (SLO S1).
 		run.idleSince = ev.at ?? new Date().toISOString();
 		run.stalledAt = undefined;
-		store.appendNotice({ kind: "run_idle", runId: run.id, text: `${run.label} settled a turn without claw_finish (not a completion)`, key: `idle:${run.id}:${run.settles}` });
+		// Low severity: a notice folded into the next digest, never a wake-up of its own (SLO S4).
+		store.appendNotice({
+			kind: "run_idle", runId: run.id,
+			text: run.ask?.state === "cancelled"
+				? `${run.label} cancelled its own question and settled the turn without claw_finish (not a completion); the run is idle, so it still needs a truthful report or an answer in its tab`
+				: `${run.label} settled a turn without claw_finish (not a completion)`,
+			key: `idle:${run.id}:${run.settles}`,
+		});
+		return;
+	}
+	// The worker's own question modal. An open modal is its own state, never `awaiting_user`: that word is reserved for
+	// the terminal needs_user report, and merging them would hide whether a human has to answer in the worker's tab.
+	if (ev.type === "ask") {
+		if (TERMINAL.includes(run.status) || !ev.ask) return;
+		const label = run.hoja?.identifier ?? run.id;
+		const where = run.block !== undefined ? `tab ${run.tab ?? "?"} (block ${run.block})` : "its tab";
+		if (ev.ask.state === "opened") {
+			run.ask = { flowId: ev.ask.flowId, title: ev.ask.title, questionIds: ev.ask.questionIds, openedAt: ev.at, state: "open" };
+			run.status = "awaiting_decision";
+			store.appendInbox({
+				kind: "run_awaiting_input", runId: run.id,
+				text: `${label} is waiting for your answer in ${where}: ${ev.ask.questionIds.length || "one"} question(s)${ev.ask.title ? ` — "${ev.ask.title}"` : ""}. Answer in that tab and the same run continues.`,
+				key: `ask-open:${run.id}:${ev.ask.flowId}`,
+			});
+			return;
+		}
+		run.ask = {
+			flowId: ev.ask.flowId,
+			title: run.ask?.title,
+			questionIds: ev.ask.questionIds.length ? ev.ask.questionIds : run.ask?.questionIds ?? [],
+			openedAt: run.ask?.openedAt ?? ev.at,
+			state: ev.ask.state === "cancelled" ? "cancelled" : "answered",
+			closedAt: ev.at,
+		};
+		if (run.status === "awaiting_decision") run.status = "running";
+		store.appendInbox({
+			kind: "run_input_answered", runId: run.id,
+			text: ev.ask.state === "cancelled"
+				? `${label}'s question was cancelled; the worker continues in ${where} and must report a truthful outcome (needs_user if it still needs a decision).`
+				: `${label}'s question was answered in ${where}; the same run continues.`,
+			key: `ask-close:${run.id}:${ev.ask.flowId}`,
+		});
+		return;
+	}
+	// A new turn in the same worker tab after a reported finish: the run was resumed, not re-created.
+	if (ev.type === "resumed") {
+		if (TERMINAL.includes(run.status)) return;
+		run.status = "running";
+		store.appendInbox({ kind: "run_resumed", runId: run.id, text: `${run.label} resumed in the same tab after its report`, key: `resumed:${ev.eid}` });
 		return;
 	}
 	// finish
 	if (TERMINAL.includes(run.status)) return;
+	// The worker reported a result while its modal still looked open, so no closing ask event was recorded. Never keep
+	// presenting it as waiting for an answer; the report itself is the truth about the turn.
+	if (run.ask?.state === "open") run.ask = { ...run.ask, state: "unresolved", closedAt: ev.at };
 	const outcome = ev.outcome ?? "failed";
 	const finish = validateFinishSafe({ outcome, summary: ev.summary, evidence: ev.evidence });
 	run.finish = { ...finish, at: new Date().toISOString() };
@@ -309,17 +393,33 @@ export async function reconcileRun(run: Run, deps: DaemonDeps, live: Set<number>
 			const again = store.readEvents(run.id, run.eventsOffset);
 			for (const ev of again.items) applyEvent(run, ev, store);
 			run.eventsOffset = again.offset;
-			if (isActive(run)) {
+			// A worker that never reached session_start died starting up (a duplicate extension registration,
+			// a bad flag, a missing module). That is a failure with a reason, never a silent "lost" run.
+			if (isActive(run) && neverStarted(run)) failStartup(run, deps);
+			else if (isActive(run)) {
 				run.status = "lost";
-				run.error = "worker stopped without claw_finish (process or tab gone)";
+				run.error = run.ask?.state === "open"
+					? "worker stopped without claw_finish while its own question modal was still open (process or tab gone); the decision was never answered"
+					: "worker stopped without claw_finish (process or tab gone)";
+				if (run.ask?.state === "open") run.ask = { ...run.ask, state: "unresolved", closedAt: deps.now().toISOString() };
 				queueComment(run, `Claw: ${run.error}. No completion is implied.`);
 				store.appendInbox({ kind: "run_lost", runId: run.id, text: `${run.label} lost: ${run.error}`, key: `lost:${run.id}` });
 			}
 		}
 	}
+	// An unanswered modal is a live wait, not an idle run: remind once (deduped by key) instead of letting it look silent.
+	if (run.ask?.state === "open" && deps.now().getTime() - Date.parse(run.ask.openedAt) >= ASK_STALE_MS) {
+		const minutes = Math.round((deps.now().getTime() - Date.parse(run.ask.openedAt)) / 60_000);
+		store.appendInbox({
+			kind: "run_awaiting_input", runId: run.id,
+			text: `${run.hoja?.identifier ?? run.id} has waited ${minutes} min for an answer in its own tab; the run is still active and continues there. If the question is no longer wanted, cancel the run (claw_cancel) instead of leaving it open.`,
+			key: `ask-stale:${run.id}:${run.ask.flowId}`,
+		});
+	}
 	if (run.status === "launching" && deps.now().getTime() - Date.parse(run.createdAt) > LAUNCH_TIMEOUT_MS) {
 		const unknown = run.phase === "create_dispatched" ? "; the Hoja create outcome was unknown, so a late issue carrying the run marker may exist and needs a manual check" : "";
-		failRun(run, deps, `launch timed out after ${LAUNCH_TIMEOUT_MS / 1000}s in phase ${run.phase} with no worker started event${unknown}`);
+		const captured = startupFailureReason(store.readWorkerLog(run.id));
+		failRun(run, deps, `launch timed out after ${LAUNCH_TIMEOUT_MS / 1000}s in phase ${run.phase} with no worker started event${captured ? `; worker stderr: ${captured}` : ""}${unknown}`);
 		run.failureClass = "launch";
 	}
 	// Self-supervision owns terminal tab close, the idle/stall bound, decision reminders and bounded recovery. It gets

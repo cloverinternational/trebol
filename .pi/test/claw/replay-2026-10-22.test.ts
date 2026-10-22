@@ -39,7 +39,7 @@ function expectedIdleTransitions(events: FixtureRun["events"]): number {
 describe("replay of the recorded 2026-10-22 /claw store", () => {
 	let dir: string;
 	let store: ClawStore;
-	const before = { completed: 0, awaiting: 0, lost: 0, idle: 0, cancelled: 0 };
+	const before = { completed: 0, awaiting: 0, lost: 0, idle: 0, cancelled: 0, startupFailed: 0 };
 
 	beforeAll(async () => {
 		dir = mkdtempSync(join(tmpdir(), "claw-replay-"));
@@ -69,6 +69,7 @@ describe("replay of the recorded 2026-10-22 /claw store", () => {
 			if (after.status === "completed") before.completed++;
 			if (after.status === "awaiting_user") before.awaiting++;
 			if (after.status === "lost") before.lost++;
+			if (after.status === "failed" && /session_start/.test(after.error ?? "")) before.startupFailed++;
 			if (after.status === "idle") before.idle++;
 			if (after.status === "cancelled") before.cancelled++;
 		}
@@ -95,11 +96,18 @@ describe("replay of the recorded 2026-10-22 /claw store", () => {
 		}
 	});
 
-	it("reproduces today's losses as lost, and only as lost", () => {
+	it("diagnoses today's losses truthfully: lost, or failed with the startup reason", () => {
 		const lostToday = runs.filter((r) => r.status === "lost");
 		expect(lostToday.length).toBe(6);
-		for (const fixture of lostToday) expect(store.getRun(fixture.id)!.status).toBe("lost");
-		expect(before.lost).toBeGreaterThanOrEqual(6);
+		for (const fixture of lostToday) {
+			const after = store.getRun(fixture.id)!;
+			// A worker that never wrote a single event died before session_start: main's startup diagnosis turns that
+			// into `failed` with the reason instead of a silent `lost`. Both are truthful; neither claims a result.
+			if (after.status === "failed") expect(after.error).toMatch(/worker exited before session_start|worker stopped without claw_finish/);
+			else expect(after.status).toBe("lost");
+			expect(after.finish).toBeUndefined();
+		}
+		expect(before.lost + before.startupFailed).toBeGreaterThanOrEqual(6);
 	});
 
 	it("emits one idle notice per idle transition, not one per settle (today: 36 notices for 44 runs)", () => {

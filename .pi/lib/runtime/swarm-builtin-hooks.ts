@@ -27,8 +27,8 @@
  */
 import { formatHookContext, nextReminderSeq, wrapReminder } from "../policy/swarm-annoyance-nudge.ts";
 import {
-  isBashReadOnly, isBashTool, isPlanModeTool, isReadOnlyExplorationTool, isReadOnlyMemoryCall, isSkillTool,
-  isTaskManagementTool, isUserInteractionTool, isCodeModeTool, normalizeToolName,
+  isBashReadOnly, isBashTool, isPlanModeTool, isReadOnlyDomainTool, isReadOnlyExplorationTool, isReadOnlyMemoryCall,
+  isReadOnlyVaultCall, isSkillTool, isTaskManagementTool, isUserInteractionTool, isCodeModeTool, normalizeToolName,
 } from "./swarm-toolclass.ts";
 
 /** The autogen manager owns persisted accounting; the builtin hook owns readable guidance. */
@@ -139,7 +139,11 @@ export class TaskEnforcementHook {
     if (!toolName) return CONTINUE;
     if (isPlanModeTool(toolName)) this.planModeUsed = true;
     if (isTaskManagementTool(toolName) || isPlanModeTool(toolName) || isSkillTool(toolName) || isUserInteractionTool(toolName) || isCodeModeTool(toolName)) return CONTINUE;
-    if (isReadOnlyExplorationTool(toolName) || isReadOnlyMemoryCall(toolName, event.params)) return CONTINUE;
+    // Read-only domain lookups (Hoja, context retrieval, history, vault list/get) inform the next task; they do no work.
+    if (isReadOnlyExplorationTool(toolName) || isReadOnlyMemoryCall(toolName, event.params)
+      || isReadOnlyDomainTool(toolName) || isReadOnlyVaultCall(toolName, event.params)) return CONTINUE;
+    // A Claw worker reports its outcome after its own TaskManage task completed; no new task is needed for that report.
+    if (normalizeToolName(toolName) === "clawfinish" && tasks.some(t => t.status === "completed")) return CONTINUE;
     if (isBashTool(toolName)) {
       const cmd = event.params?.command;
       if (typeof cmd === "string" && isBashReadOnly(cmd)) return CONTINUE;

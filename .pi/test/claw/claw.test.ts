@@ -333,6 +333,47 @@ describe("claw daemon", () => {
 		expect(store.readInbox(0).items.some((i) => i.kind === "run_lost")).toBe(true);
 	});
 
+	it("a worker that never reached session_start is failed with the reason it wrote, not reported lost", async () => {
+		spawnReq();
+		await tick(deps);
+		const [run0] = runs();
+		writeFileSync(store.workerLogPath(run0.id), 'Failed to load extension "/main/extensions/ask-user/index.ts": Tool "ask_user_question" conflicts with "/wt/extensions/ask-user/index.ts"\n');
+		await tern.exec(["close", String(run0.block)]);
+		clock = new Date(clock.getTime() + 5 * 60_000);
+		await tick(deps);
+		const run = store.getRun(run0.id)!;
+		expect(run.status).toBe("failed");
+		expect(run.error).toContain("before session_start");
+		expect(run.error).toContain('Tool "ask_user_question" conflicts with');
+		const inbox = store.readInbox(0).items;
+		expect(inbox.some((i) => i.kind === "run_failed")).toBe(true);
+		expect(inbox.some((i) => i.kind === "run_lost")).toBe(false);
+	});
+
+	it("a worker that never started and wrote nothing still fails with a bounded reason", async () => {
+		spawnReq();
+		await tick(deps);
+		const [run0] = runs();
+		await tern.exec(["close", String(run0.block)]);
+		clock = new Date(clock.getTime() + 5 * 60_000);
+		await tick(deps);
+		const run = store.getRun(run0.id)!;
+		expect(run.status).toBe("failed");
+		expect(run.error).toContain("wrote no reason");
+		expect(run.error).toContain("worker.log");
+	});
+
+	it("records how the worker's extensions were resolved", async () => {
+		deps = { ...deps, planLaunch: () => ({ mode: "explicit", extensions: ["/wt/extensions/tool.js"], builtins: ["codemode"], kept: ["/wt"], dropped: ["/main"] }) };
+		spawnReq();
+		await tick(deps);
+		const run = store.getRun(runs()[0].id)!;
+		expect(run.launchNote).toContain("loaded /wt once");
+		expect(run.launchNote).toContain("skipped /main");
+		const launched = tern.calls.find((args) => args[0] === "new");
+		expect(launched?.join(" ")).toContain("'--no-extensions' '--extension' '/wt/extensions/tool.js'");
+	});
+
 	it("a finish written just before the process exited is honored, not reported lost", async () => {
 		spawnReq();
 		await tick(deps);

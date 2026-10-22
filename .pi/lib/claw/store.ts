@@ -12,13 +12,21 @@ import { join } from "node:path";
 
 import type { Resolved } from "./hoja.ts";
 
-export type RunStatus = "launching" | "running" | "idle" | "awaiting_user" | "completed" | "failed" | "lost" | "cancelled";
+/** awaiting_decision: the worker opened its own ask modal and its turn is suspended until a human answers or cancels
+ *  in that worker's tab. It is not a report, not a result, and not the terminal `needs_user` outcome (awaiting_user). */
+export type RunStatus = "launching" | "running" | "idle" | "awaiting_decision" | "awaiting_user" | "completed" | "failed" | "lost" | "cancelled";
 export const TERMINAL: readonly RunStatus[] = ["completed", "failed", "lost", "cancelled"];
 /** Where a run is in its launch sequence; persisted before each side effect so a restart knows what is safe to redo.
  *  create_dispatched: the Hoja create was about to be sent; its outcome may be unknown and is only ever reconciled. */
 export type RunPhase = "intent" | "create_dispatched" | "issue_created" | "tab_opening" | "tab_open";
 export type HojaRef = { issueId: string; identifier: string; teamKey: string; project: string; assignee: string };
 export type Finish = { outcome: "completed" | "failed" | "needs_user"; summary: string; evidence: string[]; at: string };
+/** A worker's own ask_user_question modal, as the daemon sees it from worker events.
+ *  open: the modal is showing in the worker's tab and the turn is suspended. answered/cancelled: the modal resolved.
+ *  unresolved: the worker reported a finish (or the turn settled, or the process ended) with no closing ask event, so
+ *  nobody recorded how the modal closed; it is never presented as still waiting. */
+export type RunAskState = "open" | "answered" | "cancelled" | "unresolved";
+export type RunAsk = { flowId: string; title?: string; questionIds: string[]; openedAt: string; state: RunAskState; closedAt?: string };
 export type OutboxOp = { id: string; kind: "comment"; body: string; done: boolean } | { id: string; kind: "state"; state: string; done: boolean };
 export type SpawnInput = { task: string; project: string; assignee?: string; label?: string; cwd?: string; provider?: string; model?: string };
 export type Run = {
@@ -30,6 +38,8 @@ export type Run = {
 	hoja?: HojaRef; attempts: number; outbox: OutboxOp[]; seen: string[]; error?: string;
 	/** The worker is running but its tab did not take the run label; shown by claw_read and status. */
 	tabWarning?: string;
+	/** How extensions were resolved for this worker when the launch differed from Pi's own package discovery. */
+	launchNote?: string;
 	/** Last Hoja write failure; the op stays pending and is retried. Kept apart from `error` so it cannot hide a launch failure. */
 	syncError?: string;
 	/** ISO instant after which no side effect may start (the spawn request's expiry). Checked before the Hoja create and before the tab. */
@@ -57,15 +67,19 @@ export type Run = {
 	relaunchCount?: number;
 	/** When the supervisor noticed this run's worker tab missing while the worker process was still alive. */
 	tabMissingAt?: string;
+	/** The worker's own question modal. Absent when the worker never asked (legacy runs keep their plain needs_user). */
+	ask?: RunAsk;
 };
 
 /** One bounded supervisor act. `nextAt` is jittered so several runs never retry in lockstep; `exhausted` means the
  *  budget is spent and the act is reported once instead of retried. */
 export type Remedy = { attempts: number; lastAt: string; nextAt: string; done?: boolean; exhausted?: boolean; note?: string };
 export type ClawEvent = {
-	eid: string; type: "started" | "settled" | "finish"; at: string; runId: string;
+	eid: string; type: "started" | "settled" | "ask" | "resumed" | "finish"; at: string; runId: string;
 	pid?: number; sessionFile?: string; text?: string; stopReason?: string;
 	outcome?: Finish["outcome"]; summary?: string; evidence?: string[];
+	/** For type "ask": the worker's own modal opening or resolving. The worker owns this event; the daemon only applies it. */
+	ask?: { flowId: string; title?: string; questionIds: string[]; state: "opened" | "answered" | "cancelled" };
 };
 export type TriggerWhen = { kind: "cron"; cron: string } | { kind: "at"; at: string } | { kind: "on_exit"; runId: string; on?: RunStatus[] };
 export type TriggerAction = ({ kind: "spawn" } & SpawnInput) | { kind: "notify"; message: string };
@@ -75,6 +89,7 @@ export type Trigger = {
 };
 export type InboxKind =
 	| "run_started" | "run_idle" | "run_completed" | "run_failed" | "run_needs_user" | "run_lost" | "run_cancelled"
+	| "run_awaiting_input" | "run_input_answered" | "run_resumed"
 	| "trigger_fired" | "notify" | "error"
 	/** Supervisor notices. `run_stalled` names what a stuck run needs and since when; `run_tab_orphan` reports a worker
 	 *  tab the daemon could not close; `run_recovered` records a bounded automatic recovery. */
@@ -186,6 +201,14 @@ export class ClawStore {
 	}
 	taskPath(id: string): string { return join(this.runsDir, `${id}.task.md`); }
 	eventsPath(id: string): string { return join(this.runsDir, `${id}.events.jsonl`); }
+	/** The worker's own stderr, captured by the launch command so a startup failure can name its reason. */
+	workerLogPath(id: string): string { return join(this.runsDir, `${id}.worker.log`); }
+	readWorkerLog(id: string, maxBytes = 16_384): string {
+		try {
+			const raw = readFileSync(this.workerLogPath(id));
+			return raw.subarray(Math.max(0, raw.length - maxBytes)).toString("utf8");
+		} catch { return ""; }
+	}
 	appendEvent(event: ClawEvent): void { appendFileSync(this.eventsPath(event.runId), `${JSON.stringify(event)}\n`); }
 	readEvents(id: string, offset: number) { return readLines<ClawEvent>(this.eventsPath(id), offset); }
 

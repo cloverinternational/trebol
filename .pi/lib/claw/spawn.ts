@@ -12,6 +12,7 @@ import { writeFileSync } from "node:fs";
 import { basename, isAbsolute, resolve } from "node:path";
 import { HojaRequestError, type HojaClient, type IssueRef, type IssueView, type Resolved } from "./hoja.ts";
 import { clawSession, findRunBlock, launchTab, tabLabel, type TernExec } from "./launcher.ts";
+import { describePlan, type LaunchPlan } from "./launch-plan.ts";
 import { recordAttempt, remedyKey } from "./remedy.ts";
 import { TERMINAL, type ClawStore, type Run, type SpawnInput, type OutboxOp } from "./store.ts";
 
@@ -19,7 +20,8 @@ export const MAX_INTENT_ATTEMPTS = 5;
 export const RECONCILE_MS = 15_000;
 export const HOJA_START_STATE = "In Progress";
 export type ClawHoja = Pick<HojaClient, "resolve" | "createIssue" | "readIssue" | "findIssueByMarker" | "comment" | "setState">;
-export type LaunchDeps = { store: ClawStore; hoja: ClawHoja; tern: TernExec; workspace: string; now?: () => Date };
+/** `planLaunch` decides how the worker loads extensions; absent means Pi's own package discovery. */
+export type LaunchDeps = { store: ClawStore; hoja: ClawHoja; tern: TernExec; workspace: string; now?: () => Date; planLaunch?: (cwd: string) => LaunchPlan };
 
 /** The worker's model choice. Both unset means pi's configured default. pi's --provider only searches for --model, so a provider needs one. */
 export function workerModel(input: { provider?: string; model?: string }): { provider?: string; model?: string } {
@@ -58,6 +60,20 @@ Never move ${h.identifier} to Done; a human decides that.
 ## Task
 
 ${run.task}
+
+## When you need a decision
+
+You have your own \`ask_user_question\` tool and your own tab, and the user answers in this tab. Do not route a decision
+through the orchestrator.
+
+1. Before ending a turn that needs a decision, call \`ask_user_question\` with one short question set: the concrete
+   options and why each one matters.
+2. This turn is suspended until the user answers or cancels the modal in this tab. An answer returns to you as the tool
+   result; continue the same run with it. Do not start another run and do not ask the orchestrator to relay the answer.
+3. If the modal is cancelled, unavailable (no interactive terminal), or \`ask_user_question\` is missing: do not ask
+   again in a loop and do not invent a question. Call \`claw_finish\` with outcome "needs_user" and a summary that states
+   the exact question, the options, and what you will do with each answer. The user can answer in this tab and this same
+   run continues here.
 
 ## Finish (required)
 
@@ -290,12 +306,19 @@ export async function continueRun(run: Run, deps: LaunchDeps): Promise<Run> {
 		run.phase = "tab_opening";
 		store.saveRun(run);
 		try {
+			// A configured package and a cwd-local package that name the same repository load every extension twice
+			// and pi exits on the tool conflicts. The plan keeps one copy, preferring this worker's own checkout.
+			const plan = deps.planLaunch?.(run.cwd) ?? { mode: "discovery" as const };
 			const prompt = `Read and execute your Claw task file in full: ${store.taskPath(run.id)}`;
-			const { tab, block, named } = await launchTab(tern, { session, cwd: run.cwd, label: tabNameFor(run), runId: run.id, clawDir: store.dir, prompt, provider: run.provider, model: run.model });
+			const { tab, block, named } = await launchTab(tern, {
+				session, cwd: run.cwd, label: tabNameFor(run), runId: run.id, clawDir: store.dir, prompt, provider: run.provider, model: run.model,
+				plan, logPath: store.workerLogPath(run.id),
+			});
 			run.tab = tab;
 			run.block = block;
 			run.phase = "tab_open";
 			run.error = undefined;
+			run.launchNote = describePlan(plan);
 			run.tabWarning = named ? undefined : `worker tab is open but could not be renamed to "${tabNameFor(run)}"`;
 			store.saveRun(run);
 		} catch (error) {
