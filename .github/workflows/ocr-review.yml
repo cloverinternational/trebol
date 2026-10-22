@@ -228,6 +228,7 @@ jobs:
             .github/ocr-runtime/package.json
             .github/ocr-runtime/package-lock.json
             .github/scripts/ocr-review-post.cjs
+            .github/scripts/ocr-llm-endpoint.cjs
           sparse-checkout-cone-mode: false
 
       - name: Fetch untrusted head as data
@@ -313,15 +314,27 @@ jobs:
           authkey: ${{ secrets.TS_OCR_AUTHKEY }}
           tags: tag:github-ocr
 
-      - name: Validate Plexus connectivity
+      # Why the protocol is configurable, and why `anthropic` is preferred here:
+      # Anthropic only reads a prompt-cache prefix when the request carries
+      # `cache_control` breakpoints. OpenCodeReview emits them on the last system
+      # block, the last tool and the last message for its Anthropic protocol, and
+      # never for its OpenAI protocol (internal/llm/client.go buildOpenAIParams
+      # encodes messages as plain strings, which cannot carry the field).
+      # Plexus preserves the tool and message breakpoints but drops the one on the
+      # system block, so a chat-completions request through Plexus caches nothing
+      # at all (measured: 3,400 requests, 98.7M prompt tokens, 0 cached). The
+      # Anthropic protocol therefore restores caching where the OpenAI protocol
+      # cannot, at the cost of the base URL needing to be normalised.
+      - name: Resolve and validate the Plexus endpoint
+        id: endpoint
         if: steps.budget.outputs.should_run == 'true'
         shell: bash
         env:
           TAILSCALE_OUTCOME: ${{ steps.tailscale.outcome }}
-          OCR_LLM_URL: ${{ vars.OCR_LLM_URL }}
+          RAW_OCR_LLM_URL: ${{ vars.OCR_LLM_URL }}
           OCR_LLM_TOKEN: ${{ secrets.OCR_PLEXUS_API_KEY }}
-          OCR_LLM_MODEL: ${{ vars.OCR_LLM_MODEL }}
-          OCR_LLM_PROTOCOL: ${{ vars.OCR_LLM_PROTOCOL }}
+          RAW_OCR_LLM_MODEL: ${{ vars.OCR_LLM_MODEL }}
+          RAW_OCR_LLM_PROTOCOL: ${{ vars.OCR_LLM_PROTOCOL }}
         run: |
           set -euo pipefail
           if [ -s ocr-exit-code.txt ]; then
@@ -329,16 +342,12 @@ jobs:
           fi
           echo "llm-preflight" > ocr-phase.txt
           missing=0
-          for name in OCR_LLM_URL OCR_LLM_TOKEN OCR_LLM_MODEL OCR_LLM_PROTOCOL; do
+          for name in RAW_OCR_LLM_URL OCR_LLM_TOKEN RAW_OCR_LLM_MODEL RAW_OCR_LLM_PROTOCOL; do
             if [ -z "${!name:-}" ]; then
-              echo "Required OCR configuration ${name} is missing." >> ocr-stderr.log
+              echo "Required OCR configuration ${name#RAW_} is missing." >> ocr-stderr.log
               missing=1
             fi
           done
-          if [ "$OCR_LLM_PROTOCOL" != "openai" ]; then
-            echo "OCR_LLM_PROTOCOL must be openai for Plexus Chat Completions." >> ocr-stderr.log
-            missing=1
-          fi
           if [ "$TAILSCALE_OUTCOME" != "success" ]; then
             echo "The ephemeral Tailscale connection failed." >> ocr-stderr.log
             missing=1
@@ -347,6 +356,16 @@ jobs:
             echo "78" > ocr-exit-code.txt
             exit 0
           fi
+          if ! resolved_url="$(node "${GITHUB_WORKSPACE}/.ocr-trusted/.github/scripts/ocr-llm-endpoint.cjs" \
+              "$RAW_OCR_LLM_URL" "$RAW_OCR_LLM_PROTOCOL" 2>>ocr-stderr.log)"; then
+            echo "78" > ocr-exit-code.txt
+            exit 0
+          fi
+          {
+            echo "OCR_LLM_URL=${resolved_url}"
+            echo "OCR_LLM_MODEL=${RAW_OCR_LLM_MODEL}"
+            echo "OCR_LLM_PROTOCOL=${RAW_OCR_LLM_PROTOCOL}"
+          } >> "$GITHUB_ENV"
           set +e
           timeout 120s ocr llm test >>ocr-stderr.log 2>&1
           status=$?
@@ -359,10 +378,7 @@ jobs:
         if: steps.budget.outputs.should_run == 'true'
         shell: bash
         env:
-          OCR_LLM_URL: ${{ vars.OCR_LLM_URL }}
           OCR_LLM_TOKEN: ${{ secrets.OCR_PLEXUS_API_KEY }}
-          OCR_LLM_MODEL: ${{ vars.OCR_LLM_MODEL }}
-          OCR_LLM_PROTOCOL: ${{ vars.OCR_LLM_PROTOCOL }}
         run: |
           set -euo pipefail
           if [ -s ocr-exit-code.txt ]; then
@@ -382,10 +398,7 @@ jobs:
         if: steps.budget.outputs.should_run == 'true'
         shell: bash
         env:
-          OCR_LLM_URL: ${{ vars.OCR_LLM_URL }}
           OCR_LLM_TOKEN: ${{ secrets.OCR_PLEXUS_API_KEY }}
-          OCR_LLM_MODEL: ${{ vars.OCR_LLM_MODEL }}
-          OCR_LLM_PROTOCOL: ${{ vars.OCR_LLM_PROTOCOL }}
         run: |
           set -euo pipefail
           if [ -s ocr-exit-code.txt ]; then
@@ -413,7 +426,6 @@ jobs:
         if: always() && steps.budget.outputs.should_run == 'true'
         shell: bash
         env:
-          OCR_LLM_URL: ${{ vars.OCR_LLM_URL }}
           OCR_LLM_TOKEN: ${{ secrets.OCR_PLEXUS_API_KEY }}
         run: |
           set -euo pipefail
