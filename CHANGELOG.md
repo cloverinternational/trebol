@@ -4,6 +4,10 @@ Release metadata is kept in `package.json`, `update-manifest.json`, and this fil
 
 ## [Unreleased]
 
+### Fixed
+
+- OpenCodeReview now speaks the Anthropic protocol to Plexus (`OCR_LLM_PROTOCOL=anthropic`, base URL normalised by `.github/scripts/ocr-llm-endpoint.cjs`), because its OpenAI protocol cannot emit `cache_control` and Plexus drops the field from `system[]` blocks anyway. Every `chat → claude-oauth` review request had re-billed its whole prompt — 3,400 requests and 98.7M uncached tokens in five days — and now caches: 23,188 uncached input tokens became 8,869 cache reads + 14,479 cache writes on the same review. See `docs/audits/plexus-chat-claude-cache-trace.md`.
+
 ## [0.7.1] - 2026-10-22
 
 ### Highlights
