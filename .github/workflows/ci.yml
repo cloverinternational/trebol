@@ -58,6 +58,23 @@ jobs:
           console.log(`Release metadata consistent at ${manifest.version}.`);
           NODE
 
+  tracked-symlinks:
+    # A committed symlink is stored as its target string, so an absolute target
+    # names one machine's filesystem: it dangles in every clone and, in the
+    # checkout that owns it, it replaces the real directory. `node_modules` was
+    # tracked that way by 3746215 and broke every checkout. This job reads the
+    # index and needs no dependencies, so it runs before any install could mask
+    # the problem.
+    name: No tracked symlink escapes the checkout
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Fail on a tracked symlink with an absolute (or escaping) target
+        run: node tools/repo/check-tracked-symlinks.mjs
+
   build-test:
     name: Build and test
     runs-on: ubuntu-latest

@@ -81,6 +81,7 @@
     "doctor": "node tools/install/doctor.mjs",
     "dogfood": "npm run build && npm test",
     "check:install": "node tools/install/check-load.mjs",
+    "check:symlinks": "node tools/repo/check-tracked-symlinks.mjs",
     "check:extension-parity": "node tools/install/extension-inventory.mjs --compare docs/parity/extension-surface-before.json --surface-only",
     "test:ask-user": "node --experimental-strip-types --test extensions/ask-user/tests/*.test.ts"
   },
