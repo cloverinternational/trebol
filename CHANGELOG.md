@@ -6,6 +6,7 @@ Release metadata is kept in `package.json`, `update-manifest.json`, and this fil
 
 ### Fixed
 
+- Claw worker launches survive an extension source that is being edited: a launch gate parses the registered entry points and their local imports before a tab opens, retries transient load/parse/tool-conflict failures with bounded backoff and jitter (the real error is kept), never retries deterministic configuration errors, and refuses a launch when the source checkout moved or gained tracked edits since the run was created. A worker that dies before writing any event is reported failed with a reason instead of a silent `lost`.
 - Claw: sending input to an idle worker re-arms the idle notice for its next settled turn, and `status` reports `since` for runs awaiting the user.
 - Tern runner no longer crashes at startup on fresh checkouts: `prepare` now builds `packages/tools/taskmanage/dist` (imported by `.pi/lib/tern/task-view.ts`), and `doctor` checks for it.
 

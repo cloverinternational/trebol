@@ -11,6 +11,7 @@ import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 
 import type { Resolved } from "./hoja.ts";
+import type { SourceState } from "./preflight.ts";
 
 export type RunStatus = "launching" | "running" | "idle" | "awaiting_user" | "completed" | "failed" | "lost" | "cancelled";
 export const TERMINAL: readonly RunStatus[] = ["completed", "failed", "lost", "cancelled"];
@@ -42,6 +43,15 @@ export type Run = {
 	tabClosedAt?: string;
 	/** Last failed attempt to close the worker tab; retried while the run is terminal and Tern answers. */
 	tabCloseError?: string;
+	/** The checkout this run was created from (HEAD, branch, fingerprint of tracked changes). The launch gate refuses a
+	 *  worker tab when that checkout has moved or gained tracked edits since, so a worker cannot load a different tree. */
+	source?: SourceState;
+	/** The same checkout as it was immediately before the worker tab opened. */
+	sourceAtLaunch?: SourceState;
+	/** Non-fatal launch-gate findings (a source that was already dirty, a source this gate cannot inspect). */
+	launchWarning?: string;
+	/** Attempts the last launch gate used: 1 means the source was healthy on the first try. */
+	launchAttempts?: number;
 };
 export type ClawEvent = {
 	eid: string; type: "started" | "settled" | "finish"; at: string; runId: string;

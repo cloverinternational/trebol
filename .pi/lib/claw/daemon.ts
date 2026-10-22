@@ -7,6 +7,7 @@ import { nextCronTime, validateCron } from "../../../packages/tools/schedule/src
 import type { LaunchDeps } from "./spawn.ts";
 import { continueRun, failRun, findByKey, queueComment, queueState, runMarker, startRun, opMarker } from "./spawn.ts";
 import { liveBlocks, closeBlock, isBlockGone, sendToBlock, type TernExec } from "./launcher.ts";
+import { describeSource } from "./preflight.ts";
 import { ClawStore, readJson, TERMINAL, type ClawEvent, type Request, type Response, type Run, type RunStatus, type Trigger, type SpawnInput } from "./store.ts";
 import { validateFinish } from "./child.ts";
 
@@ -73,7 +74,11 @@ export function releaseLock(store: ClawStore): void {
 	if (readJson<{ pid: number }>(store.lockPath)?.pid === process.pid) rmSync(store.lockPath, { force: true });
 }
 
-const summary = (r: Run) => ({ id: r.id, label: r.label, status: r.status, phase: r.phase, project: r.project, assignee: r.assignee, identifier: r.hoja?.identifier, block: r.block, pid: r.pid, error: r.error, finish: r.finish });
+const summary = (r: Run) => ({
+	id: r.id, label: r.label, status: r.status, phase: r.phase, project: r.project, assignee: r.assignee, identifier: r.hoja?.identifier,
+	block: r.block, pid: r.pid, error: r.error, finish: r.finish,
+	source: r.source ? describeSource(r.source) : undefined, launchAttempts: r.launchAttempts, launchWarning: r.launchWarning,
+});
 export const isActive = (r: Run) => !TERMINAL.includes(r.status) && r.status !== "awaiting_user";
 
 /** Closes a run's worker tab once. A block Tern no longer has is already closed, not an error. Only blocks the daemon
@@ -291,16 +296,25 @@ export async function reconcileRun(run: Run, deps: DaemonDeps, live: Set<number>
 			for (const ev of again.items) applyEvent(run, ev, store);
 			run.eventsOffset = again.offset;
 			if (isActive(run)) {
-				run.status = "lost";
-				run.error = "worker stopped without claw_finish (process or tab gone)";
-				queueComment(run, `Claw: ${run.error}. No completion is implied.`);
-				store.appendInbox({ kind: "run_lost", runId: run.id, text: `${run.label} lost: ${run.error}`, key: `lost:${run.id}` });
+				if (run.pid === undefined && run.eventsOffset === 0) {
+					// The worker died before it wrote a single event. It never reported `started`, so nothing about the work is
+					// known; the likely cause is the extension source failing to load at launch. That is a failed launch with a
+					// reason, not a silent `lost` state a human has to guess about.
+					const source = run.source ? ` It was created from source checkout ${describeSource(run.source)}.` : "";
+					failRun(run, deps, `worker exited before it reported started; no run event was ever written. The extension source under ${run.cwd} probably failed to load.${source} Check the tab output, fix the source, then spawn a new run; Hoja ${run.hoja?.identifier ?? "(none)"} stays In Progress`);
+				} else {
+					run.status = "lost";
+					run.error = "worker stopped without claw_finish (process or tab gone)";
+					queueComment(run, `Claw: ${run.error}. No completion is implied.`);
+					store.appendInbox({ kind: "run_lost", runId: run.id, text: `${run.label} lost: ${run.error}`, key: `lost:${run.id}` });
+				}
 			}
 		}
 	}
 	if (run.status === "launching" && deps.now().getTime() - Date.parse(run.createdAt) > LAUNCH_TIMEOUT_MS) {
 		const unknown = run.phase === "create_dispatched" ? "; the Hoja create outcome was unknown, so a late issue carrying the run marker may exist and needs a manual check" : "";
-		failRun(run, deps, `launch timed out after ${LAUNCH_TIMEOUT_MS / 1000}s in phase ${run.phase} with no worker started event${unknown}`);
+		const source = run.source ? `; source checkout ${describeSource(run.source)}` : "";
+		failRun(run, deps, `launch timed out after ${LAUNCH_TIMEOUT_MS / 1000}s in phase ${run.phase} with no worker started event${unknown}${source}`);
 	}
 	if (CLOSE_ON_END.includes(run.status) && live !== undefined && run.block !== undefined && !run.tabClosedAt) {
 		await closeRunTab(run, deps.tern).catch((e) => { run.tabCloseError = `tab close failed: ${(e as Error).message}`.slice(0, 300); });
