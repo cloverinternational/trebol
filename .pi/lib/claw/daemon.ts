@@ -2,7 +2,7 @@
  *  Each tick: serve client requests, resume unfinished launches, apply worker events, detect lost workers,
  *  flush Hoja writes (outbox), then fire due triggers. Every step is idempotent so a crash at any point is safe. */
 import { spawn as spawnChild } from "node:child_process";
-import { openSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, openSync, rmSync, writeFileSync } from "node:fs";
 import { nextCronTime, validateCron } from "../../../packages/tools/schedule/src/cron.ts";
 import type { LaunchDeps } from "./spawn.ts";
 import { continueRun, failRun, findByKey, queueComment, queueState, runMarker, startRun, opMarker } from "./spawn.ts";
@@ -13,6 +13,7 @@ import { validateFinish } from "./child.ts";
 import { ENDED_GOAL, GOAL_LONG_MS, applyGoalEvent, endGoal, goalRow, type ClawGoalEndReason } from "./goal.ts";
 import { compareFingerprint } from "./fingerprint.ts";
 import { CLOSE_ON_END, DEFAULT_SLO, closeRunTab, flushDigest, sloFrom, superviseRun, supervisionPending, type SloConfig } from "./supervisor.ts";
+import { resumeRun, resumeRefusal } from "./resume.ts";
 
 export const TICK_MS = 1000;
 export const IDLE_EXIT_MS = 120_000;
@@ -95,6 +96,7 @@ const summary = (r: Run) => ({
 	block: r.block, pid: r.pid, error: r.error, launchNote: r.launchNote, finish: r.finish,
 	source: r.source ? describeSource(r.source) : undefined, launchAttempts: r.launchAttempts, launchWarning: r.launchWarning,
 	goal: goalRow(r.goal, Date.now()),
+	keepOpen: r.keepOpen === true, sessionFile: r.sessionFile, resumeCount: r.resumeCount ?? 0, lastResumeAt: r.lastResumeAt, resumeError: r.resumeError,
 });
 export const isActive = (r: Run) => !TERMINAL.includes(r.status) && r.status !== "awaiting_user";
 
@@ -180,6 +182,57 @@ export async function handleRequest(req: Request, deps: DaemonDeps): Promise<unk
 			store.appendInbox({ kind: "run_cancelled", runId: run.id, text: `${run.id} cancelled`, key: `cancel:${run.id}` });
 			return summary(run);
 		}
+		case "keep": {
+			// Keep open is a decision about the tab, not about the work: it never signals a worker and never reopens a
+			// tab that is already closed. Releasing it (keep=false) clears a spent close budget so the next tick tries
+			// again instead of being silently exhausted.
+			const run = store.getRun(req.runId);
+			if (!run) throw new Error(`no run ${req.runId}`);
+			run.keepOpen = req.keep;
+			if (!req.keep && run.remedies?.["tab-close"]) delete run.remedies["tab-close"];
+			store.saveRun(run);
+			store.appendInbox({
+				kind: "run_kept", runId: run.id, key: `kept:${run.id}:${req.keep ? "on" : "off"}`,
+				text: req.keep
+					? `${run.hoja?.identifier ?? run.id} is kept open: its worker tab is never auto-closed, so you can keep working in it. Release it with claw_close ${run.id} or claw_set_keep run_id=${run.id} keep=false.`
+					: `${run.hoja?.identifier ?? run.id} is no longer kept open; its worker tab closes on the next tick${run.block !== undefined ? ` (block ${run.block})` : ""}.`,
+			});
+			return summary(run);
+		}
+		case "close": {
+			// Close now, and release the keep so the supervisor owns the outcome: if this close fails, the next tick retries
+			// it inside the close budget instead of the tab drifting back to "kept".
+			const run = store.getRun(req.runId);
+			if (!run) throw new Error(`no run ${req.runId}`);
+			const block = run.block;
+			run.keepOpen = false;
+			if (run.remedies?.["tab-close"]) delete run.remedies["tab-close"];
+			await closeRunTab(run, tern).catch((error) => {
+				run.tabCloseError = `tab close failed: ${(error as Error).message}`.slice(0, 300);
+			});
+			store.saveRun(run);
+			store.appendInbox({
+				kind: "run_tab_closed", runId: run.id, key: `closed:${run.id}:${run.tabClosedAt ?? "pending"}`,
+				text: run.tabClosedAt
+					? `${run.hoja?.identifier ?? run.id}: worker tab ${block === undefined ? "(none recorded)" : `block ${block}`} closed by hand. The run is still ${run.status}; bring it back with claw_resume ${run.id}.`
+					: `${run.hoja?.identifier ?? run.id}: could not close its worker tab (${run.tabCloseError ?? run.error ?? "no block recorded"}); the supervisor retries on the next tick.`,
+			});
+			return summary(run);
+		}
+		case "resume": {
+			// Same run, same Hoja issue, same session file: a resume never creates anything. Every refusal (live worker,
+			// missing session, in-flight resume, deleted issue, spent budget) is an error with the next step in it.
+			const run = store.getRun(req.runId);
+			if (!run) throw new Error(`no run ${req.runId}`);
+			if (!run.hoja) throw new Error(`run ${run.id} has no Hoja issue, so a resume would have nowhere to report; spawn a new run with claw_spawn`);
+			let live: Set<number> | undefined;
+			try { live = await liveBlocks(tern); } catch { live = undefined; }
+			const refusal = resumeRefusal(run, { alive: deps.alive, live, sessionExists: existsSync, nowMs: deps.now().getTime() });
+			if (refusal) throw new Error(refusal);
+			// The same snapshot goes in: a run whose tab is gone but whose pid is not recorded is resumable only because
+			// this set proves the block is missing, and the resume must reach the same verdict the refusal did.
+			return summary(await resumeRun(run, { ...deps, live }));
+		}
 		case "withdraw": {
 			// Settles a request its caller gave up on. The daemon is sequential: the target is already answered, or a run
 			// exists (dispatched), or it is still undispatched and is refused now so it can never start later.
@@ -233,8 +286,9 @@ export async function processRequests(deps: DaemonDeps): Promise<void> {
 	}
 }
 
-/** No event means the worker never reached `session_start`: it died while pi was still starting. */
-const neverStarted = (run: Run): boolean => run.pid === undefined && run.eventsOffset === 0 && run.phase === "tab_open";
+/** No event since this launch attempt means the worker never reached `session_start`: it died while pi was still
+ *  starting. Counted from the last resume, so a resumed run is judged on its new process, not on old history. */
+const neverStarted = (run: Run): boolean => run.pid === undefined && run.eventsOffset === (run.resumeFrom ?? 0) && run.phase === "tab_open";
 
 /** The first actionable line of a worker's captured stderr. pi prints one line per startup failure. */
 export function startupFailureReason(log: string): string | undefined {
@@ -439,6 +493,7 @@ async function relaunchLaunch(run: Run, deps: DaemonDeps, reason: string): Promi
 	run.relaunchCount = (run.relaunchCount ?? 0) + 1;
 	run.status = "launching";
 	run.phase = "issue_created";
+	run.launchStartedAt = deps.now().toISOString();
 	run.error = undefined;
 	run.tabCloseError = undefined;
 	run.block = undefined;
@@ -462,7 +517,9 @@ export async function reconcileRun(run: Run, deps: DaemonDeps, live: Set<number>
 	if (isActive(run)) {
 		let dead = false;
 		if (run.pid !== undefined) dead = !deps.alive(run.pid);
-		else if (run.block !== undefined && live && !live.has(run.block) && deps.now().getTime() - Date.parse(run.createdAt) > LOST_GRACE_MS) dead = true;
+		// The grace runs from this launch attempt, not from creation: a resumed run is judged on its new tab, not on a
+		// record written hours ago.
+		else if (run.block !== undefined && live && !live.has(run.block) && deps.now().getTime() - Date.parse(run.launchStartedAt ?? run.createdAt) > LOST_GRACE_MS) dead = true;
 		if (dead) {
 			// A worker may have written its last event just before exiting; re-read before declaring it lost.
 			const again = store.readEvents(run.id, run.eventsOffset);
@@ -491,7 +548,8 @@ export async function reconcileRun(run: Run, deps: DaemonDeps, live: Set<number>
 			key: `ask-stale:${run.id}:${run.ask.flowId}`,
 		});
 	}
-	if (run.status === "launching" && deps.now().getTime() - Date.parse(run.createdAt) > LAUNCH_TIMEOUT_MS) {
+	// Measured from the current launch attempt: resuming an old run must not be judged as a launch that hung since creation.
+	if (run.status === "launching" && deps.now().getTime() - Date.parse(run.launchStartedAt ?? run.createdAt) > LAUNCH_TIMEOUT_MS) {
 		const unknown = run.phase === "create_dispatched" ? "; the Hoja create outcome was unknown, so a late issue carrying the run marker may exist and needs a manual check" : "";
 		const captured = startupFailureReason(store.readWorkerLog(run.id));
 		const source = run.source ? `; source checkout ${describeSource(run.source)}` : "";

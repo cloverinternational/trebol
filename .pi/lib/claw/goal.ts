@@ -20,6 +20,17 @@ export const MAX_CRITERIA = 8;
 export type ClawGoalStatus = "pending" | "active" | "met" | "impossible" | "cleared" | "unavailable" | "error";
 /** Why the loop ended. `finish` and `awaiting_decision` are the reasons the worker itself reports. */
 export type ClawGoalEndReason = "met" | "impossible" | "cleared" | "finish" | "needs_user" | "cancel" | "awaiting_decision" | "terminal" | "error";
+/** One armed generation of a run's goal. A run keeps ONE goal; resuming it arms the next generation, and the generation
+ *  that ended is kept here so the record says what was already achieved instead of pretending it never happened. */
+export type GoalGeneration = {
+	source: string;
+	startedAt?: string;
+	endedAt?: string;
+	endReason?: ClawGoalEndReason;
+	turns: number;
+	judgeCalls: number;
+	lastVerdict?: GoalVerdict;
+};
 /** The run's goal as the daemon records it. `source` is `claw:<runId>`, so a restart can tell its own ended goal from a
  *  new one and can never establish a second loop for the same run. */
 export type ClawGoal = {
@@ -39,6 +50,12 @@ export type ClawGoal = {
 	endReason?: ClawGoalEndReason;
 	/** Set once, when the long-run warning notice was emitted. */
 	warningAt?: string;
+	/** How many times this run's goal has been armed: 1 at spawn, +1 for every resume that restored it. */
+	generations?: number;
+	/** When the current generation was armed by a resume. The elapsed clock of a pending goal starts here. */
+	resumedAt?: string;
+	/** Generations that already ended, oldest first, bounded to the last five. So a resume never erases what ended. */
+	history?: GoalGeneration[];
 };
 /** What the daemon writes for the worker to establish. Immutable for the life of the run. */
 export type GoalSpec = { runId: string; source: string; condition: string; criteria: string[]; derivedAt: string };
@@ -147,6 +164,38 @@ export function goalSpecOf(runId: string, goal: ClawGoal): GoalSpec | undefined 
 
 type GoalCarrier = { goal?: ClawGoal };
 
+/** The source of generation `n` of one run's goal. Generation 1 is what startGoal writes; every resume arms the next
+ *  one. The suffix matters: the goal extension refuses to re-establish a source that already ended (that tombstone is
+ *  what stops a restart from re-arming a finished loop), so a deliberate resume must be a new owner, not a resurrection
+ *  of the ended one. */
+export const goalSourceFor = (runId: string, generation: number): string => (generation <= 1 ? `claw:${runId}` : `claw:${runId}:g${generation}`);
+
+/** Arms the run's persisted goal again for a resumed generation — exactly one, in one call, and only for a goal that has
+ *  a condition. It keeps the condition, criteria and counters, records the ended generation in `history`, and returns the
+ *  spec the worker must establish. A goal that could never be derived (`unavailable`) is left exactly as it is: a resume
+ *  must not invent a condition. */
+export function rearmGoal(target: GoalCarrier, runId: string, at: string): { generation: number; spec: GoalSpec } | undefined {
+	const goal = target.goal;
+	if (!goal || goal.status === "unavailable" || !goal.condition) return undefined;
+	const generation = (goal.generations ?? 1) + 1;
+	goal.history = [...(goal.history ?? []), {
+		source: goal.source, startedAt: goal.establishedAt ?? goal.resumedAt ?? goal.derivedAt, endedAt: goal.endedAt,
+		endReason: goal.endReason, turns: goal.turns, judgeCalls: goal.judgeCalls, lastVerdict: goal.lastVerdict,
+	}].slice(-5);
+	goal.generations = generation;
+	goal.source = goalSourceFor(runId, generation);
+	// Armed but not yet established by the worker: `pending` is what lets the worker's own `established` event apply.
+	goal.status = "pending";
+	goal.establishedAt = undefined;
+	goal.endedAt = undefined;
+	goal.endReason = undefined;
+	goal.warningAt = undefined;
+	goal.reason = undefined;
+	goal.resumedAt = at;
+	const spec = goalSpecOf(runId, goal);
+	return spec ? { generation, spec } : undefined;
+}
+
 /** Ends the goal exactly once. Returns false when there was nothing to end, so no second notice is ever emitted. */
 export function endGoal(target: GoalCarrier, reason: ClawGoalEndReason, at: string): boolean {
 	const goal = target.goal;
@@ -210,12 +259,16 @@ export function applyGoalEvent(target: GoalCarrier, event: GoalEvent, at: string
 /** One status row. `elapsedSeconds` is measured from establishment (or derivation) to the end, or to now while running. */
 export function goalRow(goal: ClawGoal | undefined, nowMs: number) {
 	if (!goal) return undefined;
-	const startedAt = Date.parse(goal.establishedAt ?? goal.derivedAt);
+	const startedAt = Date.parse(goal.establishedAt ?? goal.resumedAt ?? goal.derivedAt);
 	const endedAt = goal.endedAt ? Date.parse(goal.endedAt) : nowMs;
 	return {
 		status: goal.status,
 		condition: goal.condition || undefined,
 		source: goal.source || undefined,
+		/** 1 at spawn, +1 per resume that restored this goal. */
+		generations: goal.generations ?? 1,
+		/** How many generations already ended, so a resumed goal is never mistaken for the original one. */
+		endedGenerations: goal.history?.length ?? 0,
 		turns: goal.turns,
 		judgeCalls: goal.judgeCalls,
 		lastVerdict: goal.lastVerdict ?? null,

@@ -6,6 +6,7 @@ import { compareFingerprint, computeClawFingerprint, needsReplacement, type Claw
 import { DAEMON_MAIN, refreshDaemon, type RefreshOptions, type RefreshOutcome } from "./lifecycle.ts";
 import { runIdFor } from "./spawn.ts";
 import { goalRow } from "./goal.ts";
+import { reachability } from "./resume.ts";
 
 export { DAEMON_MAIN };
 export const REQUEST_TIMEOUT_MS = 90_000;
@@ -107,6 +108,7 @@ export async function request(store: ClawStore, workspace: string, body: Request
 
 export function statusSummary(store: ClawStore, nowMs = Date.now()) {
 	const runs = store.listRuns();
+	const facts = { alive: pidAlive, sessionExists: existsSync, nowMs: Date.now() };
 	const lock = readJson<DaemonLock>(store.lockPath);
 	const comparison = compareFingerprint(lock?.fingerprint, computeClawFingerprint()?.key);
 	const live = lock?.pid !== undefined && pidAlive(lock.pid);
@@ -125,6 +127,11 @@ export function statusSummary(store: ClawStore, nowMs = Date.now()) {
 		/** The always-on completion goal of every run: condition, turns used, judge calls, last verdict and elapsed time.
 		 *  Nothing here bounds a goal; a `warning` row has merely run unusually long. */
 		goals: runs.filter((r) => r.goal).map((r) => ({ id: r.id, identifier: r.hoja?.identifier, ...goalRow(r.goal, nowMs)! })),
+		/** Runs a human asked to keep open: their tab survives a terminal state, across daemon restarts. */
+		keptOpen: runs.filter((r) => r.keepOpen === true).map((r) => ({ id: r.id, identifier: r.hoja?.identifier, status: r.status, tab: r.block, sessionFile: r.sessionFile })),
+		/** Terminal runs whose conversation can still be reopened with claw_resume, and why the others cannot. */
+		resumable: runs.map((r) => ({ run: r, state: reachability(r, facts) })).filter((x) => TERMINAL.includes(x.run.status) && x.state.resumable)
+			.map((x) => ({ id: x.run.id, identifier: x.run.hoja?.identifier, status: x.run.status, sessionFile: x.run.sessionFile, resumes: x.run.resumeCount ?? 0 })),
 		hojaSyncPending: runs.reduce((n, r) => n + r.outbox.filter((o) => !o.done).length, 0),
 		triggers: store.listTriggers().map((t) => ({ id: t.id, enabled: t.enabled, next: t.nextFireAt, fired: t.fired, lastError: t.lastError })),
 		unreadInbox: store.readInbox(store.readOrchestrator().offset).items.length,
@@ -132,12 +139,23 @@ export function statusSummary(store: ClawStore, nowMs = Date.now()) {
 	};
 }
 
-/** Run rows for `claw list`. `ageSeconds` is time since creation; a launching run also shows seconds left before it times out. */
-export function runListing(runs: Run[], nowMs: number) {
+/** Run rows for `claw list`. `ageSeconds` is time since creation; a launching run also shows seconds left before it
+ *  times out, counted from the current launch or resume attempt. `keepOpen` and `resumable` say how the run can still be
+ *  reached: a kept run's tab is never auto-closed, and a resumable one reopens on its own session file with claw_resume.
+ *  `reachability` is the reason when it cannot be resumed. */
+export function runListing(runs: Run[], nowMs: number, options: { alive?: (pid: number) => boolean; live?: Set<number> } = {}) {
+	const alive = options.alive ?? pidAlive;
 	return runs.map((r) => {
+		const launchAge = Math.max(0, Math.round((nowMs - Date.parse(r.launchStartedAt ?? r.createdAt)) / 1000));
 		const ageSeconds = Math.max(0, Math.round((nowMs - Date.parse(r.createdAt)) / 1000));
-		const launchTimeoutInSeconds = r.status === "launching" ? Math.max(0, Math.round(LAUNCH_TIMEOUT_MS / 1000) - ageSeconds) : undefined;
+		const launchTimeoutInSeconds = r.status === "launching" ? Math.max(0, Math.round(LAUNCH_TIMEOUT_MS / 1000) - launchAge) : undefined;
+		const reach = reachability(r, { alive, live: options.live, sessionExists: existsSync, nowMs });
 		const waiting = r.ask?.state === "open" ? { questions: r.ask.questionIds, since: r.ask.openedAt, tab: r.block } : undefined;
-		return { id: r.id, label: r.label, status: r.status, phase: r.phase, identifier: r.hoja?.identifier, ageSeconds, launchTimeoutInSeconds, error: r.error, launchNote: r.launchNote, waiting, goal: goalRow(r.goal, nowMs) };
+		return {
+			id: r.id, label: r.label, status: r.status, phase: r.phase, identifier: r.hoja?.identifier, ageSeconds, launchTimeoutInSeconds,
+			error: r.error, launchNote: r.launchNote, waiting, goal: goalRow(r.goal, nowMs),
+			keepOpen: reach.keepOpen, resumable: reach.resumable, reachability: reach.reason,
+			sessionFile: r.sessionFile, resumes: r.resumeCount ?? 0, resumeError: r.resumeError,
+		};
 	});
 }

@@ -7,6 +7,8 @@ import type { GoalEvent } from "./goal.ts";
 export const WORKER_BLOCKED_TOOLS: readonly string[] = [
 	"Agent", "AgentControl", "Subagent", "Delegate", "DelegateOutput", "BackgroundTask", "SubagentOutput", "TaskOutput",
 	"claw_spawn", "claw_send", "claw_cancel", "claw_trigger", "claw_list", "claw_read",
+	// A worker must not relaunch, close or un-keep runs: those are the orchestrator's decisions about other runs' tabs.
+	"claw_resume", "claw_close", "claw_set_keep",
 ];
 
 export type WorkerIdentity = { runId: string; clawDir: string };

@@ -177,6 +177,9 @@ export async function startRun(input: SpawnInput, deps: LaunchDeps, key: { reque
 	const { provider, model } = workerModel(input);
 	// Validation only: no run and no side effect exists yet if this throws.
 	await deps.hoja.resolve(input.project, input.assignee);
+	// Explicitly asked to stay open: such a run's worker tab is never auto-closed on a terminal state (see supervisor.ts),
+	// so a human can keep working in it. Recorded on the run, so it survives a daemon restart; absent means close as before.
+	const keepOpen = input.keepOpen === true;
 	// Record the checkout this run is planned against, before anything leaves the process. The launch gate compares the
 	// checkout with this snapshot, so a branch switch or an in-place edit between create and tab is refused, not executed.
 	const source = await snapshotSource(cwd);
@@ -190,6 +193,8 @@ export async function startRun(input: SpawnInput, deps: LaunchDeps, key: { reque
 	};
 	// Always on: the goal is derived and recorded before any side effect, so it is auditable even if the launch fails.
 	run.goal = startGoal(id, task, at);
+	if (keepOpen) run.keepOpen = true;
+	run.launchStartedAt = at;
 	deps.store.saveRun(run);
 	return continueRun(run, deps);
 }
