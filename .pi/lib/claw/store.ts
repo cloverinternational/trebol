@@ -42,7 +42,26 @@ export type Run = {
 	tabClosedAt?: string;
 	/** Last failed attempt to close the worker tab; retried while the run is terminal and Tern answers. */
 	tabCloseError?: string;
+	/** When this run last entered `idle`; the stall clock. Cleared by `claw_send` (the worker is working again). */
+	idleSince?: string;
+	/** When the supervisor first reported this idle episode as stalled. One report per episode. */
+	stalledAt?: string;
+	/** When this run last entered `awaiting_user`; what the decision notice says "since" from. */
+	awaitingSince?: string;
+	/** Who ended a failed run: a launch step ("launch"), the worker's own report ("worker"), or the supervisor ("stalled"). */
+	failureClass?: "launch" | "worker" | "stalled";
+	/** Bounded supervisor acts, keyed by `<action>:<state>`. Attempts, next due time, budget exhaustion. Applies at most
+	 *  once per run per key, so a fault cannot be acted on in a loop; see .pi/lib/claw/supervisor.ts. */
+	remedies?: Record<string, Remedy>;
+	/** How many times this run was restarted after a launch failure that provably created nothing (0 or 1). */
+	relaunchCount?: number;
+	/** When the supervisor noticed this run's worker tab missing while the worker process was still alive. */
+	tabMissingAt?: string;
 };
+
+/** One bounded supervisor act. `nextAt` is jittered so several runs never retry in lockstep; `exhausted` means the
+ *  budget is spent and the act is reported once instead of retried. */
+export type Remedy = { attempts: number; lastAt: string; nextAt: string; done?: boolean; exhausted?: boolean; note?: string };
 export type ClawEvent = {
 	eid: string; type: "started" | "settled" | "finish"; at: string; runId: string;
 	pid?: number; sessionFile?: string; text?: string; stopReason?: string;
@@ -54,9 +73,31 @@ export type Trigger = {
 	id: string; when: TriggerWhen; action: TriggerAction; enabled: boolean; once: boolean; createdAt: string;
 	nextFireAt?: string; fired: number; lastFiredAt?: string; lastRunId?: string; lastError?: string; retryAt?: string;
 };
-export type InboxKind = "run_started" | "run_idle" | "run_completed" | "run_failed" | "run_needs_user" | "run_lost" | "run_cancelled" | "trigger_fired" | "notify" | "error";
+export type InboxKind =
+	| "run_started" | "run_idle" | "run_completed" | "run_failed" | "run_needs_user" | "run_lost" | "run_cancelled"
+	| "trigger_fired" | "notify" | "error"
+	/** Supervisor notices. `run_stalled` names what a stuck run needs and since when; `run_tab_orphan` reports a worker
+	 *  tab the daemon could not close; `run_recovered` records a bounded automatic recovery. */
+	| "run_stalled" | "run_tab_orphan" | "run_recovered"
+	/** One collapsed digest per window (see .pi/lib/claw/supervisor.ts) and an all-clear heartbeat, so silence is health. */
+	| "claw_digest" | "claw_heartbeat";
 /** `id` is the stable delivery identity: the dedup key when one exists, otherwise a generated id. It is what the receiver records in its transcript. */
 export type InboxItem = { id: string; at: string; key?: string; kind: InboxKind; runId?: string; triggerId?: string; text: string };
+/** A low-severity notice held for the next digest. Delivered only inside a `claw_digest` inbox item, so per-event
+ *  chatter never wakes the orchestrator one item at a time. Same dedupe-on-key contract as InboxItem. */
+export type Notice = { id: string; at: string; key?: string; kind: InboxKind; runId?: string; text: string };
+/** Supervisor bookkeeping that must survive a daemon restart: the digest cursor, the last digest/heartbeat, and counters. */
+export type SupervisorState = {
+	noticesOffset: number;
+	lastDigestAt?: string;
+	lastHeartbeatAt?: string;
+	digests: number;
+	notices: number;
+	lastTickAt?: string;
+	ticks: number;
+	/** Runs the supervisor reported as stalled, orphaned or recovered since the store was created. */
+	anomalies: number;
+};
 export type Request =
 	| { id: string; kind: "spawn"; createdAt: string; expiresAt: string; input: SpawnInput }
 	| { id: string; kind: "send"; createdAt: string; runId: string; text: string }
@@ -116,6 +157,8 @@ export class ClawStore {
 	readonly controlPath: string;
 	readonly lockPath: string;
 	readonly logPath: string;
+	readonly noticesPath: string;
+	readonly supervisorPath: string;
 
 	constructor(dir: string) {
 		this.dir = dir;
@@ -127,6 +170,8 @@ export class ClawStore {
 		this.controlPath = join(dir, "control.json");
 		this.lockPath = join(dir, "daemon.lock");
 		this.logPath = join(dir, "daemon.log");
+		this.noticesPath = join(dir, "notices.jsonl");
+		this.supervisorPath = join(dir, "supervisor.json");
 		for (const d of [this.runsDir, this.triggersDir, this.requestsDir, this.responsesDir]) mkdirSync(d, { recursive: true });
 	}
 	static forWorkspace(workspace: string): ClawStore { return new ClawStore(join(workspace, ".swarm", "claw")); }
@@ -173,16 +218,29 @@ export class ClawStore {
 		appendFileSync(this.inboxPath, `${JSON.stringify({ id, at: new Date().toISOString(), ...item })}\n`);
 	}
 	readInbox(offset: number) { return readLines<InboxItem>(this.inboxPath, offset); }
+	/** Low-severity notices, folded into the next digest. Durable and append-only like the inbox; deduped on key. */
+	appendNotice(item: Omit<Notice, "at" | "id">): void {
+		if (item.key && this.readNotices(0).items.some((i) => i.key === item.key)) return;
+		const id = item.key ?? this.newId("evt");
+		appendFileSync(this.noticesPath, `${JSON.stringify({ id, at: new Date().toISOString(), ...item })}\n`);
+	}
+	readNotices(offset: number) { return readLines<Notice>(this.noticesPath, offset); }
+	readSupervisor(): SupervisorState {
+		return readJson<SupervisorState>(this.supervisorPath) ?? { noticesOffset: 0, digests: 0, notices: 0, ticks: 0, anomalies: 0 };
+	}
+	writeSupervisor(state: SupervisorState): void { writeJson(this.supervisorPath, state); }
 	/** Owner = the Pi session that drives the inbox; only that session delivers inbox items. */
 	readOrchestrator(): OrchestratorState { return readJson<OrchestratorState>(join(this.dir, "orchestrator.json")) ?? { offset: 0 }; }
 	writeOrchestrator(state: OrchestratorState): void { writeJson(join(this.dir, "orchestrator.json"), state); }
 
 	/** Absent control file means on. `pane` is the orchestrator's Tern block (TERN_PANE) recorded by /claw on; worker tabs open in its session. */
-	readControl(): { enabled: boolean; pane?: number } {
-		const c = readJson<{ enabled?: boolean; pane?: number }>(this.controlPath);
-		return { enabled: c?.enabled !== false, pane: Number.isInteger(c?.pane) ? c?.pane : undefined };
+	readControl(): { enabled: boolean; pane?: number; supervise?: Record<string, unknown> } {
+		const c = readJson<{ enabled?: boolean; pane?: number; supervise?: Record<string, unknown> }>(this.controlPath);
+		return { enabled: c?.enabled !== false, pane: Number.isInteger(c?.pane) ? c?.pane : undefined, supervise: c?.supervise };
 	}
 	writeControl(enabled: boolean, pane: number | undefined): void {
-		writeJson(this.controlPath, { enabled, pane, updatedAt: new Date().toISOString() });
+		// Keep the operator's supervisor overrides: /claw on|off rewrites this file and must not drop them.
+		const supervise = readJson<{ supervise?: Record<string, unknown> }>(this.controlPath)?.supervise;
+		writeJson(this.controlPath, { enabled, pane, ...(supervise ? { supervise } : {}), updatedAt: new Date().toISOString() });
 	}
 }

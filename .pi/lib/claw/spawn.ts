@@ -12,6 +12,7 @@ import { writeFileSync } from "node:fs";
 import { basename, isAbsolute, resolve } from "node:path";
 import { HojaRequestError, type HojaClient, type IssueRef, type IssueView, type Resolved } from "./hoja.ts";
 import { clawSession, findRunBlock, launchTab, tabLabel, type TernExec } from "./launcher.ts";
+import { recordAttempt, remedyKey } from "./remedy.ts";
 import { TERMINAL, type ClawStore, type Run, type SpawnInput, type OutboxOp } from "./store.ts";
 
 export const MAX_INTENT_ATTEMPTS = 5;
@@ -106,12 +107,22 @@ const pastDeadline = (run: Run, deps: LaunchDeps) => run.deadline !== undefined 
 export function failRun(run: Run, deps: LaunchDeps, error: string): Run {
 	const { store } = deps;
 	run.status = "failed";
+	// Every failRun caller is a launch step: the supervisor may retry it when it provably created no tab.
+	run.failureClass = "launch";
 	run.error = error.slice(0, 500);
 	run.reconcileAt = undefined;
 	queueComment(run, `Claw: ${run.error}`);
 	store.saveRun(run);
 	store.appendInbox({ kind: "run_failed", runId: run.id, text: `${run.id} failed: ${run.error}`, key: `fail:${run.id}` });
 	return run;
+}
+
+/** Paces a retryable launch step: counts the attempt in the run's remedy ledger and schedules the next try with jitter,
+ *  instead of burning the budget one attempt per one-second tick. */
+function pace(run: Run, deps: LaunchDeps, key: string, budget: number, baseMs: number, capMs: number): { attempts: number; exhausted: boolean } {
+	const step = recordAttempt(run, remedyKey(key, "launch"), now(deps).getTime(), { budget, baseMs, capMs });
+	run.reconcileAt = run.remedies?.[remedyKey(key, "launch")]?.nextAt;
+	return step;
 }
 
 /** Validates, persists the intent, then drives the run forward. Returns the run as it stands after this attempt. */
@@ -160,7 +171,9 @@ async function dispatchCreate(run: Run, deps: LaunchDeps): Promise<Run> {
 	} catch (error) {
 		run.attempts++;
 		run.error = `Hoja: ${(error as Error).message}`.slice(0, 500);
-		if (run.attempts >= MAX_INTENT_ATTEMPTS) return failRun(run, deps, `${run.error}; gave up after ${run.attempts} attempts; not started`);
+		// Backoff with jitter: five transient 5xx must not be spent inside five seconds of ticks.
+		const step = pace(run, deps, "hoja-resolve", MAX_INTENT_ATTEMPTS, 2_000, 30_000);
+		if (step.exhausted) return failRun(run, deps, `${run.error}; gave up after ${step.attempts} attempts; not started`);
 		store.saveRun(run);
 		return run;
 	}
@@ -270,6 +283,7 @@ export async function continueRun(run: Run, deps: LaunchDeps): Promise<Run> {
 			// No tab call was made, so the attempt is safe to repeat.
 			run.attempts++;
 			run.error = `Tern: ${(error as Error).message}`.slice(0, 500);
+			pace(run, deps, "tern-session", MAX_INTENT_ATTEMPTS, 2_000, 30_000);
 			store.saveRun(run);
 			return run;
 		}
@@ -286,7 +300,8 @@ export async function continueRun(run: Run, deps: LaunchDeps): Promise<Run> {
 			store.saveRun(run);
 		} catch (error) {
 			run.status = "failed";
-			run.error = `tab open failed (not retried): ${(error as Error).message}. ${await locateTab(run, tern)}`.slice(0, 500);
+			run.failureClass = "launch";
+			run.error = `tab open failed: ${(error as Error).message}. ${await locateTab(run, tern)} The supervisor retries once, and only if no Tern block carries this run id.`.slice(0, 500);
 			queueComment(run, `Claw could not open the worker tab: ${run.error}`);
 			store.saveRun(run);
 			store.appendInbox({ kind: "run_failed", runId: run.id, text: `${run.id} failed: ${run.error}`, key: `fail:${run.id}` });

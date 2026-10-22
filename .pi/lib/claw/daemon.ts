@@ -6,9 +6,10 @@ import { openSync, rmSync, writeFileSync } from "node:fs";
 import { nextCronTime, validateCron } from "../../../packages/tools/schedule/src/cron.ts";
 import type { LaunchDeps } from "./spawn.ts";
 import { continueRun, failRun, findByKey, queueComment, queueState, runMarker, startRun, opMarker } from "./spawn.ts";
-import { liveBlocks, closeBlock, isBlockGone, sendToBlock, type TernExec } from "./launcher.ts";
+import { liveBlocks, closeBlock, sendToBlock, findRunBlock } from "./launcher.ts";
 import { ClawStore, readJson, TERMINAL, type ClawEvent, type Request, type Response, type Run, type RunStatus, type Trigger, type SpawnInput } from "./store.ts";
 import { validateFinish } from "./child.ts";
+import { CLOSE_ON_END, DEFAULT_SLO, closeRunTab, flushDigest, sloFrom, superviseRun, supervisionPending, type SloConfig } from "./supervisor.ts";
 
 export const TICK_MS = 1000;
 export const IDLE_EXIT_MS = 120_000;
@@ -17,14 +18,14 @@ export const TRIGGER_RETRY_MS = 60_000;
 export const CANCEL_VERIFY_MS = 5_000;
 /** A run still "launching" this long after creation has no worker: it is failed with a reason, never left silent. */
 export const LAUNCH_TIMEOUT_MS = 5 * 60_000;
-/** Worker tabs of these runs are closed by the daemon. `lost` is not listed: its tab state is unknown. */
-export const CLOSE_ON_END: readonly RunStatus[] = ["completed", "cancelled", "failed"];
 
 export type DaemonDeps = LaunchDeps & {
 	now: () => Date;
 	alive: (pid: number) => boolean;
 	signal: (pid: number, sig: "SIGTERM") => void;
 	cancelVerifyMs?: number;
+	/** Supervisor SLO overrides; tests use small bounds, a workspace may tighten them in control.json `supervise`. */
+	slo?: Partial<SloConfig>;
 };
 
 export function pidAlive(pid: number): boolean {
@@ -76,15 +77,7 @@ export function releaseLock(store: ClawStore): void {
 const summary = (r: Run) => ({ id: r.id, label: r.label, status: r.status, phase: r.phase, project: r.project, assignee: r.assignee, identifier: r.hoja?.identifier, block: r.block, pid: r.pid, error: r.error, finish: r.finish });
 export const isActive = (r: Run) => !TERMINAL.includes(r.status) && r.status !== "awaiting_user";
 
-/** Closes a run's worker tab once. A block Tern no longer has is already closed, not an error. Only blocks the daemon
- *  recorded from its own tab launch or run-id lookup ever reach this. */
-export async function closeRunTab(run: Run, tern: TernExec): Promise<void> {
-	if (run.block === undefined || run.tabClosedAt) return;
-	try { await closeBlock(tern, run.block); }
-	catch (error) { if (!isBlockGone(error)) throw error; }
-	run.tabClosedAt = new Date().toISOString();
-	run.tabCloseError = undefined;
-}
+export { closeRunTab };
 
 /** What `claw send` says when a run cannot take input. Always names the next step. */
 export function sendRefusal(run: Run): string {
@@ -112,7 +105,8 @@ export async function handleRequest(req: Request, deps: DaemonDeps): Promise<unk
 			if (!isActive(run) || run.block === undefined) throw new Error(sendRefusal(run));
 			await sendToBlock(tern, run.block, req.text);
 			// An idle worker is working again after input: its next settled turn is a new idle episode and must be announced.
-			if (run.status === "idle") { run.status = "running"; store.saveRun(run); }
+			// The stall clock is reset by the same input, so a human who answers a stalled run extends it deliberately.
+			if (run.status === "idle") { run.status = "running"; run.idleSince = undefined; run.stalledAt = undefined; store.saveRun(run); }
 			return { sent: run.id, reactivated };
 		}
 		case "cancel": {
@@ -198,7 +192,11 @@ export function applyEvent(run: Run, ev: ClawEvent, store: ClawStore): void {
 		run.pid = ev.pid;
 		run.sessionFile = ev.sessionFile;
 		if (!TERMINAL.includes(run.status) && run.status !== "awaiting_user") run.status = "running";
-		store.appendInbox({ kind: "run_started", runId: run.id, text: `${run.label} (${run.hoja?.identifier ?? run.id}) is running`, key });
+		// A started worker is working: its stall clock and stall report belong to the previous episode.
+		run.idleSince = undefined;
+		run.stalledAt = undefined;
+		// Low severity: folded into the next digest, never a wake-up of its own (SLO S4).
+		store.appendNotice({ kind: "run_started", runId: run.id, text: `${run.label} (${run.hoja?.identifier ?? run.id}) is running`, key });
 		return;
 	}
 	if (ev.type === "settled") {
@@ -210,7 +208,9 @@ export function applyEvent(run: Run, ev: ClawEvent, store: ClawStore): void {
 		// A settled turn is not a result: it may be idle, waiting for a permission or a question, or done without a report.
 		// The notice belongs to the transition, so it is keyed by the run and its settle count, not by the event.
 		run.status = "idle";
-		store.appendInbox({ kind: "run_idle", runId: run.id, text: `${run.label} settled a turn without claw_finish (not a completion)`, key: `idle:${run.id}:${run.settles}` });
+		run.idleSince = ev.at ?? new Date().toISOString();
+		run.stalledAt = undefined;
+		store.appendNotice({ kind: "run_idle", runId: run.id, text: `${run.label} settled a turn without claw_finish (not a completion)`, key: `idle:${run.id}:${run.settles}` });
 		return;
 	}
 	// finish
@@ -227,9 +227,12 @@ export function applyEvent(run: Run, ev: ClawEvent, store: ClawStore): void {
 		store.appendInbox({ kind: "run_completed", runId: run.id, text: `${label} completed (In Review, not Done): ${finish.summary}`, key });
 	} else if (finish.outcome === "needs_user") {
 		run.status = "awaiting_user";
-		store.appendInbox({ kind: "run_needs_user", runId: run.id, text: `${label} needs your decision: ${finish.summary}`, key });
+		// The "since" the supervisor repeats, and the tab flag that makes the decision visible in the tab bar.
+		run.awaitingSince = run.finish.at;
+		store.appendInbox({ kind: "run_needs_user", runId: run.id, text: `${label} needs your decision since ${run.finish.at.slice(11, 16)}Z: ${finish.summary}. Answer with claw_send ${run.id} "<decision>" or claw_cancel ${run.id}.`, key });
 	} else {
 		run.status = "failed";
+		run.failureClass = "worker";
 		store.appendInbox({ kind: "run_failed", runId: run.id, text: `${label} failed: ${finish.summary}`, key });
 	}
 }
@@ -274,6 +277,22 @@ export async function flushOutbox(run: Run, deps: DaemonDeps): Promise<boolean> 
 	return changed;
 }
 
+/** Restarts a run whose launch failed and provably created no tab. Same run, same Hoja issue: no duplicate issue or
+ *  duplicate worker. The next tick's `continueRun` redoes the tab step. */
+async function relaunchLaunch(run: Run, deps: DaemonDeps, reason: string): Promise<void> {
+	deps.store.appendInbox({
+		kind: "run_recovered", runId: run.id, key: `recovered:${run.id}`,
+		text: `${run.hoja?.identifier ?? run.id} recovered: ${reason}. Relaunching the worker tab (same issue, attempt ${(run.relaunchCount ?? 0) + 1}); the earlier failure is not a result.`,
+	});
+	run.relaunchCount = (run.relaunchCount ?? 0) + 1;
+	run.status = "launching";
+	run.phase = "issue_created";
+	run.error = undefined;
+	run.tabCloseError = undefined;
+	run.block = undefined;
+	run.tab = undefined;
+}
+
 export async function reconcileRun(run: Run, deps: DaemonDeps, live: Set<number> | undefined): Promise<void> {
 	const { store } = deps;
 	const before = JSON.stringify(run);
@@ -301,10 +320,16 @@ export async function reconcileRun(run: Run, deps: DaemonDeps, live: Set<number>
 	if (run.status === "launching" && deps.now().getTime() - Date.parse(run.createdAt) > LAUNCH_TIMEOUT_MS) {
 		const unknown = run.phase === "create_dispatched" ? "; the Hoja create outcome was unknown, so a late issue carrying the run marker may exist and needs a manual check" : "";
 		failRun(run, deps, `launch timed out after ${LAUNCH_TIMEOUT_MS / 1000}s in phase ${run.phase} with no worker started event${unknown}`);
+		run.failureClass = "launch";
 	}
-	if (CLOSE_ON_END.includes(run.status) && live !== undefined && run.block !== undefined && !run.tabClosedAt) {
-		await closeRunTab(run, deps.tern).catch((e) => { run.tabCloseError = `tab close failed: ${(e as Error).message}`.slice(0, 300); });
-	}
+	// Self-supervision owns terminal tab close, the idle/stall bound, decision reminders and bounded recovery. It gets
+	// the Tern snapshot even when it is undefined (a failed snapshot must not silently cancel the close).
+	await superviseRun(run, {
+		store, hoja: deps.hoja, tern: deps.tern, workspace: deps.workspace, now: () => deps.now(), alive: deps.alive,
+		slo: deps.slo ?? store.readControl().supervise,
+		noTabCarries: async (runId) => (await findRunBlock(deps.tern, runId)) === undefined,
+		relaunch: (r, reason) => relaunchLaunch(r, deps, reason),
+	}, live);
 	if (run.outbox.some((o) => !o.done)) await flushOutbox(run, deps);
 	if (JSON.stringify(run) !== before) store.saveRun(run);
 }
@@ -362,12 +387,17 @@ export async function tick(deps: DaemonDeps): Promise<{ ternAvailable: boolean }
 	for (const run of store.listRuns()) {
 		await reconcileRun(run, deps, live);
 	}
+	// SLO S4: one digest per window instead of a wake-up per notice, and an all-clear while work is in progress.
+	flushDigest(store, deps.now().getTime(), sloFrom(deps.slo ?? store.readControl().supervise));
 	await fireTriggers(deps, store.readControl().enabled);
 	return { ternAvailable };
 }
 
+/** Work that keeps the daemon alive: runs in flight, triggers, requests, and every obligation the supervisor still
+ *  owes (a scheduled retry, an undelivered digest, an unclosed tab). Without the last group a retry window could end
+ *  with the daemon exiting, which is how a failed tab close used to be forgotten. */
 export function hasWork(store: ClawStore): boolean {
-	return store.listRuns().some(isActive) || store.listTriggers().some((t) => t.enabled) || store.listRequests().length > 0;
+	return store.listRuns().some(isActive) || store.listTriggers().some((t) => t.enabled) || store.listRequests().length > 0 || supervisionPending(store);
 }
 
 export async function runDaemon(deps: DaemonDeps, options: { tickMs?: number; idleExitMs?: number; log?: (line: string) => void; stopSignal?: AbortSignal } = {}): Promise<void> {

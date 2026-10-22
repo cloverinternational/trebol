@@ -163,7 +163,7 @@ describe("claw daemon", () => {
 		let run = store.getRun(run0.id)!;
 		expect(run.status).toBe("idle");
 		expect(fh.calls.states).toEqual([]);
-		expect(store.readInbox(0).items.map((i) => i.kind)).toContain("run_idle");
+		expect(store.readNotices(0).items.map((i) => i.kind)).toContain("run_idle");
 
 		worker(run, "finish", { outcome: "completed", summary: "Build fixed", evidence: ["npm test: 12 passed"] });
 		await tick(deps);
@@ -277,7 +277,8 @@ describe("claw daemon", () => {
 		await tick(deps);
 		const [run] = runs();
 		expect(run.status).toBe("failed");
-		expect(run.error).toContain("tab open failed (not retried)");
+		expect(run.error).toContain("tab open failed");
+		expect(run.error).toContain("The supervisor retries once");
 		expect(run.error).toContain("No Tern block carries this run id");
 		tern.state.failNew = false;
 		await tick(deps);

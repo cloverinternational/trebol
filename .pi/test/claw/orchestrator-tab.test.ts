@@ -44,7 +44,7 @@ describe("claw run events after a finish", () => {
 			const run: Run = { id: "run-ev2", label: "w", task: "t", cwd: dir, status: "running", phase: "tab_open", createdAt: "", updatedAt: "", project: "p", eventsOffset: 0, settles: 0, attempts: 0, outbox: [], seen: [] };
 			applyEvent(run, { eid: "s2", type: "settled", at: "", runId: run.id, text: "waiting" }, store);
 			expect(run.status).toBe("idle");
-			expect(store.readInbox(0).items.map((i) => i.kind)).toEqual(["run_idle"]);
+			expect(store.readNotices(0).items.map((i) => i.kind)).toEqual(["run_idle"]);
 		} finally { rmSync(dir, { recursive: true, force: true }); }
 	});
 });

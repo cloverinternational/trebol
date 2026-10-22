@@ -4,8 +4,13 @@ Release metadata is kept in `package.json`, `update-manifest.json`, and this fil
 
 ## [Unreleased]
 
+### Added
+
+- Claw supervises itself: written SLOs the daemon enforces, so check-ups no longer need a human prompt. Every run is bounded to a terminal state (launch 300 s, idle stall report 600 s, supervisor fail 3600 s), every terminal run's worker tab is closed with jittered retries and one `run_tab_orphan` report when it cannot be, each act happens at most once per run per state inside a budget, low-severity notices collapse into one `claw_digest` per 5 minutes plus a heartbeat while workers run, a `needs_user` decision flags its own tab and repeats in bounded digests, and a launch failure that provably created no tab is relaunched once on the same Hoja issue. See `docs/claw/slo-2026-10-22.md` and `tools/claw/metrics.mjs`.
+
 ### Fixed
 
+- Claw: a terminal run's worker tab is no longer left open when the Tern snapshot fails. `reconcileRun` gated the close on `live !== undefined`, so an unresponsive Tern skipped it with no retry, no report and no inbox kind; the close now runs regardless, retries with backoff, and reports an orphan once. `lost` runs are closed too.
 - Claw: sending input to an idle worker re-arms the idle notice for its next settled turn, and `status` reports `since` for runs awaiting the user.
 - Tern runner no longer crashes at startup on fresh checkouts: `prepare` now builds `packages/tools/taskmanage/dist` (imported by `.pi/lib/tern/task-view.ts`), and `doctor` checks for it.
 - Tern ask dialog: question tabs and option rows are tappable. A tap on a single-choice row answers and advances like a digit key, multi-choice rows toggle, double-tap still activates, and the narrow (<60 column) layout keeps the same tappable rows.
