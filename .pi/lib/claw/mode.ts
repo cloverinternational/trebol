@@ -13,7 +13,12 @@ export const CLAW_EXCLUDED_TOOLS: readonly string[] = [
 
 /** Orchestrator-only tools. Pi activates registered tools by default, so these are removed from the active set while
  *  Claw is off, and are never captured as the prior set. */
-export const CLAW_ORCHESTRATOR_TOOLS: readonly string[] = ["claw_spawn", "claw_list", "claw_read", "claw_send", "claw_cancel", "claw_trigger"];
+export const CLAW_ORCHESTRATOR_TOOLS: readonly string[] = [
+	"claw_spawn", "claw_list", "claw_read", "claw_send", "claw_cancel", "claw_trigger",
+	// Keep-open and resume act on other runs' tabs, so they are orchestrator tools: hidden while Claw is off and added
+	// with the rest when it is on.
+	"claw_set_keep", "claw_close", "claw_resume",
+];
 
 export type ClawModeState = { on: boolean; savedTools?: string[] };
 export type ClawAgentRoute = (input: Record<string, unknown>, ctx: unknown) => Promise<unknown>;

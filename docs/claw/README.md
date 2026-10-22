@@ -4,7 +4,8 @@ Orchestrator in one Pi session; each worker is a visible Tern tab running pi on 
 Code: `.pi/lib/claw/` (store, spawn lifecycle, daemon, Hoja client, Tern launcher, worker helpers),
 `extensions/claw/` (orchestrator tools + `/claw`; worker gate + `claw_finish` when `PI_CLAW_RUN` is set).
 Tests: `.pi/test/claw/claw.test.ts` (lifecycle, daemon, Hoja, Tern, worker) and
-`.pi/test/claw/clarification.test.ts` (worker-local questions).
+`.pi/test/claw/clarification.test.ts` (worker-local questions), `.pi/test/claw/keep-open-resume.test.ts` (keep-open and
+resume, including the goal generation a resume restores).
 
 ## Commands and tools
 
@@ -15,6 +16,9 @@ Tests: `.pi/test/claw/claw.test.ts` (lifecycle, daemon, Hoja, Tern, worker) and
 - Per-chat mode: `/claw on|off` persists `claw-mode` in the session transcript; `/reload`, resume and restart restore the chat's own mode (routing and inbox ownership only, no daemon start, tab rename or store change). A new chat starts off. See `docs/claw/reload-persistence-2026-10-21.md`.
 - `/claw status` — control state, daemon pid, run counts, pending Hoja syncs, triggers.
 - `claw_spawn`, `claw_list`, `claw_read`, `claw_send`, `claw_cancel`, `claw_trigger` (add|list|remove).
+- `claw_set_keep {run_id, keep}`, `claw_close {run_id}`, `claw_resume {run_id}` — keep a finished run's tab open,
+  release or close it, and relaunch a worker into the run's recorded session. See
+  [Keep open and resume](#keep-open-and-resume-2026-10-22).
 - Worker only: `claw_finish {outcome: completed|failed|needs_user, summary, evidence[]}` (clears the completion goal
   first); `claw_goal {action: status|widen, criteria?}` reads or widens the goal. `completed` needs evidence.
 
@@ -34,6 +38,9 @@ Tests: `.pi/test/claw/claw.test.ts` (lifecycle, daemon, Hoja, Tern, worker) and
 | cancelled | stopped by `claw_cancel` |
 
 Hoja Done is never set automatically. `agent_settled` is never treated as success.
+Every terminal run's tab is closed on the terminal tick **unless** the run was spawned with `keepOpen`
+(see [Keep open and resume](#keep-open-and-resume-2026-10-22)); a run whose tab is gone can be brought back with
+`claw_resume` on its recorded session.
 
 ## Extension loading for workers (duplicate registration)
 
@@ -73,10 +80,13 @@ continuing on NOT_MET; nothing in Claw limits the number of turns.
   host at `before_agent_start`, in the worker's own process. Pi gives every extension its own API object *and* its own
   module instance (measured), so the host is published on a process-global symbol keyed by session id
   (`Symbol.for("pi-swarm-goal-hosts")`), not in module state.
-- **Idempotent, restart-safe.** Establishment is keyed by the run's source (`claw:<runId>`). A resumed session restores
-  the persisted goal from its own transcript and the worker leaves it alone; a goal that already ended for that source is
-  never re-armed, and a daemon restart reads `run.goal` back from the run record without duplicating anything. Ending a
-  goal removes its spec file, so nothing can re-establish it after the fact.
+- **Idempotent, restart-safe.** Establishment is keyed by the run's generation source (`claw:<runId>`, then
+  `claw:<runId>:g<n>` after a resume). A worker restart inside one generation restores the persisted goal from its own
+  transcript and leaves it alone; a goal that already ended for that source is never re-armed by a restart, and a daemon
+  restart reads `run.goal` back from the run record without duplicating anything. Ending a goal removes its spec file, so
+  nothing can re-establish that generation after the fact. A **deliberate** `claw_resume` is the one way a goal is armed
+  again: the daemon writes the spec for the next generation (`rearmGoal`, once per resume) before the tab opens — see
+  [Keep open and resume](#keep-open-and-resume-2026-10-22).
 - **Semantic brakes, each exactly once.** MET, IMPOSSIBLE, `claw_finish`, cancellation, the worker's own question
   (`awaiting_decision`) and any terminal run state. `claw_finish` clears the goal *before* recording the report, so the
   settle that follows that turn performs **zero** further judge calls (the measured zombie-loop defect). The daemon ends
@@ -99,6 +109,80 @@ Tests: `.pi/test/claw/goal.test.ts` (derivation, recording, the loop, every brak
 `.pi/test/tools/swarm-goal.test.ts` (host API, session lookup, observer), mutation checks in
 `tools/verify/claw-goal-mutations.mjs` (20 guards), live demonstration in `tools/e2e/claw-goal-always.mjs` (real `pi`,
 real extensions, a harmless `/tmp` condition).
+
+## Keep open and resume (2026-10-22)
+
+Two per-run ways to keep working with an agent after its run ends. Both default to **off**: with no option, a terminal
+run's tab is closed on the terminal tick exactly as before (SLO S2). Code: `.pi/lib/claw/resume.ts` (resume + the
+read-only reachability answer), `.pi/lib/claw/supervisor.ts` (the single close point), `.pi/lib/claw/goal.ts`
+(`rearmGoal`), `.pi/lib/claw/launcher.ts` (`--session`), `extensions/claw/extension.ts` (tools + `Agent` schema).
+
+### API
+
+| Surface | Shape |
+| --- | --- |
+| `claw_spawn` | `{task, project, assignee?, label?, cwd?, provider?, model?, keepOpen?: boolean}` |
+| `Agent` (while Claw is on) | same fields, `keepOpen` included in the overlaid schema |
+| `claw_set_keep` | `{run_id, keep: boolean}` — `keep=false` releases it so the next tick closes the tab |
+| `claw_close` | `{run_id}` — close the tab now and release the keep |
+| `claw_resume` | `{run_id}` — relaunch the worker into the run's recorded session |
+
+Every one returns the run summary, which now carries `keepOpen`, `sessionFile`, `resumeCount`, `lastResumeAt` and
+`resumeError`. New request kinds (`keep`, `close`, `resume`) go through the same durable request/response files as the
+rest, so a client timeout cannot leave a resume half-applied.
+
+### Keep open
+
+- **Persisted, not remembered.** `keepOpen` is written on the run (`run.keepOpen`) at spawn, before any side effect. The
+  supervisor is the only thing that closes a worker tab, and `superviseTabClose` returns immediately for a kept run, so
+  neither a daemon restart nor any number of ticks can close it: the decision is read back from the store every tick.
+- **Only the close is skipped.** Events, the goal, the outbox and the dead-worker checks keep being reconciled; a kept
+  run is a normal run whose tab stays.
+- **Not supervision work.** `supervisionPending` ignores a kept tab, so the daemon may idle-exit while a human keeps
+  using it; the next Claw call starts a daemon that reads the same record.
+- **Release.** `claw_close` closes now and releases; `claw_set_keep keep=false` releases so the next tick closes. Both
+  clear an exhausted `tab-close` remedy, otherwise a budget spent by an earlier failed close would silently block it.
+- **Visible.** `claw_list` rows gain `keepOpen`, `resumable` and `reachability` (why not); `/claw status` gains
+  `keptOpen[]` and `resumable[]`; `claw_read` returns the raw run record.
+
+### Resume
+
+`claw_resume <run_id>` relaunches the run's worker tab on the session file the worker recorded in its `started` event.
+Same run, same Hoja issue, same conversation: no second issue, no duplicate run, and the task prompt is **not** re-sent
+(re-sending it would execute the task twice).
+
+- **pi flags, read from the installed CLI, not guessed.** `pi --help` documents `--session <path|id>  Use specific
+  session file or partial UUID`; the installed `dist/main.js` resolves an argument containing `/` to a path and calls
+  `SessionManager.open(path)`, which appends to that file instead of starting a new session. `workerCommand` therefore
+  renders `pi --name '<label>' --session '<absolute sessionFile>'` and omits the positional prompt for a resume.
+  Everything else (`PI_TERN_UI=0`, `PI_CLAW_RUN`, `PI_CLAW_DIR`, the extension plan, the stderr capture) is unchanged.
+- **Works for** a dead worker (`lost`), a tab already closed (`tabClosedAt`), a completed run, and after a daemon
+  restart: the whole resume is derived from the persisted run record, and it clears the stale `pid` before the tab opens
+  so the supervisor cannot read the fresh tab as a corpse.
+- **Refused, with the next step in the message:** a run whose worker is alive (pid or live block — use `claw_send`),
+  an active run whose worker cannot be *proven* gone (an unreadable Tern snapshot is not evidence of death), a resume
+  already in flight (`resumingAt` within 120 s), a missing `sessionFile` or missing file on disk (relaunch with
+  `claw_spawn` and the same task), a run whose Hoja issue no longer exists, and a run whose resume budget is spent.
+- **Budgeted.** Every failed resume records one attempt in the same remedy ledger as every other bounded act
+  (`resume`, 3 attempts, jittered backoff). The attempt that spends it marks it `exhausted`, records `resumeError`, and
+  appends one `run_budget_spent` with the reason; a further `claw_resume` is refused without touching Tern.
+- **Visible.** A successful resume appends a normal `resumed` run event (the same kind a worker appends when it
+  continues after a report), so the daemon emits the usual `run_resumed` inbox item; the run's `resumeCount` and
+  `lastResumeAt` are on the record, and a Hoja comment says the tab was resumed.
+- **A failed resume changes nothing else.** The run goes back to its prior status with `resumeError` set; the close,
+  the Hoja outbox and the goal are left exactly as they were.
+
+### Interaction with the always-on goal
+
+| Situation | What happens |
+| --- | --- |
+| A kept-open run reaches a terminal state | The goal ends exactly as it does for any run (`endGoal` + spec withdrawn), and no judge call is owed. Keeping the tab **never** re-arms, extends or pauses a goal: the tab is a conversation a human can still use, not a live loop. |
+| A kept-open run's goal ended while the worker was still alive | Unchanged from v1: the worker keeps its own turn; use `claw_send` or `claw_cancel`. Keep-open only decides whether the tab survives the terminal tick. |
+| `claw_resume` on a run with a goal | The persisted goal is armed again as the **next generation** of the *same* goal (`rearmGoal`): same condition and criteria, one run record, the ended generation appended to `goal.history`, `goal.generations` +1, and exactly one spec written (`runs/<run>.goal.json`) before the tab opens. The daemon marks it `pending`; the worker's own `established` event makes it `active` again in its new process. |
+| Why a new source and not the same one | The goal extension refuses to re-arm a source that already ended (its tombstone). That rule is what stops a *restart* from resurrecting a finished loop; a deliberate resume must therefore be a new owner, `claw:<runId>:g<n>`, recorded on the run so nothing duplicates or forks it. |
+| A resume that fails | The re-arm is rolled back (generation, history, status) and the spec is withdrawn, so a generation that never ran is never recorded as if it had. |
+| A run whose task derived no goal (`unavailable`) | A resume never invents a condition; the run stays `unavailable` and relies on its own `claw_finish` report. |
+
 
 ## Worker-local clarification
 
@@ -192,7 +276,7 @@ evidence and before/after numbers: `docs/claw/slo-2026-10-22.md`. Code: `.pi/lib
 | SLO | Enforced by |
 | --- | --- |
 | Every run reaches a terminal state within a bound, or fails with a real reason | launch bound 300 s; idle stall report at 600 s; supervisor fail at 3600 s (`claw_send` resets the clock) |
-| Every terminal run's tab is closed | close on the terminal tick, 5 jittered retries, one `run_tab_orphan` naming `tern close <block>`; **not** gated on the Tern snapshot; `lost` included |
+| Every terminal run's tab is closed | close on the terminal tick, 5 jittered retries, one `run_tab_orphan` naming `tern close <block>`; **not** gated on the Tern snapshot; `lost` included. A run spawned with `keepOpen` is the explicit exception (S7) |
 | Each act happens at most once per run per state | `remedies["<action>:<state>"]` ledger with attempts, jittered `nextAt`, budget, `exhausted` |
 | Silence means healthy | `run_started`/`run_idle` become notices folded into one `claw_digest` per 300 s; one `claw_heartbeat` per 1800 s while a worker runs |
 | A pending decision is surfaced, not idled on | `awaitingSince`, tab renamed `! <id> decide`, bounded reminders (3 over 30 min each), answer with `claw_send` |

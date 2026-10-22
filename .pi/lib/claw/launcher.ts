@@ -62,7 +62,13 @@ export function tabLabel(raw: string): string {
 }
 
 export type LaunchSpec = {
-	session: number; cwd: string; label: string; runId: string; clawDir: string; prompt: string; provider?: string; model?: string;
+	session: number; cwd: string; label: string; runId: string; clawDir: string;
+	/** The first message. Absent on a resume: the worker reopens its own conversation and waits for input, so the task
+	 *  is never re-executed as a second turn. */
+	prompt?: string;
+	/** Continue this exact session file (`pi --session <path>`), keeping its history. Absent on a fresh launch. */
+	sessionFile?: string;
+	provider?: string; model?: string;
 	/** Identity-aware extension plan; `discovery` (or absent) keeps Pi's own package resolution. */
 	plan?: LaunchPlan;
 	/** File that receives the worker's stderr, so a startup failure names its reason instead of only "lost". */
@@ -86,7 +92,12 @@ export function workerCommand(spec: LaunchSpec): string[] {
 	// Only stderr is captured: pi's TUI needs stdout to stay a terminal.
 	const flags = launchArguments(spec.plan).map((arg) => ` ${shellQuote(arg)}`).join("");
 	const log = spec.logPath ? ` 2> >(tee -a ${shellQuote(spec.logPath)} >&2)` : "";
-	const line = `exec env PI_TERN_UI=0 PI_CLAW_RUN=${shellQuote(spec.runId)} PI_CLAW_DIR=${shellQuote(spec.clawDir)} pi --name ${shellQuote(spec.label)}${spec.provider ? ` --provider ${shellQuote(spec.provider)}` : ""}${spec.model ? ` --model ${shellQuote(spec.model)}` : ""}${flags} ${shellQuote(spec.prompt)}${log}`;
+	// `--session <path>` is pi's "use specific session file" (dist/cli/args.js parses it, dist/main.js resolves an
+	// absolute path to openSessionOrExit -> SessionManager.open), so the worker reopens and appends to that file: the same
+	// conversation, not a fork and not a new session.
+	const resume = spec.sessionFile ? ` --session ${shellQuote(spec.sessionFile)}` : "";
+	const first = spec.prompt === undefined ? "" : ` ${shellQuote(spec.prompt)}`;
+	const line = `exec env PI_TERN_UI=0 PI_CLAW_RUN=${shellQuote(spec.runId)} PI_CLAW_DIR=${shellQuote(spec.clawDir)} pi --name ${shellQuote(spec.label)}${spec.provider ? ` --provider ${shellQuote(spec.provider)}` : ""}${spec.model ? ` --model ${shellQuote(spec.model)}` : ""}${resume}${flags}${first}${log}`;
 	return ["/bin/zsh", "-lic", line];
 }
 

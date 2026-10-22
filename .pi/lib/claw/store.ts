@@ -30,7 +30,7 @@ export type Finish = { outcome: "completed" | "failed" | "needs_user"; summary: 
 export type RunAskState = "open" | "answered" | "cancelled" | "unresolved";
 export type RunAsk = { flowId: string; title?: string; questionIds: string[]; openedAt: string; state: RunAskState; closedAt?: string };
 export type OutboxOp = { id: string; kind: "comment"; body: string; done: boolean } | { id: string; kind: "state"; state: string; done: boolean };
-export type SpawnInput = { task: string; project: string; assignee?: string; label?: string; cwd?: string; provider?: string; model?: string };
+export type SpawnInput = { task: string; project: string; assignee?: string; label?: string; cwd?: string; provider?: string; model?: string; keepOpen?: boolean };
 export type Run = {
 	id: string; label: string; task: string; cwd: string; status: RunStatus; phase: RunPhase;
 	createdAt: string; updatedAt: string; project: string; assignee?: string; provider?: string; model?: string;
@@ -83,6 +83,25 @@ export type Run = {
 	/** The always-on completion goal: derived from the task at spawn, established by the worker after launch, and
 	 *  recorded from the worker's own goal events. It has no cap, deadline or expiry; only semantic brakes end it. */
 	goal?: ClawGoal;
+	/** Kept open by request: the supervisor never closes this tab on a terminal state, across daemon restarts and
+	 *  repeated ticks. Persisted on the run (not in memory) so a restart honours it. Released by claw_close or
+	 *  claw_set_keep keep=false, which then closes on the next tick. Absent (the default) closes exactly as before. */
+	keepOpen?: boolean;
+	/** When this run's current launch or resume attempt started. The launch timeout and the no-started notice measure
+	 *  from here, so resuming an old run does not look like a launch that has been hanging since it was created. */
+	launchStartedAt?: string;
+	/** How many times this run was resumed into its recorded session. A resume is not a new run and never a new issue. */
+	resumeCount?: number;
+	/** When the last successful resume relaunched this run's worker tab. */
+	lastResumeAt?: string;
+	/** Set before a resume's tab call and cleared when it finishes: a second resume while this is fresh is refused. */
+	resumingAt?: string;
+	/** The events offset at the last resume: no event after it means the resumed worker never reached session_start. */
+	resumeFrom?: number;
+	/** Last failed resume, kept apart from `error` so it cannot hide a launch failure. Cleared by the next good resume. */
+	resumeError?: string;
+	/** Reports superseded by a resume, newest last: resuming a completed run keeps what it reported. */
+	finishHistory?: Finish[];
 };
 
 /** One bounded supervisor act. `nextAt` is jittered so several runs never retry in lockstep; `exhausted` means the
@@ -111,6 +130,8 @@ export type InboxKind =
 	/** Supervisor notices. `run_stalled` names what a stuck run needs and since when; `run_tab_orphan` reports a worker
 	 *  tab the daemon could not close; `run_recovered` records a bounded automatic recovery. */
 	| "run_stalled" | "run_tab_orphan" | "run_recovered"
+	/** A human closed a worker tab (`run_tab_closed`) or asked for its run to stay open (`run_kept`). */
+	| "run_tab_closed" | "run_kept"
 	/** A retry budget is spent: the act stopped and the reason is recorded once instead of retrying forever. */
 	| "run_budget_spent"
 	/** One collapsed digest per window (see .pi/lib/claw/supervisor.ts) and an all-clear heartbeat, so silence is health. */
@@ -136,6 +157,12 @@ export type Request =
 	| { id: string; kind: "spawn"; createdAt: string; expiresAt: string; input: SpawnInput }
 	| { id: string; kind: "send"; createdAt: string; runId: string; text: string }
 	| { id: string; kind: "cancel"; createdAt: string; runId: string }
+	/** Close one run's worker tab by hand. Also releases keepOpen, so the supervisor would close it anyway. */
+	| { id: string; kind: "close"; createdAt: string; runId: string }
+	/** Keep this run's worker tab open (keep=true) or release it so the next tick closes it (keep=false). */
+	| { id: string; kind: "keep"; createdAt: string; runId: string; keep: boolean }
+	/** Relaunch this run's worker tab on its recorded session file: same run, same Hoja issue, same conversation. */
+	| { id: string; kind: "resume"; createdAt: string; runId: string }
 	| { id: string; kind: "trigger_add"; createdAt: string; when: TriggerWhen; action: TriggerAction; once: boolean }
 	| { id: string; kind: "trigger_remove"; createdAt: string; triggerId: string }
 	/** Caller gave up waiting. Settles the target request: refused (not started) if still undispatched, else reports its outcome. */

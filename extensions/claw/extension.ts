@@ -37,8 +37,9 @@ export const CLAW_AGENT_PARAMETERS = { type: "object", required: ["task", "proje
 	provider: { type: "string", description: "Pi provider for this worker, for example anthropic. Needs model. Default: pi's configured provider." },
 	model: { type: "string", description: "Pi model for this worker, for example claude-opus-5-5 or provider/id. Default: pi's configured model." },
 	cwd: { type: "string", description: "Working directory for the worker; defaults to this workspace." },
+	keepOpen: { type: "boolean", description: "Keep the worker tab open when the run ends, so the human can keep working in it. Default false (closed on a terminal state); release later with claw_close." },
 } } as const;
-export const CLAW_AGENT_DESCRIPTION = "Start a visible worker tab that runs pi on the task, with a Hoja issue in the project's team. This is the only way to delegate work while Claw is on. Completion is reported to you by the inbox after the worker calls claw_finish.";
+export const CLAW_AGENT_DESCRIPTION = "Start a visible worker tab that runs pi on the task, with a Hoja issue in the project's team. This is the only way to delegate work while Claw is on. Completion is reported to you by the inbox after the worker calls claw_finish. Pass keepOpen for a long task whose conversation a human will keep using: the tab then survives the run's end, and claw_resume brings any finished run back on its own session.";
 
 /** Replaces the Agent tool's advertised description and schema in a provider payload (OpenAI or Anthropic shape). */
 export function overlayClawAgent<T extends { tools?: unknown }>(payload: T): T | undefined {
@@ -269,7 +270,7 @@ export function registerOrchestrator(pi: any, options: OrchestratorOptions = {})
 		setClawMode(true, saved ?? current);
 		const available: string[] = (pi.getAllTools?.() ?? []).map((tool: any) => tool.name);
 		pi.setActiveTools?.(clawRoutedTools(current, available));
-		setClawAgentRoute(async (input: any) => call({ kind: "spawn", input: { task: str(input?.task, "task"), project: str(input?.project, "project"), assignee: input?.assignee, label: input?.label, cwd: input?.cwd, provider: input?.provider, model: input?.model } }));
+		setClawAgentRoute(async (input: any) => call({ kind: "spawn", input: { task: str(input?.task, "task"), project: str(input?.project, "project"), assignee: input?.assignee, label: input?.label, cwd: input?.cwd, provider: input?.provider, model: input?.model, keepOpen: input?.keepOpen === true } }));
 	};
 	const deactivate = () => {
 		if (!clawModeOn()) return;
@@ -297,8 +298,9 @@ export function registerOrchestrator(pi: any, options: OrchestratorOptions = {})
 				label: { type: "string", description: "Tab name; defaults to a short form of the task." }, cwd: { type: "string" },
 				provider: { type: "string", description: "Pi provider for this worker, for example anthropic. Needs model. Default: pi's configured provider." },
 				model: { type: "string", description: "Pi model for this worker, for example claude-opus-5-5 or provider/id. Default: pi's configured model." },
+				keepOpen: { type: "boolean", description: "Keep the worker tab open after the run ends, so the human can keep working in it. Default false; release it with claw_close." },
 			} },
-			execute: async (_id: string, p: any) => text(await call({ kind: "spawn", input: { task: str(p.task, "task"), project: str(p.project, "project"), assignee: p.assignee, label: p.label, cwd: p.cwd, provider: p.provider, model: p.model } })),
+			execute: async (_id: string, p: any) => text(await call({ kind: "spawn", input: { task: str(p.task, "task"), project: str(p.project, "project"), assignee: p.assignee, label: p.label, cwd: p.cwd, provider: p.provider, model: p.model, keepOpen: p.keepOpen === true } })),
 		},
 		{
 			name: "claw_list",
@@ -332,6 +334,30 @@ export function registerOrchestrator(pi: any, options: OrchestratorOptions = {})
 			description: "Stop one run: terminate its worker and close its tab. Records cancelled, never completed.",
 			parameters: { type: "object", required: ["run_id"], additionalProperties: false, properties: { run_id: { type: "string" } } },
 			execute: async (_id: string, p: any) => text(await call({ kind: "cancel", runId: str(p.run_id, "run_id") })),
+		},
+		{
+			name: "claw_resume",
+			label: "Claw resume",
+			description: "Bring one run back so the human can keep working with it: relaunch its worker tab on the session file it recorded, so the agent keeps its history and context. Same run, same Hoja issue, never a second issue or a duplicate run. Works for a dead worker, a closed tab, a completed run and a run whose daemon restarted. Refused with the reason when the run is already alive, its session file is missing, a resume is already in flight, its Hoja issue was deleted, or its resume budget is spent.",
+			parameters: { type: "object", required: ["run_id"], additionalProperties: false, properties: { run_id: { type: "string" } } },
+			execute: async (_id: string, p: any) => text(await call({ kind: "resume", runId: str(p.run_id, "run_id") })),
+		},
+		{
+			name: "claw_close",
+			label: "Claw close",
+			description: "Close one run's worker tab by hand and release keepOpen, so it is not reopened. Use it to hand a kept tab back to the supervisor.",
+			parameters: { type: "object", required: ["run_id"], additionalProperties: false, properties: { run_id: { type: "string" } } },
+			execute: async (_id: string, p: any) => text(await call({ kind: "close", runId: str(p.run_id, "run_id") })),
+		},
+		{
+			name: "claw_set_keep",
+			label: "Claw set keep",
+			description: "Keep a run's worker tab open when the run ends (keep=true), or release it so the supervisor closes it on the next tick (keep=false). Persisted on the run, so it survives a daemon restart.",
+			parameters: { type: "object", required: ["run_id", "keep"], additionalProperties: false, properties: { run_id: { type: "string" }, keep: { type: "boolean" } } },
+			execute: async (_id: string, p: any) => {
+				if (typeof p.keep !== "boolean") throw new Error("keep is required and must be true or false");
+				return text(await call({ kind: "keep", runId: str(p.run_id, "run_id"), keep: p.keep }));
+			},
 		},
 		{
 			name: "claw_trigger",

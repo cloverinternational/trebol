@@ -4,10 +4,34 @@ Release metadata is kept in `package.json`, `update-manifest.json`, and this fil
 
 ## [Unreleased]
 
+### Added
+
+- Claw keep-open and resume (#PR): a run can now outlive its own completion, so a human and the agent can keep working
+  in the same conversation. `claw_spawn` and the routed `Agent` tool take an explicit per-run `keepOpen` (default off),
+  recorded on the run before any side effect, so the supervisor's single close point skips that tab across daemon
+  restarts and every tick while events, the goal and the Hoja outbox keep being reconciled; a kept tab is not
+  supervision work, so it cannot hold the daemon alive. `claw_set_keep {run_id, keep}` releases it and `claw_close
+  {run_id}` closes it now (both clear a spent `tab-close` budget so the release always takes effect). `claw_resume
+  {run_id}` relaunches a worker into the run's **recorded session file** — `pi --name <label> --session <path>`, the flag
+  the installed CLI documents as "use specific session file" and resolves through `SessionManager.open`, appending to
+  that file — with no positional prompt, so the task is never re-executed: same run, same Hoja issue, no second issue or
+  duplicate run, and it works for a dead worker, a closed tab, a completed run and after a daemon restart (the stale pid
+  is cleared first). Resume refuses clearly when the worker is alive, when an active run's worker cannot be *proven*
+  gone, when a resume is already in flight, when the session file is missing or gone, when the Hoja issue was deleted,
+  and when its retry budget is spent (3 attempts in the shared remedy ledger, one `run_budget_spent` with the reason).
+  Status and listing expose `keepOpen`, `resumable` and the reason when not, and a resume emits a normal `resumed` run
+  event. With the always-on goal: keep-open never re-arms, extends or pauses a goal (a terminal run's goal ends exactly
+  once and its spec is withdrawn), while a resume arms the next *generation* of the same goal — same condition, one run
+  record, the ended generation kept in `goal.history`, exactly one spec written before the tab opens, and a new
+  generation source so the goal extension's per-source tombstone (which stops a restart from resurrecting a finished
+  loop) does not silently block a deliberate resume; a failed resume rolls the re-arm back. See
+  `docs/claw/README.md` and `tools/claw/mutation-check.mjs` (14 mutations, all killed).
+
 ### Fixed
 
 - `node_modules` is no longer a tracked symlink. Commit 3746215 (PR #338) committed it as a link to the absolute path `/Users/swarm/Work/Clover/trebol/node_modules`; git stores a symlink as its target string, so every clone and every `git worktree add` materialized a link into one machine's directory — dangling elsewhere, and in its own checkout replacing the real dependency tree with a self-referential link (the Claw daemon died with `Cannot find package 'croner'`; after `npm ci` the missing directory read as `D node_modules`, which the launch gate refused as a modified source checkout). `git rm --cached node_modules` plus a `.gitignore` `node_modules` entry (no trailing slash — `node_modules/` matches directories only, which is how the symlink slipped through) removes and blocks it. Sharing dependencies between worktrees stays possible as an explicit, per-worktree, RELATIVE link via `node tools/repo/link-node-modules.mjs <source-checkout>`; nothing in the tooling or CI depended on the tracked link. `tools/repo/check-tracked-symlinks.mjs` (`npm run check:symlinks`, wired into CI as its own job that needs no install) reads the index and fails on any tracked symlink whose target is absolute or resolves outside the checkout, so the regression cannot recur.
 - OpenCodeReview now speaks the Anthropic protocol to Plexus (`OCR_LLM_PROTOCOL=anthropic`, base URL normalised by `.github/scripts/ocr-llm-endpoint.cjs`), because its OpenAI protocol cannot emit `cache_control` and Plexus drops the field from `system[]` blocks anyway. Every `chat → claude-oauth` review request had re-billed its whole prompt — 3,400 requests and 98.7M uncached tokens in five days — and now caches: 23,188 uncached input tokens became 8,869 cache reads + 14,479 cache writes on the same review. See `docs/audits/plexus-chat-claude-cache-trace.md`.
+
 
 ## [0.7.1] - 2026-10-22
 

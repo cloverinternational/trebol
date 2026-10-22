@@ -14,6 +14,9 @@
  *  S5  A decision is surfaced, not idled on. `awaiting_user` records awaitingSince, flags the worker tab, and reports
  *      what is needed and since when; reminders are bounded by needsUserReminderBudget. The worker-local ask modal is
  *      TREBOL-308's job; this only makes the run visible and bounded.
+ *  S7  A run a human asked to keep stays open. `keepOpen` is persisted on the run, so neither a daemon restart nor a
+ *      repeated tick can close its worker tab; releasing it (claw_close, claw_set_keep keep=false) closes on the next
+ *      tick. A kept run is not supervision work, so it never holds the daemon alive either.
  *  S6  Recoverable faults are recovered. A launch that provably created no tab is retried once (same run, same Hoja
  *      issue); a `create_dispatched` lookup is retried with backoff and never re-sends the create; a failed tab close
  *      is retried. A worker with no `started` event is deliberately not relaunched: it may have executed the task
@@ -111,8 +114,12 @@ export type SuperviseDeps = LaunchDeps & {
 };
 
 /** S2: close the tab, retry with backoff, and report an orphan once the budget is spent. Never gated on the Tern
- *  snapshot: a failed snapshot is exactly the case that used to leave the tab open with no notice. */
+ *  snapshot: a failed snapshot is exactly the case that used to leave the tab open with no notice.
+ *  S7: this is the one place that decides a tab may be closed, so a kept run is honoured for every caller and on every
+ *  tick — including the first tick after a daemon restart, which sees only the persisted record. */
 async function superviseTabClose(run: Run, deps: SuperviseDeps, live: Set<number> | undefined, nowMs: number, slo: SloConfig): Promise<void> {
+	// S7: the human asked for this tab. Closing it is a decision, not a fault to supervise.
+	if (run.keepOpen) return;
 	if (run.block === undefined || run.tabClosedAt) return;
 	const key = remedyKey("tab-close");
 	if (!remedyDue(run, key, nowMs)) return;
@@ -262,6 +269,8 @@ export async function superviseRun(run: Run, deps: SuperviseDeps, live: Set<numb
 	const now = deps.now();
 	const nowMs = now.getTime();
 
+	// S7 is enforced inside superviseTabClose: a kept run's tab is never closed, on any tick and after any restart,
+	// because the choice is on the run record rather than in this process's memory.
 	if (run.block !== undefined && !run.tabClosedAt && (CLOSE_ON_END.includes(run.status) || run.status === "lost")) {
 		await superviseTabClose(run, deps, live, nowMs, slo);
 	}
@@ -271,11 +280,13 @@ export async function superviseRun(run: Run, deps: SuperviseDeps, live: Set<numb
 
 	// S1: a tab that opened but never reported `started` is named once. It is not relaunched: the worker may have run
 	// the task without its claw extension, so a second copy could duplicate side effects.
-	const ageMs = nowMs - Date.parse(run.createdAt);
+	// Measured from the current launch attempt, not from creation: a resumed run is not a launch that has hung since day one.
+	const launchedAt = Date.parse(run.launchStartedAt ?? run.createdAt);
+	const ageMs = nowMs - launchedAt;
 	if ((run.status === "launching" || run.status === "running") && run.phase === "tab_open" && run.block !== undefined && run.pid === undefined && run.settles === 0 && ageMs >= slo.startedMs) {
 		deps.store.appendNotice({
 			kind: "run_stalled", runId: run.id, key: `no-started:${run.id}`,
-			text: `${runName(run)}: tab ${run.block} opened ${minutes(ageMs)}m ago but the worker never reported started (pid unknown); check the tab. The supervisor fails it at ${new Date(Date.parse(run.createdAt) + slo.launchMs).toISOString().slice(11, 16)}Z unless it starts.`,
+			text: `${runName(run)}: tab ${run.block} opened ${minutes(ageMs)}m ago but the worker never reported started (pid unknown); check the tab. The supervisor fails it at ${new Date(launchedAt + slo.launchMs).toISOString().slice(11, 16)}Z unless it starts.`,
 		});
 	}
 	// A running worker whose tab disappeared is reported, never re-attached: pi cannot be moved into a new block.
@@ -353,7 +364,8 @@ export function supervisionPending(store: ClawStore): boolean {
 	if (store.readNotices(state.noticesOffset).items.length > 0) return true;
 	return store.listRuns().some((run) => {
 		if (run.status === "awaiting_user") return run.block !== undefined && redeemable(run, "decision-flag") || redeemable(run, "decision-remind");
-		if (run.block !== undefined && !run.tabClosedAt && (CLOSE_ON_END.includes(run.status) || run.status === "lost")) return redeemable(run, "tab-close");
+		// A kept run's open tab is not an obligation: it must not keep the daemon alive forever.
+		if (!run.keepOpen && run.block !== undefined && !run.tabClosedAt && (CLOSE_ON_END.includes(run.status) || run.status === "lost")) return redeemable(run, "tab-close");
 		if (run.status === "idle") return true;
 		if (run.status === "failed" && run.failureClass === "launch" && run.phase === "issue_created") return (run.relaunchCount ?? 0) < 1 && redeemable(run, "relaunch");
 		return false;
