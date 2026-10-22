@@ -81,7 +81,8 @@ describe("claw daemon noise, stuck runs and tabs", () => {
 	};
 	const settled = (runId: string, eid: string): ClawEvent => ({ eid, type: "settled", at: clock.toISOString(), runId, text: "" });
 	const started = (runId: string, eid: string): ClawEvent => ({ eid, type: "started", at: clock.toISOString(), runId, pid: 77 });
-	const idleNotices = () => store.readInbox(0).items.filter((i) => i.kind === "run_idle");
+	/** Idle notices are low severity: they live in notices.jsonl and reach the inbox folded into a digest (SLO S4). */
+	const idleNotices = () => store.readNotices(0).items.filter((i) => i.kind === "run_idle");
 	const sendReq = (runId: string, text = "continue"): Request => ({ id: `req-send-${seq.n++}`, kind: "send", createdAt: clock.toISOString(), runId, text } as Request);
 
 	describe("1. settled notice fires once per idle transition", () => {

@@ -89,6 +89,11 @@ continuing on NOT_MET; nothing in Claw limits the number of turns.
   inbox notice and never stops the run.
 - **Judge bounds unchanged.** Per settlement the judge still has 8 tool turns and an 8 MiB transcript cap
   (`MAX_VERDICT_TOOL_TURNS`, `MAX_TRANSCRIPT_BYTES` in `.pi/lib/tools/swarm-goal.ts`); the *goal* has no bound.
+- **Supervisor interaction.** The supervisor's bound-to-terminal SLOs (`superviseIdle`: nudge, then fail after
+  `idleFailMs`) apply to `idle` runs. A worker inside an active goal loop does not settle — the settle is turned into
+  the next turn — so the run stays `running` and that bound does not apply to it, which is what "no deadline" means here.
+  When a goal ends (MET, IMPOSSIBLE, a report, a question or a terminal state) the run behaves normally again and the
+  ordinary SLOs resume.
 
 Tests: `.pi/test/claw/goal.test.ts` (derivation, recording, the loop, every brake, restart, near-misses),
 `.pi/test/tools/swarm-goal.test.ts` (host API, session lookup, observer), mutation checks in
@@ -177,6 +182,33 @@ model) remains the deeper manual check for registration-time failures such as a 
 - Triggers fire with a key (`trg@scheduled-time` or `trg@run`); runs and inbox items dedupe on it.
 - Hoja writes go through an outbox with read-back; each comment carries `<!-- claw-op:ID -->` and is skipped if already visible.
 - Inbox (`inbox.jsonl`) is durable; the owning session delivers unread items on start and every 3 s.
+
+## Self-supervision (2026-10-22)
+
+The daemon enforces written SLOs and acts on them, so a human does not have to prompt check-ups. Full detail,
+evidence and before/after numbers: `docs/claw/slo-2026-10-22.md`. Code: `.pi/lib/claw/supervisor.ts`,
+`.pi/lib/claw/remedy.ts`.
+
+| SLO | Enforced by |
+| --- | --- |
+| Every run reaches a terminal state within a bound, or fails with a real reason | launch bound 300 s; idle stall report at 600 s; supervisor fail at 3600 s (`claw_send` resets the clock) |
+| Every terminal run's tab is closed | close on the terminal tick, 5 jittered retries, one `run_tab_orphan` naming `tern close <block>`; **not** gated on the Tern snapshot; `lost` included |
+| Each act happens at most once per run per state | `remedies["<action>:<state>"]` ledger with attempts, jittered `nextAt`, budget, `exhausted` |
+| Silence means healthy | `run_started`/`run_idle` become notices folded into one `claw_digest` per 300 s; one `claw_heartbeat` per 1800 s while a worker runs |
+| A pending decision is surfaced, not idled on | `awaitingSince`, tab renamed `! <id> decide`, bounded reminders (3 over 30 min each), answer with `claw_send` |
+| Recoverable faults are recovered | one relaunch of a launch failure that provably created no tab (same run, same issue); paced Hoja lookups; never a second create |
+
+Store additions: `notices.jsonl` (low-severity notices awaiting a digest), `supervisor.json` (digest cursor, digest and
+heartbeat counters), and per-run `idleSince`, `stalledAt`, `awaitingSince`, `failureClass`, `remedies`,
+`relaunchCount`, `tabMissingAt`. Bounds are overridable per workspace in `control.json` → `supervise` (validated; a bad
+value falls back to the default).
+
+New inbox kinds: `run_stalled`, `run_tab_orphan`, `run_recovered`, `claw_digest`, `claw_heartbeat`.
+
+Operator tooling: `tools/claw/metrics.mjs` (the five supervision metrics for any store),
+`tools/claw/build-fixture-store.mjs` (a store rebuilt from the committed 2026-10-22 fixtures),
+`tools/claw/replay-supervisor.mjs` (runs the real tick loop over it), `tools/claw/mutation-check.mjs` (proves each fix's
+test fails when the fix is reverted).
 
 ## Live E2E (2026-10-21)
 

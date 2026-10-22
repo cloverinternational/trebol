@@ -179,7 +179,8 @@ describe("claw worker-local clarification", () => {
 		const run = store.getRun(run0.id)!;
 		expect(run.status).toBe("idle");
 		expect(run.status).not.toBe("awaiting_decision");
-		const idle = store.readInbox(0).items.find((i) => i.kind === "run_idle")!;
+		// Idle notices are low severity: they live in notices.jsonl and reach the inbox inside a digest (SLO S4).
+		const idle = store.readNotices(0).items.find((i) => i.kind === "run_idle")!;
 		expect(idle.kind).toBe("run_idle");
 		expect(idle.text).toContain("cancelled its own question");
 		expect(idle.text).toContain("not a completion");
