@@ -41,7 +41,7 @@ describe("claw process: repro on recorded event shapes", () => {
 	it("issue 1: repeated settled turns with no finish emit one run_idle per idle episode, not one per settle", () => {
 		const run = runWith(store, { status: "running" });
 		for (let i = 0; i < 4; i++) applyEvent(run, { eid: `s${i}`, type: "settled", at: "", runId: run.id, text: "still going" }, store);
-		expect(store.readInbox(0).items.filter((i) => i.kind === "run_idle")).toHaveLength(1);
+		expect(store.readNotices(0).items.filter((i) => i.kind === "run_idle")).toHaveLength(1);
 	});
 
 	it("issue 1b: a settle after a send (run active again) notifies idle once more", async () => {
@@ -52,7 +52,7 @@ describe("claw process: repro on recorded event shapes", () => {
 		await handleRequest({ id: "req-s", kind: "send", createdAt: "", runId: run.id, text: "continue" }, deps);
 		const again = store.getRun(run.id)!;
 		applyEvent(again, { eid: "b", type: "settled", at: "", runId: run.id, text: "y" }, store);
-		expect(store.readInbox(0).items.filter((i) => i.kind === "run_idle")).toHaveLength(2);
+		expect(store.readNotices(0).items.filter((i) => i.kind === "run_idle")).toHaveLength(2);
 	});
 
 	it("issue 2: a terminal run whose tab is still live gets its tab closed by the reconcile pass", async () => {

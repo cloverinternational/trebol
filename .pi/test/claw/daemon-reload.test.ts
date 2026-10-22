@@ -386,7 +386,9 @@ describe("a daemon stops serving when the code under it changes", () => {
 		expect(fake.signals.map((s) => s.pid)).toEqual([600001]);
 		expect(fake.alive.has(600002)).toBe(true);
 		// The next daemon picks the run up from persisted state: the settle becomes an idle turn, not a lost worker.
-		await tick({ ...deps(), alive: (pid) => pid === 600002 } as DaemonDeps);
+		// The clock is pinned one minute after the settle: the scenario is the restart, and a run idle for a day is now
+		// ended by the self-supervision bound (SLO S1d), which is a different assertion made in supervisor.test.ts.
+		await tick({ ...deps(), now: () => new Date("2026-10-21T10:06:00.000Z"), alive: (pid) => pid === 600002 } as DaemonDeps);
 		const after = store.getRun(run.id)!;
 		expect(after.status).toBe("idle");
 		expect(after.error).toBeUndefined();
