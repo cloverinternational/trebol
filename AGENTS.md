@@ -88,7 +88,7 @@ path, and preserve native tools and unrelated extensions while disabled.
 | `tools/experiments/bootstrap-agent/` | Opt-in bootstrap experiments; `planning-contract.mjs` provides experimental prompt variants and strict plan validation. Private history replays stay in ignored artifacts; planning scores do not prove execution or memory retrieval. |
 | `tools/integration/` | Postgres integration runner and cache dogfood. |
 | `tools/install/` | `doctor.mjs`: global-install health check (`npm run doctor`). |
-| `tools/repo/` | Repository maintenance: `rewrite-imports.mjs` re-targets relative specifiers after moves and has a `--check` mode. |
+| `tools/repo/` | Repository maintenance: `rewrite-imports.mjs` re-targets relative specifiers after moves and has a `--check` mode; `check-tracked-symlinks.mjs` fails on a tracked symlink that escapes the checkout (`npm run check:symlinks`); `link-node-modules.mjs` is the opt-in, per-worktree, relative dependency sharing helper. |
 | `docs/architecture/` | Living design descriptions. |
 | `docs/reference/` | Contracts, inventories, and operational references. |
 | `docs/parity/` | Parity plan, acceptance record, and VHS media. |
@@ -103,6 +103,16 @@ capitalised files are `AGENTS.md`, per-package `README.md`, and skill
 `SKILL.md`/reference files whose names are contractual. `dist/`,
 `node_modules/`, `artifacts/`, `.pi/agent-sessions/`, and `.swarm/` are never
 tracked. Generated files say so in their header and name their generator.
+
+Never track a symlink that points outside its own checkout. Git stores a
+symlink as its target string, so `node_modules -> /abs/path` (tracked by
+3746215, removed here) dangles in every other clone and, in the checkout that
+owns the path, materialises over the real directory and leaves a
+self-referential link — the Claw daemon then dies with `Cannot find package
+'croner'` and the missing directory reads as `D node_modules`, which the launch
+gate reports as a modified source checkout. `.gitignore` cannot fix what is
+already tracked, so `npm run check:symlinks` reads the index in CI and fails on
+any absolute or escaping target.
 
 ## How Pi is composed
 
@@ -506,8 +516,23 @@ npx vitest run .pi/test/context   # one layer, or any path/file
 npm run build -w @pi-swarm/prompt # one package
 npm run doctor                    # global-install health: PATH, dist, deps, models.json, theme
 node tools/repo/rewrite-imports.mjs --check   # every relative specifier resolves
+npm run check:symlinks            # no tracked symlink escapes this checkout
 npm run dogfood                   # build + test
 ```
+
+### Sharing dependencies across worktrees
+
+Each checkout installs its own `node_modules` (`npm ci`). To reuse one install
+across local worktrees, link it explicitly and relatively — never commit a link:
+
+```sh
+node tools/repo/link-node-modules.mjs ../trebol   # this worktree -> ../trebol/node_modules
+npm run check:symlinks                            # proves the link is untracked
+```
+
+The helper refuses an already-real directory and never creates an absolute
+link. `npm ci` writes into the shared directory, so a per-worktree install is
+still the right default whenever `package-lock.json` differs between branches.
 
 ### Installing globally
 

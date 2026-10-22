@@ -12,7 +12,14 @@ artifacts/
 
 # Build output and dependencies
 **/dist/
-**/node_modules/
+
+# Dependencies. The pattern deliberately has NO trailing slash: `node_modules/`
+# matches directories only, which is how an absolute-path symlink named
+# `node_modules` got tracked in 3746215 and broke every checkout. A bare
+# `node_modules` matches the directory, a file, and a symlink at any depth.
+# Never share dependencies by committing a link -- see
+# `node tools/repo/link-node-modules.mjs` for a per-worktree RELATIVE link.
+node_modules
 
 # Pi project-scope package installs (pi install -l)
 .pi/git/
