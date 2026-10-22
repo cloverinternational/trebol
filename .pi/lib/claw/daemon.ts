@@ -111,6 +111,8 @@ export async function handleRequest(req: Request, deps: DaemonDeps): Promise<unk
 			}
 			if (!isActive(run) || run.block === undefined) throw new Error(sendRefusal(run));
 			await sendToBlock(tern, run.block, req.text);
+			// An idle worker is working again after input: its next settled turn is a new idle episode and must be announced.
+			if (run.status === "idle") { run.status = "running"; store.saveRun(run); }
 			return { sent: run.id, reactivated };
 		}
 		case "cancel": {
