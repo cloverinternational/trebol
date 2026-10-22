@@ -4,6 +4,10 @@ Release metadata is kept in `package.json`, `update-manifest.json`, and this fil
 
 ## [Unreleased]
 
+### Fixed
+
+- Tern ask dialog: question tabs and option rows are tappable. A tap on a single-choice row answers and advances like a digit key, multi-choice rows toggle, double-tap still activates, and the narrow (<60 column) layout keeps the same tappable rows.
+
 ## [0.7.0] - 2026-10-21
 
 ### Added
