@@ -28,10 +28,32 @@ Tests: `.pi/test/claw/claw.test.ts` (lifecycle, daemon, Hoja, Tern, worker) and
 | awaiting_user | worker reported `needs_user` |
 | completed | `claw_finish completed` with evidence; Hoja moves to In Review |
 | failed | `claw_finish failed`, launch failure, or completion refused for missing evidence |
+| failed (startup) | worker died before `session_start`; the reason comes from the worker's captured stderr |
 | lost | worker process gone without `claw_finish` |
 | cancelled | stopped by `claw_cancel` |
 
 Hoja Done is never set automatically. `agent_settled` is never treated as success.
+
+## Extension loading for workers (duplicate registration)
+
+Pi resolves package sources and the cwd-local project package by lexical path, so one repository
+registered twice - as a configured package (`~/.pi/agent/settings.json`) and again by the checkout
+the worker starts in (`.pi/settings.json` `packages: [".."]`) - loads every extension twice and pi
+exits with `Tool "X" conflicts with <other copy>` for every tool. A linked worktree has its own
+path, so the two registrations never match.
+
+`.pi/lib/claw/launch-plan.ts` names a repository by real identity (the shared git common dir, or
+the realpath outside git) and, when two sources name the same repository, launches the worker with
+an explicit extension list (`pi -ne -e <file> ... -e builtin:<name>`) built from the kept sources.
+The checkout the worker runs in wins, so a worker tests the branch it was started in; the other
+copy is skipped and named in `launchNote` (`claw_list`, `claw_read`, `claw_status`). Distinct
+repositories keep their own extensions, and nothing changes when there is no duplicate. If a
+source cannot be enumerated as local extension files (npm/git sources, glob filters), the plan
+falls back to `--no-approve`, which suppresses the project-local copy only.
+
+A conflict between two *different* repositories is not deduplicated. Pi reports it, the worker
+dies before `session_start`, and the run is recorded `failed` with that line instead of `lost`.
+Worker stderr is captured to `.swarm/claw/runs/<run>.worker.log` for that reason.
 
 ## Worker-local clarification
 

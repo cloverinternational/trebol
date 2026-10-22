@@ -2,6 +2,7 @@
  *  through a login shell (so LINEAR_TOKEN and the rest of ~/.zshrc reach the worker), and probe liveness. */
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import type { LaunchPlan } from "./launch-plan.ts";
 
 const run = promisify(execFile);
 export type TernExec = (args: string[]) => Promise<string>;
@@ -60,12 +61,32 @@ export function tabLabel(raw: string): string {
 	return name || "claw-worker";
 }
 
-export type LaunchSpec = { session: number; cwd: string; label: string; runId: string; clawDir: string; prompt: string; provider?: string; model?: string };
+export type LaunchSpec = {
+	session: number; cwd: string; label: string; runId: string; clawDir: string; prompt: string; provider?: string; model?: string;
+	/** Identity-aware extension plan; `discovery` (or absent) keeps Pi's own package resolution. */
+	plan?: LaunchPlan;
+	/** File that receives the worker's stderr, so a startup failure names its reason instead of only "lost". */
+	logPath?: string;
+};
+
+/** Pi arguments for a plan. Discovery needs none; an explicit plan replaces Pi's package resolution. */
+export function launchArguments(plan: LaunchPlan | undefined): string[] {
+	if (!plan || plan.mode === "discovery") return [];
+	if (plan.mode === "project-ignored") return ["--no-approve"];
+	return [
+		"--no-extensions",
+		...plan.extensions.flatMap((file) => ["--extension", file]),
+		...plan.builtins.flatMap((name) => ["--extension", `builtin:${name}`]),
+	];
+}
 
 export function workerCommand(spec: LaunchSpec): string[] {
 	// PI_TERN_UI=0 is the documented bypass of the Tern shell dispatch (docs/reference/tern-pi-shell-dispatch.md):
 	// the worker is a plain terminal pi with its normal tools, not the Tern-native preview.
-	const line = `exec env PI_TERN_UI=0 PI_CLAW_RUN=${shellQuote(spec.runId)} PI_CLAW_DIR=${shellQuote(spec.clawDir)} pi --name ${shellQuote(spec.label)}${spec.provider ? ` --provider ${shellQuote(spec.provider)}` : ""}${spec.model ? ` --model ${shellQuote(spec.model)}` : ""} ${shellQuote(spec.prompt)}`;
+	// Only stderr is captured: pi's TUI needs stdout to stay a terminal.
+	const flags = launchArguments(spec.plan).map((arg) => ` ${shellQuote(arg)}`).join("");
+	const log = spec.logPath ? ` 2> >(tee -a ${shellQuote(spec.logPath)} >&2)` : "";
+	const line = `exec env PI_TERN_UI=0 PI_CLAW_RUN=${shellQuote(spec.runId)} PI_CLAW_DIR=${shellQuote(spec.clawDir)} pi --name ${shellQuote(spec.label)}${spec.provider ? ` --provider ${shellQuote(spec.provider)}` : ""}${spec.model ? ` --model ${shellQuote(spec.model)}` : ""}${flags} ${shellQuote(spec.prompt)}${log}`;
 	return ["/bin/zsh", "-lic", line];
 }
 

@@ -828,6 +828,17 @@ with isolated temporary settings, without starting a session or invoking a model
 global npm prefix. This executes extension factories, not a security sandbox;
 it does not certify individual tools or real-user resource filters.
 
+Pi itself compares package sources by lexical path, so a linked worktree of this
+repository (`.pi/settings.json` registers `packages: [".."]`) plus a configured
+registration of the main checkout loads every extension twice and Pi exits on the
+duplicate tool registrations. Claw resolves this before it opens a worker tab:
+`.pi/lib/claw/launch-plan.ts` identifies a repository by its git common dir (or
+realpath outside git), keeps the checkout the worker runs in, and launches that
+worker with an explicit `-ne -e ...` extension plan. Distinct repositories are
+untouched; a conflict between two different repositories is reported as a failed
+run with the worker's captured stderr line instead of "lost".
+Regression tests: `.pi/test/claw/launch-plan.test.ts`, `.pi/test/claw/worker-launch.test.ts`.
+
 ### Flat extension migration (worktree)
 
 Public entrypoints are `extensions/<name>/index.ts`; implementations and private
