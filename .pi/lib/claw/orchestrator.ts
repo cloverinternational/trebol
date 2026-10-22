@@ -1,10 +1,12 @@
 /** Orchestrator-side client: every mutation is a request file the daemon answers. Reads go straight to the store. */
 import { existsSync } from "node:fs";
-import { ClawStore, readJson, TERMINAL, type Request, type RequestBody, type Response, type Run } from "./store.ts";
+import { ClawStore, readJson, TERMINAL, type DaemonLock, type Request, type RequestBody, type Response, type Run } from "./store.ts";
 import { LAUNCH_TIMEOUT_MS, pidAlive, startDaemonProcess } from "./daemon.ts";
+import { compareFingerprint, computeClawFingerprint, needsReplacement, type ClawFingerprint } from "./fingerprint.ts";
+import { DAEMON_MAIN, refreshDaemon, type RefreshOptions, type RefreshOutcome } from "./lifecycle.ts";
 import { runIdFor } from "./spawn.ts";
 
-export const DAEMON_MAIN = new URL("./daemon-main.ts", import.meta.url).pathname;
+export { DAEMON_MAIN };
 export const REQUEST_TIMEOUT_MS = 90_000;
 export const WITHDRAW_WAIT_MS = 5_000;
 
@@ -15,16 +17,25 @@ export type CallOutcome =
 	| { state: "pending"; requestId: string; runId?: string; reason: string };
 
 type Ensure = (store: ClawStore, workspace: string) => number | undefined;
-export type RequestOptions = { timeoutMs?: number; withdrawWaitMs?: number; ensure?: Ensure };
+export type RequestOptions = {
+	timeoutMs?: number; withdrawWaitMs?: number; ensure?: Ensure;
+	/** Code-staleness check performed before the request is queued (default `refreshDaemon`). */
+	refresh?: (store: ClawStore, workspace: string, options?: RefreshOptions) => Promise<RefreshOutcome>;
+};
 
 export function daemonPid(store: ClawStore): number | undefined {
 	const pid = readJson<{ pid: number }>(store.lockPath)?.pid;
 	return pid !== undefined && pidAlive(pid) ? pid : undefined;
 }
 
-export function ensureDaemon(store: ClawStore, workspace: string): number | undefined {
-	const pid = daemonPid(store);
-	if (pid !== undefined) return pid;
+/** The live daemon's pid when it is running the code on disk; otherwise starts one, unless the live one is stale — then
+ *  it must be replaced first (`refreshDaemon`), and starting a second process would only fight for the singleton. */
+export function ensureDaemon(store: ClawStore, workspace: string, fingerprint?: ClawFingerprint): number | undefined {
+	const lock = readJson<DaemonLock>(store.lockPath);
+	if (lock?.pid !== undefined && pidAlive(lock.pid)) {
+		const comparison = compareFingerprint(lock.fingerprint, (fingerprint ?? computeClawFingerprint())?.key);
+		return needsReplacement(comparison) ? undefined : lock.pid;
+	}
 	startDaemonProcess(workspace, store, DAEMON_MAIN);
 	return undefined;
 }
@@ -55,6 +66,18 @@ export async function request(store: ClawStore, workspace: string, body: Request
 	const timeoutMs = options.timeoutMs ?? REQUEST_TIMEOUT_MS;
 	const withdrawWaitMs = options.withdrawWaitMs ?? WITHDRAW_WAIT_MS;
 	const ensure = options.ensure ?? ensureDaemon;
+	// A live daemon that runs older code does not have this request's behaviour, so it is replaced before the request is
+	// queued. Every other case queues immediately: the request file is the caller's only durable handle, and a check
+	// that is not needed must not delay it.
+	const lock = readJson<DaemonLock>(store.lockPath);
+	const staleLive = lock?.pid !== undefined && Number.isInteger(lock.pid) && lock.pid > 1 && pidAlive(lock.pid)
+		&& needsReplacement(compareFingerprint(lock.fingerprint, computeClawFingerprint()?.key));
+	if (staleLive) {
+		const freshness = await (options.refresh ?? refreshDaemon)(store, workspace).catch((error) => ({
+			action: "skipped", state: "unknown", blocked: false, note: `code check failed: ${(error as Error).message}`,
+		} as RefreshOutcome));
+		if (freshness.blocked) throw new Error(freshness.note);
+	}
 	const createdAt = new Date().toISOString();
 	const id = store.newId("req");
 	const req = (body.kind === "spawn"
@@ -83,11 +106,16 @@ export async function request(store: ClawStore, workspace: string, body: Request
 
 export function statusSummary(store: ClawStore) {
 	const runs = store.listRuns();
+	const lock = readJson<DaemonLock>(store.lockPath);
+	const comparison = compareFingerprint(lock?.fingerprint, computeClawFingerprint()?.key);
+	const live = lock?.pid !== undefined && pidAlive(lock.pid);
 	const counts: Record<string, number> = {};
 	for (const r of runs) counts[r.status] = (counts[r.status] ?? 0) + 1;
 	return {
 		enabled: store.readControl().enabled,
-		daemonPid: daemonPid(store) ?? null,
+		daemonPid: live ? lock?.pid : null,
+		/** Whether the running supervisor is the one this code would start. `unknown` means the code could not be read. */
+		daemon: { pid: live ? lock?.pid : null, startedAt: live ? lock?.startedAt : undefined, code: comparison.state, note: comparison.detail },
 		runs: counts,
 		active: runs.filter((r) => !TERMINAL.includes(r.status) && r.status !== "awaiting_user").map((r) => ({ id: r.id, label: r.label, status: r.status, identifier: r.hoja?.identifier, launchNote: r.launchNote })),
 		awaitingDecision: runs.filter((r) => r.ask?.state === "open").map((r) => ({ id: r.id, identifier: r.hoja?.identifier, tab: r.block, questions: r.ask?.questionIds ?? [], openedAt: r.ask?.openedAt })),

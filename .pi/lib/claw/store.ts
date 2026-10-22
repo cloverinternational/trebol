@@ -96,6 +96,9 @@ export type OrchestratorState = {
 	/** Inbox items handed to a session whose persistence is not yet seen in that session's transcript. */
 	inflight?: { ids: string[]; endOffset: number; sentAt: string; session: string };
 };
+/** The daemon singleton lock. `fingerprint` is the code key the daemon was started from (see ./fingerprint.ts); it is
+ *  absent on a lock written before that check existed, which is what makes an old supervisor recognizable. */
+export type DaemonLock = { pid: number; startedAt?: string; heartbeat?: number; fingerprint?: string };
 /** Request without its id/timestamp, distributed over the union so each kind keeps its fields. */
 export type RequestBody = Request extends infer R ? (R extends unknown ? Omit<R, "id" | "createdAt" | "expiresAt"> : never) : never;
 
