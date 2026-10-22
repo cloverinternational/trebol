@@ -2,6 +2,7 @@ import { isHookEnabled, recordHook, registerHook } from "./hook-state.ts";
 import { AnnoyanceNudgeState, formatHookContext, resultText } from "../policy/swarm-annoyance-nudge.ts";
 import {
   SwarmHookPipeline, createSwarmBuiltinPipeline,
+  hasFocusedTask,
   type EnforcementMode, type HookTask, type PlanModeHooks, type PostToolHook, type PreToolHook, type ToolCallEvent,
 } from "./swarm-builtin-hooks.ts";
 import { planExitDetected, simulationReminderMessage } from "../context/swarm-plan-mode.ts";
@@ -9,6 +10,7 @@ import { sleepBlockReason } from "../policy/swarm-sleep-blocker.ts";
 import { STDIN_CONFLICT_HOOK_NAME, StdinConflictHook } from "./swarm-stdin-conflict.ts";
 import { rawPi } from "./swarm-tool-surface.ts";
 import { elideOversizedToolOutput } from "./swarm-toolout.ts";
+import { TaskGateResumeBudget, evaluateTaskGateResume } from "./task-gate-resume.ts";
 
 type Pi = any;
 // Pi hands every extension module its own ExtensionAPI object, so a per-object
@@ -114,8 +116,51 @@ export function registerSwarmBuiltinHooks(pi: Pi, options: SwarmBuiltinHookOptio
   const hooks = (pipeline as any).hooks;
   const postActing = hooks.postActing;
   const preContext = new Map<string, string>();
+  // Bounded auto-continue for a turn that ended on the task-enforcement gate's
+  // own block message. The budget lives on globalThis (via the module) so a
+  // /reload cannot refill it mid-loop.
+  const gateResume = new TaskGateResumeBudget();
   pi.on("session_start", (_event: any, ctx: any) => { sessionOf(ctx); preContext.clear(); });
   pi.on("session_shutdown", () => { preContext.clear(); });
+  // A real user or RPC turn is outside intervention, which legitimately refills
+  // the budget. Continuation custom messages never take this path.
+  pi.on("input", (event: any, ctx: any) => {
+    if (event?.source !== "interactive" && event?.source !== "rpc") return;
+    gateResume.reset(sessionOf(ctx) || "session");
+  });
+  /**
+   * The gate's block is a correction, not a stop reason. When the run is about
+   * to settle and the last tool result is that exact block with no further tool
+   * call, keep the turn alive with a bounded, idempotent instruction that names
+   * the remedy; once the budget is spent, append a visible notice and let Pi
+   * settle instead of looping or hiding the blocker.
+   */
+  pi.on("agent_before_settle", (event: any, ctx: any) => {
+    if (process.env.PI_SWARM_SUBAGENT === "1") return undefined;
+    if (!isHookEnabled("taskmanage")) return undefined;
+    const decision = evaluateTaskGateResume({
+      session: sessionOf(ctx) || "session",
+      messages: event?.context?.contextMessages ?? [],
+      outcome: event?.outcome,
+      alreadyContinuing: event?.continue === true,
+      hasPendingMessages: ctx?.hasPendingMessages?.() === true,
+      taskFocused: hasFocusedTask(hookTasks()),
+      budget: gateResume,
+    });
+    if (decision.action === "none" || !decision.content) return undefined;
+    recordHook(
+      "taskmanage", "agent_before_settle", { hookName: "task-enforcement-hook" }, "executed",
+      `${decision.reason}: ${decision.block?.toolName ?? "tool"} (${decision.used}/${decision.limit})`,
+      decision.content,
+    );
+    const entries = [...(event?.entries ?? []), {
+      type: "custom_message" as const,
+      customType: decision.customType!,
+      content: decision.content,
+      display: decision.action === "exhausted",
+    }];
+    return decision.action === "continue" ? { continue: true, entries } : { entries };
+  });
 
   registerHook(pi, "taskmanage", "before_agent_start", (event: any, ctx: any) => {
     sessionOf(ctx);
