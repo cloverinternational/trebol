@@ -27,9 +27,9 @@ Tests: `.pi/test/claw/claw.test.ts` (lifecycle, daemon, Hoja, Tern, worker) and
 | awaiting_decision | the worker opened its own `ask_user_question` modal in its tab and the turn is suspended until a human answers or cancels there. Active, not a result |
 | awaiting_user | worker reported `needs_user` |
 | completed | `claw_finish completed` with evidence; Hoja moves to In Review |
-| failed | `claw_finish failed`, launch failure, or completion refused for missing evidence |
-| failed (startup) | worker died before `session_start`; the reason comes from the worker's captured stderr |
-| lost | worker process gone without `claw_finish` |
+| failed | `claw_finish failed`, launch failure (gate refusal, tab-open failure, timeout), or completion refused for missing evidence |
+| failed (startup) | worker died before `session_start`; the reason comes from the worker's captured stderr, plus the source checkout it ran from |
+| lost | worker had reported `started` (or a settle) and its process/tab then vanished without `claw_finish` |
 | cancelled | stopped by `claw_cancel` |
 
 Hoja Done is never set automatically. `agent_settled` is never treated as success.
@@ -82,6 +82,42 @@ Details and event shapes: `docs/claw/worker-clarification-2026-10-22.md`.
 
 Cancel maps the Hoja issue to `Canceled` only when the worker pid is gone and its tab is not live (verified). Otherwise the Hoja state is left unchanged and the comment says so. See `docs/claw/acceptance-2026-10-21.md`.
 
+## Launch gate
+
+A worker is a plain `pi` process whose first act is loading the extension source under its `cwd`. Two source hazards
+reach it before any run event can exist; `.pi/lib/claw/preflight.ts` decides both before a tab opens. (Extension
+*duplication* is a different hazard, handled by the launch plan above; both can produce the same `pi` startup exit.)
+
+- **Source load precheck.** The gate reads the `pi.extensions` entry points of the pi package at or above the worker's
+  `cwd`, parses each of them with the TypeScript parser (syntax only, no type check) and follows local relative imports
+  transitively (cap 2 000 files). A failure is reported the way pi reports it — `ParseError: <relative path>:<line>:<col>
+  <diagnostic>` — so a failed run names the file a human has to fix. Cost on this repository: 59 entry points, 324 files,
+  ~0.4 s cold and ~0.2 s warm (parse results are cached by path, mtime and size). A `cwd` with no pi package is **not** a
+  failure: the gate records a warning that it cannot inspect the installed extensions, and launches.
+- **Bounded retry with backoff and jitter.** Only transient failures are retried: parse/syntax errors, missing or
+  renaming files (`ENOENT`, `EBUSY`), and tool/extension conflicts (`already registered`, `conflicts with`). Four
+  attempts (one try plus three retries), delay `200 ms * 2^(n-1)` scaled by a random factor in [0.65, 1.35) and capped
+  at 2 s — ~2.3 s in total on the real repository. The last real error is kept verbatim in `run.error` and the Hoja
+  comment, with the attempt count; the Hoja issue stays `In Progress` and no tab is opened.
+- **Deterministic configuration errors are not retried.** `unknown provider`, `provider is not configured`, invalid API
+  key/credentials, invalid config or `settings.json`, project trust and `EACCES`/`EPERM` fail on the first attempt. An
+  unrecognised message is retried inside the same bounded budget, so a slow write is still rescued and a
+  misconfiguration still surfaces within ~2 s.
+- **Checkout identity.** Run creation records the launch checkout's `HEAD`, branch and a SHA-256 fingerprint of
+  `git diff HEAD` (tracked changes only) in `run.source`. At launch the same checkout is compared with that snapshot and
+  the launch is **refused** — fail-fast, not a copy — when `HEAD` or the branch moved, or when the fingerprint changed
+  (including a second edit of an already-dirty file). The error names the checkout, branch and commit, so the operator
+  sees which tree is dirty or stranded. A checkout already dirty at creation is deliberate state: it is allowed and
+  reported in `launchWarning`. Snapshotting the tree was rejected as the alternative: copying a pi package (node_modules
+  included) is expensive and is not the tree the orchestrator verified.
+- `claw_read` reports `source`, `launchAttempts` and `launchWarning`, so a gate refusal stays diagnosable afterwards.
+- A run that dies **before writing any event** is `failed (startup)` by the daemon with the line from its captured
+  stderr (`.swarm/claw/runs/<run>.worker.log`), and now also names the source checkout it was launched from, so a
+  `ParseError` or a `Tool "X" conflicts with` line and the tree that produced it are in the same message.
+
+The gate is a parse check, not a full load: `npm run check:install` (isolated `DefaultResourceLoader`, no session, no
+model) remains the deeper manual check for registration-time failures such as a duplicate tool.
+
 ## Durability
 
 - One daemon per workspace (`.swarm/claw/daemon.lock`, pid-checked; a dead owner is reclaimed). Started detached via
@@ -90,6 +126,7 @@ Cancel maps the Hoja issue to `Canceled` only when the worker pid is gone and it
 - Single writer: only the daemon writes `runs/` and `triggers/`. Clients write `requests/`; the daemon writes `responses/`.
   A response file marks a request served, so replays are no-ops.
 - Launch phases `intent -> issue_created -> tab_opening -> tab_open` are persisted before side effects.
+  The launch gate runs in `issue_created`, before a tab exists, so a retry there can never create a second tab.
   Restart reconciles `intent` by Hoja marker (`<!-- claw-run:ID -->`) before creating an issue. `tab_opening` is ambiguous
   and is reported failed, never retried.
 - Triggers fire with a key (`trg@scheduled-time` or `trg@run`); runs and inbox items dedupe on it.
@@ -143,6 +180,13 @@ See `docs/claw/e2e-evidence-2026-10-21.md` for run, Hoja, trigger and session ID
 - Inbox delivery is at-least-once in the crash window after persistence, and can drop an item in the dispatch-to-persist window. Exactly-once is not claimed.
 - A timed-out `claw_spawn` may still start a run; check `claw_list` before retrying.
 - Worker depth 1 is enforced by a `tool_call` block list (`WORKER_BLOCKED_TOOLS`); normal approval gates are unchanged.
+- The launch gate parses syntax only: a source that parses but fails while registering (a duplicate tool, a throw inside
+  an extension factory) is still discovered by the worker, not by the gate. `npm run check:install` covers that case
+  manually. Parse results are cached per process by path, mtime and size; a file rewritten within the same mtime tick and
+  with an unchanged size is not re-parsed, but its git fingerprint still changes, so the checkout check refuses it.
+- Checkout drift is judged against `git diff HEAD` for **tracked** files; untracked files added between create and launch
+  are not a refusal (a fresh file cannot be mid-write in a way the parse gate misses for an already-registered entry
+  point, and workers create untracked files by design).
 
 ## Verification log (2026-10-21, isolated scratch store)
 
