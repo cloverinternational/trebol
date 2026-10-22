@@ -1,13 +1,14 @@
 import { modeFooter } from "../../.pi/lib/runtime/mode-footer.ts";
 /** /claw v1. Orchestrator session: /claw on|off|status, claw_* tools, and a durable inbox pump that wakes the
- *  owning session. Worker session (PI_CLAW_RUN set): emits started/settled events, the explicit claw_finish
- *  tool, and the depth-1 tool gate. Run and trigger state lives in the daemon (.pi/lib/claw/daemon.ts). */
+ *  owning session. Worker session (PI_CLAW_RUN set): emits started/settled events plus its own ask modal lifecycle and
+ *  resumed turns, registers the explicit claw_finish tool, and applies the depth-1 tool gate. Run and trigger state
+ *  lives in the daemon (.pi/lib/claw/daemon.ts). */
 import { ClawStore, type RequestBody } from "../../.pi/lib/claw/store.ts";
 import { ensureDaemon, request, runListing, statusSummary } from "../../.pi/lib/claw/orchestrator.ts";
 import { pidAlive } from "../../.pi/lib/claw/daemon.ts";
 import { deliveredInboxIds, pumpInbox } from "../../.pi/lib/claw/inbox.ts";
 import { nameClawTab, ownPaneBlock, ternExec, CLAW_TAB, type TernExec } from "../../.pi/lib/claw/launcher.ts";
-import { WORKER_BLOCKED_TOOLS, recordFinish, recordSettled, recordStarted, validateFinish, workerIdentity } from "../../.pi/lib/claw/child.ts";
+import { WORKER_BLOCKED_TOOLS, askFromCompleted, askFromStarted, recordAsk, recordFinish, recordResumed, recordSettled, recordStarted, validateFinish, workerIdentity } from "../../.pi/lib/claw/child.ts";
 import { onAgentSettled } from "../../.pi/lib/runtime/agent-settled.ts";
 import { createSessionWakeup } from "../../.pi/lib/runtime/session-wakeup.ts";
 import { latestSessionModeEntry } from "../../.pi/lib/runtime/session-mode-entry.ts";
@@ -19,6 +20,11 @@ const sessionIdOf = (pi: any, ctx: any): string => String(ctx?.sessionManager?.g
 /** This chat's Claw mode, persisted as a session entry. savedTools is the pre-Claw tool set that /claw off restores. */
 export const CLAW_ENTRY = "claw-mode";
 type ClawModeEntry = { on: boolean; savedTools?: string[] };
+
+/** pi-ask's local lifecycle events (extensions/ask-user/docs/remote-events.md). Read by name, not by import, so the
+ *  worker still starts and still reports `needs_user` when the ask-user extension is not installed. */
+export const PI_ASK_STARTED_EVENT = "@eko24ive/pi-ask:started";
+export const PI_ASK_COMPLETED_EVENT = "@eko24ive/pi-ask:completed";
 
 /** Model-facing schema of the single Agent tool while Claw is on. The legacy schema is restored when it goes off. */
 export const CLAW_AGENT_PARAMETERS = { type: "object", required: ["task", "project"], additionalProperties: false, properties: {
@@ -47,10 +53,27 @@ export function overlayClawAgent<T extends { tools?: unknown }>(payload: T): T |
 
 export function registerWorker(pi: any, identity: { runId: string; clawDir: string }) {
 	const store = new ClawStore(identity.clawDir);
+	/** True between this worker's own claw_finish and its next turn: that next turn resumes the same run in this tab. */
+	let reported = false;
 	pi.on?.("session_start", (_event: unknown, ctx: any) => {
 		recordStarted(store, identity.runId, process.pid, ctx?.sessionManager?.getSessionFile?.() ?? undefined);
 	});
+	pi.on?.("before_agent_start", () => {
+		if (!reported) return;
+		reported = false;
+		recordResumed(store, identity.runId);
+	});
 	onAgentSettled(pi, (event: any) => recordSettled(store, identity.runId, event?.messages));
+	// Worker-local clarification: the modal opens and resolves in this worker's own tab, and the run state follows it.
+	// No answer content is recorded here; only the lifecycle and the question ids.
+	pi.events?.on?.(PI_ASK_STARTED_EVENT, (event: unknown) => {
+		const ask = askFromStarted(event);
+		if (ask) recordAsk(store, identity.runId, ask);
+	});
+	pi.events?.on?.(PI_ASK_COMPLETED_EVENT, (event: unknown) => {
+		const ask = askFromCompleted(event);
+		if (ask) recordAsk(store, identity.runId, ask);
+	});
 	pi.on?.("tool_call", (event: any) => {
 		if (!WORKER_BLOCKED_TOOLS.includes(event?.toolName)) return undefined;
 		return { block: true, reason: `${event.toolName} is blocked for a Claw worker (depth 1). Finish the task yourself and call claw_finish.` };
@@ -58,7 +81,7 @@ export function registerWorker(pi: any, identity: { runId: string; clawDir: stri
 	pi.registerTool({
 		name: "claw_finish",
 		label: "Claw finish",
-		description: "Report this worker's outcome exactly once. outcome: completed (verified, needs evidence), failed, or needs_user. Summary says what was done and what remains; evidence lists commands run, files changed, outputs checked.",
+		description: "Report this worker's outcome exactly once. outcome: completed (verified, needs evidence), failed, or needs_user (only when a decision could not be asked in your own tab: call ask_user_question first, and report needs_user if the modal was unavailable or cancelled). Summary says what was done and what remains; evidence lists commands run, files changed, outputs checked.",
 		parameters: {
 			type: "object", required: ["outcome", "summary"], additionalProperties: false,
 			properties: {
@@ -70,6 +93,7 @@ export function registerWorker(pi: any, identity: { runId: string; clawDir: stri
 		async execute(_id: string, params: { outcome: string; summary: string; evidence?: string[] }) {
 			const finish = validateFinish(params);
 			recordFinish(store, identity.runId, finish);
+			reported = true;
 			return text(`Recorded ${finish.outcome} for ${identity.runId}. The orchestrator will be notified; Hoja Done is never set automatically.`);
 		},
 	});
@@ -196,7 +220,7 @@ export function registerOrchestrator(pi: any, options: OrchestratorOptions = {})
 		{
 			name: "claw_send",
 			label: "Claw send",
-			description: "Type a message into an active worker's tab (not a completion; the worker still has to call claw_finish).",
+			description: "Type a message into an active worker's tab (not a completion; the worker still has to call claw_finish). Refused while the worker has its own question open: the user answers that in the worker's tab, and the same run continues.",
 			parameters: { type: "object", required: ["run_id", "text"], additionalProperties: false, properties: { run_id: { type: "string" }, text: { type: "string" } } },
 			execute: async (_id: string, p: any) => text(await call({ kind: "send", runId: str(p.run_id, "run_id"), text: str(p.text, "text") })),
 		},

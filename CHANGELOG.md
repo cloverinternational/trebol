@@ -4,11 +4,17 @@ Release metadata is kept in `package.json`, `update-manifest.json`, and this fil
 
 ## [Unreleased]
 
+### Added
+
+- Claw: worker-local clarification. A worker asks the user in its own tab through its native `ask_user_question` modal and continues the same run with the answer; the daemon reports the wait as `awaiting_decision` (distinct from the terminal `needs_user`/`awaiting_user`), refuses `claw_send` while a modal is open, never fabricates a question from a summary, and falls back to a truthful `needs_user` report when the modal is cancelled or unavailable. See `docs/claw/worker-clarification-2026-10-22.md`.
+
 ### Fixed
 
 - Claw worker launches survive an extension source that is being edited: a launch gate parses the registered entry points and their local imports before a tab opens, retries transient load/parse/tool-conflict failures with bounded backoff and jitter (the real error is kept), never retries deterministic configuration errors, and refuses a launch when the source checkout moved or gained tracked edits since the run was created. A worker that dies before writing any event is reported failed with a reason instead of a silent `lost`.
 - Claw: sending input to an idle worker re-arms the idle notice for its next settled turn, and `status` reports `since` for runs awaiting the user.
 - Tern runner no longer crashes at startup on fresh checkouts: `prepare` now builds `packages/tools/taskmanage/dist` (imported by `.pi/lib/tern/task-view.ts`), and `doctor` checks for it.
+- Tern ask dialog: question tabs and option rows are tappable. A tap on a single-choice row answers and advances like a digit key, multi-choice rows toggle, double-tap still activates, and the narrow (<60 column) layout keeps the same tappable rows.
+- Claw: a worker can report its outcome with `claw_finish` after its own TaskManage task is completed; unrelated tools and unfinished work stay blocked by task enforcement.
 
 ## [0.7.0] - 2026-10-21
 
