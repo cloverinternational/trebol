@@ -7,6 +7,8 @@ Release metadata is kept in `package.json`, `update-manifest.json`, and this fil
 ### Fixed
 
 - Claw: sending input to an idle worker re-arms the idle notice for its next settled turn, and `status` reports `since` for runs awaiting the user.
+- Tern runner no longer crashes at startup on fresh checkouts: `prepare` now builds `packages/tools/taskmanage/dist` (imported by `.pi/lib/tern/task-view.ts`), and `doctor` checks for it.
+- Tern ask dialog: question tabs and option rows are tappable. A tap on a single-choice row answers and advances like a digit key, multi-choice rows toggle, double-tap still activates, and the narrow (<60 column) layout keeps the same tappable rows.
 - Claw workers start in a worktree of this repository again. Pi compares package sources by lexical path, so a checkout registered in `~/.pi/agent/settings.json` plus the same repository's own `.pi/settings.json` `packages: [".."]` loaded every extension twice and pi exited on `Tool "X" conflicts with ...`. New `.pi/lib/claw/launch-plan.ts` identifies a repository by its git common dir (realpath outside git), keeps the checkout the worker runs in, and launches the worker with an explicit `-ne -e ...` extension plan; distinct repositories are untouched and the decision is recorded in `launchNote`. A worker that dies before `session_start` is now `failed` with the reason from its captured stderr (`.swarm/claw/runs/<run>.worker.log`) instead of `lost`.
 
 ## [0.7.0] - 2026-10-21
@@ -23,8 +25,6 @@ Release metadata is kept in `package.json`, `update-manifest.json`, and this fil
 ### Fixed
 
 - Tern browser: `click` navigates and waits for the resulting load, `goto` waits for load, and a dead pane returns an actionable hint instead of a raw `no such pane` error.
-
-
 - Tern groups consecutive tool steps into a turn summary (live view shows active steps; finished runs collapse to done/failed/interrupted) and restores persisted tool calls on reload.
 - Ctrl+B moves the running foreground Bash command to the background.
 - `/goal` verdict judging uses an answer-only prompt (MET / NOT_MET / IMPOSSIBLE).
