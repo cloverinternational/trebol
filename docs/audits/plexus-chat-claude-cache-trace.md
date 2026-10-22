@@ -276,3 +276,33 @@ bodies, one field moved, `cache_creation_input_tokens` flips from 0 to 44,611.
 - Long-run behaviour of the fix under `--concurrency 8` on large PRs. The
   measured arms used one file and concurrency 2; the cached share should rise
   with more calls per review, but that is an inference, not a measurement.
+
+## 8. Outcome after the fix (2026-10-22, live)
+
+Two repositories run this OCR workflow against the same `github-ocr` key, so the
+0% path was never one workflow: `cloverinternational/trebol` and
+`cloverinternational/plataforma` (a third, `plexus-fork`, carries a copy but no
+live traffic was observed). Both were on `OCR_LLM_PROTOCOL=openai`. The same
+change was merged in both (`trebol#345`, `trebol#347`, `plataforma#468`) and both
+repositories had their two variables flipped.
+
+Workflow dispatches on real pull requests, read back from `request_usage`:
+
+| repo | incoming → provider | requests | uncached | cache read | cache write | cost |
+|---|---|---|---|---|---|---|
+| trebol, before | chat → claude-oauth | 105 | 2,181,709 | 0 | 0 | $5.44 |
+| trebol, after | messages → claude-oauth | 154 | **358** | **4,017,111** | 1,271,913 | $1.46 |
+| plataforma, after | messages → claude-oauth | 135 | **330** | **1,966,166** | 610,910 | $1.54 |
+
+The two "after" rows are the same kind of review work that the "before" row
+billed entirely at the uncached rate: ~5.3M prompt tokens for $1.46 instead of
+$5.44 for 2.2M. Uncached input fell from 100% of the prompt to **0.007%**.
+
+Operational note: Plexus caches the `api_keys` row in memory, so the allowlist
+edit above only took effect after `docker restart plexus-green` (≈4 s of
+downtime, verified healthy with `X-Plexus-Slot: green` immediately after). The
+variable flip alone produced `403 Key is not allowed to access model
+'claude-sonnet-5' for messages` until that restart.
+
+`plexus-fork` was left alone; if it starts running reviews it needs the same
+three changes, and its spend will show up on the same key.
