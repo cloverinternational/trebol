@@ -38,6 +38,10 @@ export type Run = {
 	target?: Resolved;
 	/** Next reconcile of an unknown create (backoff). */
 	reconcileAt?: string;
+	/** When the daemon closed this run's worker tab (completed, cancelled or failed). Set once; a closed block is not retried. */
+	tabClosedAt?: string;
+	/** Last failed attempt to close the worker tab; retried while the run is terminal and Tern answers. */
+	tabCloseError?: string;
 };
 export type ClawEvent = {
 	eid: string; type: "started" | "settled" | "finish"; at: string; runId: string;

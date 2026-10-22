@@ -101,3 +101,6 @@ export async function sendToBlock(tern: TernExec, block: number, text: string): 
 }
 
 export async function closeBlock(tern: TernExec, block: number): Promise<void> { await tern(["close", String(block), "--json"]); }
+
+/** Tern's answer when the block is already gone. The tab is closed, so this is not a failure. */
+export const isBlockGone = (error: unknown): boolean => /no block/i.test((error as Error | undefined)?.message ?? "");

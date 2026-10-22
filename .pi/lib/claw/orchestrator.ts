@@ -1,7 +1,7 @@
 /** Orchestrator-side client: every mutation is a request file the daemon answers. Reads go straight to the store. */
 import { existsSync } from "node:fs";
-import { ClawStore, readJson, TERMINAL, type Request, type RequestBody, type Response } from "./store.ts";
-import { pidAlive, startDaemonProcess } from "./daemon.ts";
+import { ClawStore, readJson, TERMINAL, type Request, type RequestBody, type Response, type Run } from "./store.ts";
+import { LAUNCH_TIMEOUT_MS, pidAlive, startDaemonProcess } from "./daemon.ts";
 import { runIdFor } from "./spawn.ts";
 
 export const DAEMON_MAIN = new URL("./daemon-main.ts", import.meta.url).pathname;
@@ -90,11 +90,20 @@ export function statusSummary(store: ClawStore) {
 		daemonPid: daemonPid(store) ?? null,
 		runs: counts,
 		active: runs.filter((r) => !TERMINAL.includes(r.status) && r.status !== "awaiting_user").map((r) => ({ id: r.id, label: r.label, status: r.status, identifier: r.hoja?.identifier })),
-		awaitingUser: runs.filter((r) => r.status === "awaiting_user").map((r) => ({ id: r.id, summary: r.finish?.summary })),
+		awaitingUser: runs.filter((r) => r.status === "awaiting_user").map((r) => ({ id: r.id, summary: r.finish?.summary, since: r.finish?.at })),
 		unresolvedCreates: runs.filter((r) => r.phase === "create_dispatched" && !TERMINAL.includes(r.status)).map((r) => ({ id: r.id, error: r.error })),
 		hojaSyncPending: runs.reduce((n, r) => n + r.outbox.filter((o) => !o.done).length, 0),
 		triggers: store.listTriggers().map((t) => ({ id: t.id, enabled: t.enabled, next: t.nextFireAt, fired: t.fired, lastError: t.lastError })),
 		unreadInbox: store.readInbox(store.readOrchestrator().offset).items.length,
 		logExists: existsSync(store.logPath),
 	};
+}
+
+/** Run rows for `claw list`. `ageSeconds` is time since creation; a launching run also shows seconds left before it times out. */
+export function runListing(runs: Run[], nowMs: number) {
+	return runs.map((r) => {
+		const ageSeconds = Math.max(0, Math.round((nowMs - Date.parse(r.createdAt)) / 1000));
+		const launchTimeoutInSeconds = r.status === "launching" ? Math.max(0, Math.round(LAUNCH_TIMEOUT_MS / 1000) - ageSeconds) : undefined;
+		return { id: r.id, label: r.label, status: r.status, phase: r.phase, identifier: r.hoja?.identifier, ageSeconds, launchTimeoutInSeconds, error: r.error };
+	});
 }
