@@ -4,6 +4,10 @@ Release metadata is kept in `package.json`, `update-manifest.json`, and this fil
 
 ## [Unreleased]
 
+### Fixed
+
+- Claw: sending input to an idle worker re-arms the idle notice for its next settled turn, and `status` reports `since` for runs awaiting the user.
+
 ## [0.7.0] - 2026-10-21
 
 ### Added
