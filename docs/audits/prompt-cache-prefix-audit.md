@@ -13,7 +13,10 @@ Where the gateway address came from, and which slot answered (2026-10-22):
 
 - `vault/infrastructure/hosts.yml:408-419` **does** carry `plexus_vps` with
   `tailscale_ip: 100.121.114.16` and `tailscale_hostname: clover-plexus`, so the
-  address is corroborated by the inventory rather than assumed.
+  address is corroborated by the inventory rather than assumed. The inventory is
+  authoritative here; an earlier note that the file lacked a Plexus entry was
+  wrong. (The same file also defines `clover_swarmtag_vps`,
+  45.32.173.181 / 100.78.17.45, which is not this gateway.)
 - Independently confirmed: `tailscale status` maps `100.121.114.16` to
   `clover-plexus`; `ssh luis@100.121.114.16 hostname` returns `clover-plexus` and
   `hostname -I` lists `100.121.114.16`; the Pi client config
@@ -178,9 +181,12 @@ $0.25/M), 30-day month scaled from the 3-day window.
 - Which client sends the 2,823 `chat → claude-oauth` requests. Source IP
   100.98.35.125 is not a current Tailscale node, and the rows carry no
   attribution. It is not Pi's default Claude route (that path is at 97.7%).
-  A `clover-hub-api` style service that is *up but unrouted* would look like
-  this from the database, so the caller has to be identified from its own config
-  before this path is fixed.
+  The same trap exists elsewhere in this estate: on the API VPS a compose-managed
+  `clover-hub-api` duplicate can sit idle while traefik routes
+  `api.clover4.app` to the blue slot. Before concluding anything about a partial
+  capture gap, confirm which container actually serves the route. On Plexus this
+  was checked (section 0): the live slot is green and every answered request is
+  recorded.
 - Whether Plexus drops `cache_control` that a client *did* send, versus the
   client never sending it. Plexus source is not in this repository.
 - Mid-session break attribution per event. Without stored bodies, a break can be
