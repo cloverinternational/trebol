@@ -13,6 +13,7 @@ import { basename, isAbsolute, resolve } from "node:path";
 import { HojaRequestError, type HojaClient, type IssueRef, type IssueView, type Resolved } from "./hoja.ts";
 import { clawSession, findRunBlock, launchTab, tabLabel, type TernExec } from "./launcher.ts";
 import { describePlan, type LaunchPlan } from "./launch-plan.ts";
+import { goalSpecOf, startGoal } from "./goal.ts";
 import { TERMINAL, type ClawStore, type Run, type SpawnInput, type OutboxOp } from "./store.ts";
 
 export const MAX_INTENT_ATTEMPTS = 5;
@@ -50,6 +51,19 @@ export function defaultLabel(task: string, cwd: string, workspace: string): stri
 
 export function taskFile(run: Run): string {
 	const h = run.hoja ?? { identifier: "(pending)", teamKey: "?", project: run.project, assignee: run.assignee ?? "?" };
+	// The always-on goal is stated here so the worker can read the exact condition it is judged against. It is never
+	// part of the launch prompt (a positional prompt beginning with "/" is dispatched as a command, not as a turn).
+	const goal = run.goal && run.goal.status !== "unavailable" ? `
+## Completion goal (always on)
+
+This run is judged against this condition until it is met:
+
+${run.goal.condition}
+
+The loop continues while the judge answers NOT_MET; it ends on MET, on IMPOSSIBLE, or when you call \`claw_finish\`
+(which clears the goal first, so no further judge call happens). You cannot remove the goal. If the task needs more than
+the criteria above, widen it with the \`claw_goal\` tool — widening only adds criteria.
+` : "";
 	return `# Claw worker — run ${run.id}
 
 You are a worker started by the Claw orchestrator. Your Hoja issue is **${h.identifier}** (team ${h.teamKey}, project "${h.project}", assignee ${h.assignee}).
@@ -59,7 +73,7 @@ Never move ${h.identifier} to Done; a human decides that.
 ## Task
 
 ${run.task}
-
+${goal}
 ## When you need a decision
 
 You have your own \`ask_user_question\` tool and your own tab, and the user answers in this tab. Do not route a decision
@@ -143,12 +157,15 @@ export async function startRun(input: SpawnInput, deps: LaunchDeps, key: { reque
 	// Validation only: no run and no side effect exists yet if this throws.
 	await deps.hoja.resolve(input.project, input.assignee);
 	const at = now(deps).toISOString();
+	const id = key.requestId ? runIdFor(key.requestId) : deps.store.newId("run");
 	const run: Run = {
-		id: key.requestId ? runIdFor(key.requestId) : deps.store.newId("run"), label, task, cwd, status: "launching", phase: "intent", createdAt: at, updatedAt: at,
+		id, label, task, cwd, status: "launching", phase: "intent", createdAt: at, updatedAt: at,
 		project: input.project.trim(), requestedAssignee: input.assignee ?? "me", provider, model,
 		requestId: key.requestId, fireKey: key.fireKey, trigger: key.trigger, deadline: key.deadline,
 		eventsOffset: 0, settles: 0, attempts: 0, outbox: [], seen: [],
 	};
+	// Always on: the goal is derived and recorded before any side effect, so it is auditable even if the launch fails.
+	run.goal = startGoal(id, task, at);
 	deps.store.saveRun(run);
 	return continueRun(run, deps);
 }
@@ -258,6 +275,9 @@ async function reconcileCreate(run: Run, deps: LaunchDeps): Promise<Run> {
 	run.reconcileAt = undefined;
 	store.saveRun(run);
 	writeFileSync(store.taskPath(run.id), taskFile(run));
+	// The worker establishes this exact condition after launch, through its own process (never through the prompt).
+	const spec = run.goal ? goalSpecOf(run.id, run.goal) : undefined;
+	if (spec) store.writeGoalSpec(spec);
 	return run;
 }
 

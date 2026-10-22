@@ -9,6 +9,7 @@ import { continueRun, failRun, findByKey, queueComment, queueState, runMarker, s
 import { liveBlocks, closeBlock, isBlockGone, sendToBlock, type TernExec } from "./launcher.ts";
 import { ClawStore, readJson, TERMINAL, type ClawEvent, type Request, type Response, type Run, type RunStatus, type Trigger, type SpawnInput } from "./store.ts";
 import { validateFinish } from "./child.ts";
+import { ENDED_GOAL, GOAL_LONG_MS, applyGoalEvent, endGoal, goalRow, type ClawGoalEndReason } from "./goal.ts";
 
 export const TICK_MS = 1000;
 export const IDLE_EXIT_MS = 120_000;
@@ -76,8 +77,31 @@ export function releaseLock(store: ClawStore): void {
 	if (readJson<{ pid: number }>(store.lockPath)?.pid === process.pid) rmSync(store.lockPath, { force: true });
 }
 
-const summary = (r: Run) => ({ id: r.id, label: r.label, status: r.status, phase: r.phase, project: r.project, assignee: r.assignee, identifier: r.hoja?.identifier, block: r.block, pid: r.pid, error: r.error, launchNote: r.launchNote, finish: r.finish });
+const summary = (r: Run) => ({ id: r.id, label: r.label, status: r.status, phase: r.phase, project: r.project, assignee: r.assignee, identifier: r.hoja?.identifier, block: r.block, pid: r.pid, error: r.error, launchNote: r.launchNote, finish: r.finish, goal: goalRow(r.goal, Date.now()) });
 export const isActive = (r: Run) => !TERMINAL.includes(r.status) && r.status !== "awaiting_user";
+
+/** Ends a run's completion goal exactly once and withdraws the spec, so a restarted worker cannot re-establish it. */
+export function endRunGoal(run: Run, store: ClawStore, reason: ClawGoalEndReason, at: string): boolean {
+	if (!endGoal(run, reason, at)) return false;
+	store.removeGoalSpec(run.id);
+	return true;
+}
+
+/** ONE warning when a goal has run unusually long. It is observability only: nothing here caps, expires or stops a run,
+ *  and the loop keeps going while the judge answers NOT_MET. */
+export function warnLongGoal(run: Run, store: ClawStore, nowMs: number): boolean {
+	const goal = run.goal;
+	if (!goal || goal.status !== "active" || goal.warningAt) return false;
+	const since = Date.parse(goal.establishedAt ?? goal.derivedAt);
+	if (!Number.isFinite(since) || nowMs - since < GOAL_LONG_MS) return false;
+	goal.warningAt = new Date(nowMs).toISOString();
+	const minutes = Math.round((nowMs - since) / 60_000);
+	store.appendInbox({
+		kind: "run_goal_long", runId: run.id, key: `goal-long:${run.id}`,
+		text: `${run.hoja?.identifier ?? run.label} has worked toward its completion goal for ${minutes} min: ${goal.turns} continued turn(s), ${goal.judgeCalls} judge call(s), last verdict ${goal.lastVerdict ?? "none yet"}. This is a warning, not a stop: there is no turn cap and no deadline, and the goal continues until MET, IMPOSSIBLE, claw_finish, a decision in its tab, or cancellation.`,
+	});
+	return true;
+}
 
 /** Closes a run's worker tab once. A block Tern no longer has is already closed, not an error. Only blocks the daemon
  *  recorded from its own tab launch or run-id lookup ever reach this. */
@@ -129,6 +153,8 @@ export async function handleRequest(req: Request, deps: DaemonDeps): Promise<unk
 			await closeRunTab(run, tern).catch((e) => { run.error = `tab close failed: ${(e as Error).message}`.slice(0, 300); });
 			const verified = await verifyCancelled(run, deps);
 			run.status = "cancelled";
+			// Cancellation is a semantic brake: the goal ends once and its spec is withdrawn.
+			endRunGoal(run, store, "cancel", deps.now().toISOString());
 			if (!run.hoja) {
 				// No Hoja issue is linked. If the create was unresolved, a late commit may exist: a human must check the marker.
 				if (run.phase === "create_dispatched") run.error = `cancelled while the Hoja create outcome was unknown; a late issue carrying ${runMarker(run.id)} may exist and needs a manual check`;
@@ -222,6 +248,23 @@ export function applyEvent(run: Run, ev: ClawEvent, store: ClawStore): void {
 	if (run.seen.includes(ev.eid)) return;
 	run.seen = [...run.seen, ev.eid].slice(-500);
 	const key = `ev:${ev.eid}`;
+	// The always-on completion goal: the worker reports its own loop. A late event can never reopen an ended goal, and
+	// an event for a terminal run is history, not a new loop.
+	if (ev.type === "goal") {
+		if (!ev.goal || TERMINAL.includes(run.status)) return;
+		if (!applyGoalEvent(run, ev.goal, ev.at)) return;
+		const goal = run.goal;
+		if (!goal || !ENDED_GOAL.includes(goal.status)) return;
+		store.removeGoalSpec(run.id);
+		// The run's own report, cancellation and question already have their own notices; only a verdict is news here.
+		if (goal.endReason === "met" || goal.endReason === "impossible" || goal.endReason === "error") {
+			store.appendInbox({
+				kind: "run_goal_ended", runId: run.id, key: `goal-end:${run.id}`,
+				text: `${run.hoja?.identifier ?? run.label} completion goal ${goal.status}${goal.endReason === "error" ? `: ${goal.reason ?? goal.lastVerdict ?? "judge error"}` : ""} after ${goal.turns} continued turn(s) and ${goal.judgeCalls} judge call(s). The worker keeps its own turn; use claw_cancel if it should stop.`,
+			});
+		}
+		return;
+	}
 	if (ev.type === "started") {
 		run.pid = ev.pid;
 		run.sessionFile = ev.sessionFile;
@@ -258,6 +301,9 @@ export function applyEvent(run: Run, ev: ClawEvent, store: ClawStore): void {
 		const label = run.hoja?.identifier ?? run.id;
 		const where = run.block !== undefined ? `tab ${run.tab ?? "?"} (block ${run.block})` : "its tab";
 		if (ev.ask.state === "opened") {
+			// A question is a semantic brake: the loop ends here (the worker clears it in its own process too), so no
+			// judge call is paid while a human decides.
+			endRunGoal(run, store, "awaiting_decision", ev.at);
 			run.ask = { flowId: ev.ask.flowId, title: ev.ask.title, questionIds: ev.ask.questionIds, openedAt: ev.at, state: "open" };
 			run.status = "awaiting_decision";
 			store.appendInbox({
@@ -294,6 +340,8 @@ export function applyEvent(run: Run, ev: ClawEvent, store: ClawStore): void {
 	}
 	// finish
 	if (TERMINAL.includes(run.status)) return;
+	// The worker clears its own goal before reporting; this covers an older worker and any report that arrives first.
+	endRunGoal(run, store, ev.outcome === "needs_user" ? "needs_user" : "finish", ev.at);
 	// The worker reported a result while its modal still looked open, so no closing ask event was recorded. Never keep
 	// presenting it as waiting for an answer; the report itself is the truth about the turn.
 	if (run.ask?.state === "open") run.ask = { ...run.ask, state: "unresolved", closedAt: ev.at };
@@ -362,6 +410,8 @@ export async function reconcileRun(run: Run, deps: DaemonDeps, live: Set<number>
 	const read = store.readEvents(run.id, run.eventsOffset);
 	for (const ev of read.items) applyEvent(run, ev, store);
 	run.eventsOffset = read.offset;
+	// A terminal run has no live loop. Ending it here (once) also withdraws the spec, so nothing re-establishes it.
+	if (TERMINAL.includes(run.status)) endRunGoal(run, store, "terminal", deps.now().toISOString());
 
 	if (isActive(run)) {
 		let dead = false;
@@ -400,6 +450,8 @@ export async function reconcileRun(run: Run, deps: DaemonDeps, live: Set<number>
 		const captured = startupFailureReason(store.readWorkerLog(run.id));
 		failRun(run, deps, `launch timed out after ${LAUNCH_TIMEOUT_MS / 1000}s in phase ${run.phase} with no worker started event${captured ? `; worker stderr: ${captured}` : ""}${unknown}`);
 	}
+	// Nothing bounds an always-on goal, so a long one is reported once. The run is never stopped by this.
+	if (isActive(run)) warnLongGoal(run, store, deps.now().getTime());
 	if (CLOSE_ON_END.includes(run.status) && live !== undefined && run.block !== undefined && !run.tabClosedAt) {
 		await closeRunTab(run, deps.tern).catch((e) => { run.tabCloseError = `tab close failed: ${(e as Error).message}`.slice(0, 300); });
 	}

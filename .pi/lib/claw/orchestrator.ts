@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { ClawStore, readJson, TERMINAL, type Request, type RequestBody, type Response, type Run } from "./store.ts";
 import { LAUNCH_TIMEOUT_MS, pidAlive, startDaemonProcess } from "./daemon.ts";
 import { runIdFor } from "./spawn.ts";
+import { goalRow } from "./goal.ts";
 
 export const DAEMON_MAIN = new URL("./daemon-main.ts", import.meta.url).pathname;
 export const REQUEST_TIMEOUT_MS = 90_000;
@@ -81,7 +82,7 @@ export async function request(store: ClawStore, workspace: string, body: Request
 	throw new Error(r.error ?? "claw daemon refused the request");
 }
 
-export function statusSummary(store: ClawStore) {
+export function statusSummary(store: ClawStore, nowMs = Date.now()) {
 	const runs = store.listRuns();
 	const counts: Record<string, number> = {};
 	for (const r of runs) counts[r.status] = (counts[r.status] ?? 0) + 1;
@@ -93,6 +94,9 @@ export function statusSummary(store: ClawStore) {
 		awaitingDecision: runs.filter((r) => r.ask?.state === "open").map((r) => ({ id: r.id, identifier: r.hoja?.identifier, tab: r.block, questions: r.ask?.questionIds ?? [], openedAt: r.ask?.openedAt })),
 		awaitingUser: runs.filter((r) => r.status === "awaiting_user").map((r) => ({ id: r.id, summary: r.finish?.summary, since: r.finish?.at })),
 		unresolvedCreates: runs.filter((r) => r.phase === "create_dispatched" && !TERMINAL.includes(r.status)).map((r) => ({ id: r.id, error: r.error })),
+		/** The always-on completion goal of every run: condition, turns used, judge calls, last verdict and elapsed time.
+		 *  Nothing here bounds a goal; a `warning` row has merely run unusually long. */
+		goals: runs.filter((r) => r.goal).map((r) => ({ id: r.id, identifier: r.hoja?.identifier, ...goalRow(r.goal, nowMs)! })),
 		hojaSyncPending: runs.reduce((n, r) => n + r.outbox.filter((o) => !o.done).length, 0),
 		triggers: store.listTriggers().map((t) => ({ id: t.id, enabled: t.enabled, next: t.nextFireAt, fired: t.fired, lastError: t.lastError })),
 		unreadInbox: store.readInbox(store.readOrchestrator().offset).items.length,
@@ -105,8 +109,7 @@ export function runListing(runs: Run[], nowMs: number) {
 	return runs.map((r) => {
 		const ageSeconds = Math.max(0, Math.round((nowMs - Date.parse(r.createdAt)) / 1000));
 		const launchTimeoutInSeconds = r.status === "launching" ? Math.max(0, Math.round(LAUNCH_TIMEOUT_MS / 1000) - ageSeconds) : undefined;
-		return { id: r.id, label: r.label, status: r.status, phase: r.phase, identifier: r.hoja?.identifier, ageSeconds, launchTimeoutInSeconds, error: r.error, launchNote: r.launchNote };
 		const waiting = r.ask?.state === "open" ? { questions: r.ask.questionIds, since: r.ask.openedAt, tab: r.block } : undefined;
-		return { id: r.id, label: r.label, status: r.status, phase: r.phase, identifier: r.hoja?.identifier, ageSeconds, launchTimeoutInSeconds, error: r.error, waiting };
+		return { id: r.id, label: r.label, status: r.status, phase: r.phase, identifier: r.hoja?.identifier, ageSeconds, launchTimeoutInSeconds, error: r.error, launchNote: r.launchNote, waiting, goal: goalRow(r.goal, nowMs) };
 	});
 }

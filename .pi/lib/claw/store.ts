@@ -11,6 +11,7 @@ import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 
 import type { Resolved } from "./hoja.ts";
+import type { ClawGoal, GoalEvent, GoalSpec } from "./goal.ts";
 
 /** awaiting_decision: the worker opened its own ask modal and its turn is suspended until a human answers or cancels
  *  in that worker's tab. It is not a report, not a result, and not the terminal `needs_user` outcome (awaiting_user). */
@@ -54,13 +55,18 @@ export type Run = {
 	tabCloseError?: string;
 	/** The worker's own question modal. Absent when the worker never asked (legacy runs keep their plain needs_user). */
 	ask?: RunAsk;
+	/** The always-on completion goal: derived from the task at spawn, established by the worker after launch, and
+	 *  recorded from the worker's own goal events. It has no cap, deadline or expiry; only semantic brakes end it. */
+	goal?: ClawGoal;
 };
 export type ClawEvent = {
-	eid: string; type: "started" | "settled" | "ask" | "resumed" | "finish"; at: string; runId: string;
+	eid: string; type: "started" | "settled" | "ask" | "resumed" | "goal" | "finish"; at: string; runId: string;
 	pid?: number; sessionFile?: string; text?: string; stopReason?: string;
 	outcome?: Finish["outcome"]; summary?: string; evidence?: string[];
 	/** For type "ask": the worker's own modal opening or resolving. The worker owns this event; the daemon only applies it. */
 	ask?: { flowId: string; title?: string; questionIds: string[]; state: "opened" | "answered" | "cancelled" };
+	/** For type "goal": the worker's own goal loop reporting itself. Advisory: the daemon decides what an ended goal means. */
+	goal?: GoalEvent;
 };
 export type TriggerWhen = { kind: "cron"; cron: string } | { kind: "at"; at: string } | { kind: "on_exit"; runId: string; on?: RunStatus[] };
 export type TriggerAction = ({ kind: "spawn" } & SpawnInput) | { kind: "notify"; message: string };
@@ -68,7 +74,7 @@ export type Trigger = {
 	id: string; when: TriggerWhen; action: TriggerAction; enabled: boolean; once: boolean; createdAt: string;
 	nextFireAt?: string; fired: number; lastFiredAt?: string; lastRunId?: string; lastError?: string; retryAt?: string;
 };
-export type InboxKind = "run_started" | "run_idle" | "run_awaiting_input" | "run_input_answered" | "run_resumed" | "run_completed" | "run_failed" | "run_needs_user" | "run_lost" | "run_cancelled" | "trigger_fired" | "notify" | "error";
+export type InboxKind = "run_started" | "run_idle" | "run_awaiting_input" | "run_input_answered" | "run_resumed" | "run_completed" | "run_failed" | "run_needs_user" | "run_lost" | "run_cancelled" | "run_goal_ended" | "run_goal_long" | "trigger_fired" | "notify" | "error";
 /** `id` is the stable delivery identity: the dedup key when one exists, otherwise a generated id. It is what the receiver records in its transcript. */
 export type InboxItem = { id: string; at: string; key?: string; kind: InboxKind; runId?: string; triggerId?: string; text: string };
 export type Request =
@@ -154,6 +160,17 @@ export class ClawStore {
 			.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 	}
 	taskPath(id: string): string { return join(this.runsDir, `${id}.task.md`); }
+	/** The goal spec the worker establishes after launch. Daemon-owned; removed when the run's goal ends. */
+	goalPath(id: string): string { return join(this.runsDir, `${id}.goal.json`); }
+	writeGoalSpec(spec: GoalSpec): void { writeJson(this.goalPath(spec.runId), spec); }
+	readGoalSpec(id: string): GoalSpec | undefined {
+		const spec = SAFE_ID.test(id) ? readJson<GoalSpec>(this.goalPath(id)) : undefined;
+		return spec && typeof spec.condition === "string" && spec.condition.trim() ? spec : undefined;
+	}
+	removeGoalSpec(id: string): void {
+		if (!SAFE_ID.test(id)) return;
+		rmSync(this.goalPath(id), { force: true });
+	}
 	eventsPath(id: string): string { return join(this.runsDir, `${id}.events.jsonl`); }
 	/** The worker's own stderr, captured by the launch command so a startup failure can name its reason. */
 	workerLogPath(id: string): string { return join(this.runsDir, `${id}.worker.log`); }

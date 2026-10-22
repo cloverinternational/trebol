@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { boundTranscript, grepTranscript, readTranscriptLines, registerSwarmGoal } from "../../lib/tools/swarm-goal.ts";
+import { boundTranscript, establishGoal, goalHost, grepTranscript, readTranscriptLines, registerSwarmGoal } from "../../lib/tools/swarm-goal.ts";
 function harness(evaluate: any = async () => "MET") {
   const tools = new Map<string, any>(), commands = new Map<string, any>(), handlers = new Map<string, any[]>();
   const ctx = { ui: { notify: vi.fn() }, sessionManager: { getBranch: () => [] } };
@@ -92,5 +92,56 @@ describe("swarm-goal", () => {
     await h.command("goal", "work"); const pending = h.emit("agent_before_settle", { messages: [] }); await called;
     await h.command("goal", "clear"); resolve("NOT_MET"); await pending;
     expect(h.pi.sendMessage).toHaveBeenCalledTimes(1); expect(h.api.getGoal()).toBeUndefined();
+  });
+  it("a host establishes a goal once, widens it, and never resurrects one its source already ended", async () => {
+    const h = harness();
+    await h.emit("session_start");
+    const host = goalHost(h.pi)!;
+    expect(host.status()).toBeUndefined();
+    expect(host.establish({ condition: "ship it", source: "claw:run-1" })).toMatchObject({ created: true });
+    // Idempotent for the same source: a second turn, or a restarted worker, never creates a duplicate goal.
+    expect(host.establish({ condition: "ship it", source: "claw:run-1" })).toMatchObject({ created: false });
+    expect(host.status()).toMatchObject({ status: "active", source: "claw:run-1", turns: 0, judgeCalls: 0 });
+    // Widening only adds criteria.
+    expect(host.widen("logs every retry")).toMatchObject({ condition: expect.stringContaining("logs every retry") });
+    expect(host.status()!.condition).toContain("ship it");
+    // A different source cannot silently take over a running loop.
+    expect(() => host.establish({ condition: "other", source: "claw:run-2" })).toThrow("already active");
+    // Clearing ends it, and the same source can never re-arm it.
+    expect(host.clear("finish")).toBe(true);
+    expect(host.clear("finish")).toBe(false);
+    expect(host.status()).toBeUndefined();
+    expect(host.establish({ condition: "ship it", source: "claw:run-1" })).toMatchObject({ created: false });
+    expect(host.status()).toBeUndefined();
+  });
+  it("a host that asks before the goal extension registers still gets its goal, once", async () => {
+    const tools = new Map<string, any>(), commands = new Map<string, any>(), handlers = new Map<string, any[]>();
+    const pi = { registerTool: (t: any) => tools.set(t.name, t), registerCommand: (n: string, c: any) => commands.set(n, c), on: (n: string, h: any) => handlers.set(n, [...handlers.get(n) ?? [], h]), sendMessage: vi.fn(), appendEntry: vi.fn() };
+    const ctx = { ui: { notify: vi.fn() }, sessionManager: { getBranch: () => [] } };
+    expect(establishGoal(pi, { condition: "ship it", source: "claw:run-9" })).toBe("queued");
+    const api = registerSwarmGoal(pi, { evaluate: async () => "MET" });
+    let result: any;
+    for (const handler of handlers.get("session_start") ?? []) await handler({}, ctx);
+    expect(api.getGoal()).toMatchObject({ status: "active", source: "claw:run-9", condition: "ship it" });
+    expect(goalHost(pi)!.establish({ condition: "ship it", source: "claw:run-9" })).toMatchObject({ created: false });
+    for (const handler of handlers.get("agent_before_settle") ?? []) result = await handler({ outcome: "completed", continue: false, entries: [], context: { contextMessages: [] } }, ctx);
+    expect(result).toBeUndefined();
+    expect(api.getGoal()).toMatchObject({ status: "met" });
+  });
+  it("a host observer sees every verdict and cannot change the continuation", async () => {
+    const verdicts = ["NOT_MET", "MET"];
+    const h = harness(async () => verdicts.shift());
+    await h.emit("session_start");
+    const seen: string[] = [];
+    goalHost(h.pi)!.observe((event) => {
+      seen.push(event.kind);
+      // An observer that throws must not break the loop.
+      if (event.kind === "verdict") throw new Error("observer failure");
+    });
+    expect(goalHost(h.pi)!.establish({ condition: "verify", source: "claw:run-3" }).created).toBe(true);
+    expect((await h.emit("agent_before_settle"))?.continue).toBe(true);
+    await h.emit("agent_before_settle");
+    expect(seen).toEqual(["established", "verdict", "ended"]);
+    expect(h.api.getGoal()).toMatchObject({ status: "met", judgeCalls: 2, turns: 1 });
   });
 });
