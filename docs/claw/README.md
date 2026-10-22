@@ -151,14 +151,14 @@ evidence and before/after numbers: `docs/claw/slo-2026-10-22.md`. Code: `.pi/lib
 | Each act happens at most once per run per state | `remedies["<action>:<state>"]` ledger with attempts, jittered `nextAt`, budget, `exhausted` |
 | Silence means healthy | `run_started`/`run_idle` become notices folded into one `claw_digest` per 300 s; one `claw_heartbeat` per 1800 s while a worker runs |
 | A pending decision is surfaced, not idled on | `awaitingSince`, tab renamed `! <id> decide`, bounded reminders (3 over 30 min each), answer with `claw_send` |
-| Recoverable faults are recovered | one relaunch of a launch failure that provably created no tab (same run, same issue); paced Hoja lookups; never a second create |
+| Recoverable faults are recovered | one relaunch of a launch failure with no tab, **or of a `lost` worker that never settled a turn** (same run, same Hoja issue, no second create); a run past its own deadline is never restarted and records `run_budget_spent` with the reason; paced Hoja lookups |
 
 Store additions: `notices.jsonl` (low-severity notices awaiting a digest), `supervisor.json` (digest cursor, digest and
 heartbeat counters), and per-run `idleSince`, `stalledAt`, `awaitingSince`, `failureClass`, `remedies`,
 `relaunchCount`, `tabMissingAt`. Bounds are overridable per workspace in `control.json` → `supervise` (validated; a bad
 value falls back to the default).
 
-New inbox kinds: `run_stalled`, `run_tab_orphan`, `run_recovered`, `claw_digest`, `claw_heartbeat`.
+New inbox kinds: `run_stalled`, `run_tab_orphan`, `run_recovered`, `run_budget_spent`, `claw_digest`, `claw_heartbeat`. A spent budget is a record, not a retry: `remedies[<act>]` keeps `{attempts, exhausted, note}` and one item names the act, the reason and the next human step.
 
 Operator tooling: `tools/claw/metrics.mjs` (the five supervision metrics for any store),
 `tools/claw/build-fixture-store.mjs` (a store rebuilt from the committed 2026-10-22 fixtures),

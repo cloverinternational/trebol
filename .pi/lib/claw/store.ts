@@ -104,6 +104,8 @@ export type InboxKind =
 	/** Supervisor notices. `run_stalled` names what a stuck run needs and since when; `run_tab_orphan` reports a worker
 	 *  tab the daemon could not close; `run_recovered` records a bounded automatic recovery. */
 	| "run_stalled" | "run_tab_orphan" | "run_recovered"
+	/** A retry budget is spent: the act stopped and the reason is recorded once instead of retrying forever. */
+	| "run_budget_spent"
 	/** One collapsed digest per window (see .pi/lib/claw/supervisor.ts) and an all-clear heartbeat, so silence is health. */
 	| "claw_digest" | "claw_heartbeat";
 /** `id` is the stable delivery identity: the dedup key when one exists, otherwise a generated id. It is what the receiver records in its transcript. */

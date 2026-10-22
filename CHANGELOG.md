@@ -21,7 +21,7 @@ Release metadata is kept in `package.json`, `update-manifest.json`, and this fil
 
 ### Added
 
-- Claw supervises itself: written SLOs the daemon enforces, so check-ups no longer need a human prompt. Every run is bounded to a terminal state (launch 300 s, idle stall report 600 s, supervisor fail 3600 s), every terminal run's worker tab is closed with jittered retries and one `run_tab_orphan` report when it cannot be, each act happens at most once per run per state inside a budget, low-severity notices collapse into one `claw_digest` per 5 minutes plus a heartbeat while workers run, a `needs_user` decision flags its own tab and repeats in bounded digests, and a launch failure that provably created no tab is relaunched once on the same Hoja issue. See `docs/claw/slo-2026-10-22.md` and `tools/claw/metrics.mjs`.
+- Claw supervises itself: written SLOs the daemon enforces, so check-ups no longer need a human prompt. Every run is bounded to a terminal state (launch 300 s, idle stall report 600 s, supervisor fail 3600 s), every terminal run's worker tab is closed with jittered retries and one `run_tab_orphan` report when it cannot be, each act happens at most once per run per state inside a budget, low-severity notices collapse into one `claw_digest` per 5 minutes plus a heartbeat while workers run, a `needs_user` decision flags its own tab and repeats in bounded digests, and a run that provably produced nothing (a launch failure with no tab, or a worker that died before its first settled turn) is relaunched once on the same Hoja issue, while a run stuck past its own deadline is never restarted and records `run_budget_spent` with the reason. See `docs/claw/slo-2026-10-22.md` and `tools/claw/metrics.mjs`.
 
 ### Fixed
 
