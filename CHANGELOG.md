@@ -6,7 +6,7 @@ Release metadata is kept in `package.json`, `update-manifest.json`, and this fil
 
 ### Added
 
-- Claw keep-open and resume (#PR): a run can now outlive its own completion, so a human and the agent can keep working
+- Claw keep-open and resume (#346): a run can now outlive its own completion, so a human and the agent can keep working
   in the same conversation. `claw_spawn` and the routed `Agent` tool take an explicit per-run `keepOpen` (default off),
   recorded on the run before any side effect, so the supervisor's single close point skips that tab across daemon
   restarts and every tick while events, the goal and the Hoja outbox keep being reconciled; a kept tab is not
