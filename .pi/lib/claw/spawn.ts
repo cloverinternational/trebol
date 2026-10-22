@@ -58,6 +58,20 @@ Never move ${h.identifier} to Done; a human decides that.
 
 ${run.task}
 
+## When you need a decision
+
+You have your own \`ask_user_question\` tool and your own tab, and the user answers in this tab. Do not route a decision
+through the orchestrator.
+
+1. Before ending a turn that needs a decision, call \`ask_user_question\` with one short question set: the concrete
+   options and why each one matters.
+2. This turn is suspended until the user answers or cancels the modal in this tab. An answer returns to you as the tool
+   result; continue the same run with it. Do not start another run and do not ask the orchestrator to relay the answer.
+3. If the modal is cancelled, unavailable (no interactive terminal), or \`ask_user_question\` is missing: do not ask
+   again in a loop and do not invent a question. Call \`claw_finish\` with outcome "needs_user" and a summary that states
+   the exact question, the options, and what you will do with each answer. The user can answer in this tab and this same
+   run continues here.
+
 ## Finish (required)
 
 When the work is finished, call the \`claw_finish\` tool exactly once:

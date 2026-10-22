@@ -4,6 +4,10 @@ Release metadata is kept in `package.json`, `update-manifest.json`, and this fil
 
 ## [Unreleased]
 
+### Added
+
+- Claw: worker-local clarification. A worker asks the user in its own tab through its native `ask_user_question` modal and continues the same run with the answer; the daemon reports the wait as `awaiting_decision` (distinct from the terminal `needs_user`/`awaiting_user`), refuses `claw_send` while a modal is open, never fabricates a question from a summary, and falls back to a truthful `needs_user` report when the modal is cancelled or unavailable. See `docs/claw/worker-clarification-2026-10-22.md`.
+
 ### Fixed
 
 - Claw: sending input to an idle worker re-arms the idle notice for its next settled turn, and `status` reports `since` for runs awaiting the user.

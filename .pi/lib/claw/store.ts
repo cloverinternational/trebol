@@ -12,13 +12,21 @@ import { join } from "node:path";
 
 import type { Resolved } from "./hoja.ts";
 
-export type RunStatus = "launching" | "running" | "idle" | "awaiting_user" | "completed" | "failed" | "lost" | "cancelled";
+/** awaiting_decision: the worker opened its own ask modal and its turn is suspended until a human answers or cancels
+ *  in that worker's tab. It is not a report, not a result, and not the terminal `needs_user` outcome (awaiting_user). */
+export type RunStatus = "launching" | "running" | "idle" | "awaiting_decision" | "awaiting_user" | "completed" | "failed" | "lost" | "cancelled";
 export const TERMINAL: readonly RunStatus[] = ["completed", "failed", "lost", "cancelled"];
 /** Where a run is in its launch sequence; persisted before each side effect so a restart knows what is safe to redo.
  *  create_dispatched: the Hoja create was about to be sent; its outcome may be unknown and is only ever reconciled. */
 export type RunPhase = "intent" | "create_dispatched" | "issue_created" | "tab_opening" | "tab_open";
 export type HojaRef = { issueId: string; identifier: string; teamKey: string; project: string; assignee: string };
 export type Finish = { outcome: "completed" | "failed" | "needs_user"; summary: string; evidence: string[]; at: string };
+/** A worker's own ask_user_question modal, as the daemon sees it from worker events.
+ *  open: the modal is showing in the worker's tab and the turn is suspended. answered/cancelled: the modal resolved.
+ *  unresolved: the worker reported a finish (or the turn settled, or the process ended) with no closing ask event, so
+ *  nobody recorded how the modal closed; it is never presented as still waiting. */
+export type RunAskState = "open" | "answered" | "cancelled" | "unresolved";
+export type RunAsk = { flowId: string; title?: string; questionIds: string[]; openedAt: string; state: RunAskState; closedAt?: string };
 export type OutboxOp = { id: string; kind: "comment"; body: string; done: boolean } | { id: string; kind: "state"; state: string; done: boolean };
 export type SpawnInput = { task: string; project: string; assignee?: string; label?: string; cwd?: string; provider?: string; model?: string };
 export type Run = {
@@ -42,11 +50,15 @@ export type Run = {
 	tabClosedAt?: string;
 	/** Last failed attempt to close the worker tab; retried while the run is terminal and Tern answers. */
 	tabCloseError?: string;
+	/** The worker's own question modal. Absent when the worker never asked (legacy runs keep their plain needs_user). */
+	ask?: RunAsk;
 };
 export type ClawEvent = {
-	eid: string; type: "started" | "settled" | "finish"; at: string; runId: string;
+	eid: string; type: "started" | "settled" | "ask" | "resumed" | "finish"; at: string; runId: string;
 	pid?: number; sessionFile?: string; text?: string; stopReason?: string;
 	outcome?: Finish["outcome"]; summary?: string; evidence?: string[];
+	/** For type "ask": the worker's own modal opening or resolving. The worker owns this event; the daemon only applies it. */
+	ask?: { flowId: string; title?: string; questionIds: string[]; state: "opened" | "answered" | "cancelled" };
 };
 export type TriggerWhen = { kind: "cron"; cron: string } | { kind: "at"; at: string } | { kind: "on_exit"; runId: string; on?: RunStatus[] };
 export type TriggerAction = ({ kind: "spawn" } & SpawnInput) | { kind: "notify"; message: string };
@@ -54,7 +66,7 @@ export type Trigger = {
 	id: string; when: TriggerWhen; action: TriggerAction; enabled: boolean; once: boolean; createdAt: string;
 	nextFireAt?: string; fired: number; lastFiredAt?: string; lastRunId?: string; lastError?: string; retryAt?: string;
 };
-export type InboxKind = "run_started" | "run_idle" | "run_completed" | "run_failed" | "run_needs_user" | "run_lost" | "run_cancelled" | "trigger_fired" | "notify" | "error";
+export type InboxKind = "run_started" | "run_idle" | "run_awaiting_input" | "run_input_answered" | "run_resumed" | "run_completed" | "run_failed" | "run_needs_user" | "run_lost" | "run_cancelled" | "trigger_fired" | "notify" | "error";
 /** `id` is the stable delivery identity: the dedup key when one exists, otherwise a generated id. It is what the receiver records in its transcript. */
 export type InboxItem = { id: string; at: string; key?: string; kind: InboxKind; runId?: string; triggerId?: string; text: string };
 export type Request =

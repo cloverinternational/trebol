@@ -3,7 +3,8 @@
 Orchestrator in one Pi session; each worker is a visible Tern tab running pi on one task, with one Hoja issue.
 Code: `.pi/lib/claw/` (store, spawn lifecycle, daemon, Hoja client, Tern launcher, worker helpers),
 `extensions/claw/` (orchestrator tools + `/claw`; worker gate + `claw_finish` when `PI_CLAW_RUN` is set).
-Tests: `.pi/test/claw/claw.test.ts`.
+Tests: `.pi/test/claw/claw.test.ts` (lifecycle, daemon, Hoja, Tern, worker) and
+`.pi/test/claw/clarification.test.ts` (worker-local questions).
 
 ## Commands and tools
 
@@ -23,6 +24,7 @@ Tests: `.pi/test/claw/claw.test.ts`.
 | launching | run persisted; Hoja issue / tab in progress |
 | running | worker reported `started` |
 | idle | native turn settled with no `claw_finish`. Not a result; may be awaiting input or a permission |
+| awaiting_decision | the worker opened its own `ask_user_question` modal in its tab and the turn is suspended until a human answers or cancels there. Active, not a result |
 | awaiting_user | worker reported `needs_user` |
 | completed | `claw_finish completed` with evidence; Hoja moves to In Review |
 | failed | `claw_finish failed`, launch failure, or completion refused for missing evidence |
@@ -30,6 +32,31 @@ Tests: `.pi/test/claw/claw.test.ts`.
 | cancelled | stopped by `claw_cancel` |
 
 Hoja Done is never set automatically. `agent_settled` is never treated as success.
+
+## Worker-local clarification
+
+A worker asks its own questions. The worker tab is plain terminal pi (`PI_TERN_UI=0`), so `ask_user_question` renders
+its native modal in that block: the user answers in the worker's tab, the answer returns to the worker as the tool
+result, and the same run continues. The orchestrator never relays an answer and no second run is created.
+
+- The worker appends `ask` events (opened / answered / cancelled) taken from the pi-ask lifecycle events of its own
+  process (`@eko24ive/pi-ask:started`, `@eko24ive/pi-ask:completed`). Only the flow id, the title and the question ids
+  are recorded; answer content never reaches the run store.
+- The daemon maps an open modal to `awaiting_decision` and back to `running` when it resolves. It is deliberately
+  distinct from `awaiting_user`, which stays reserved for the reported `needs_user` outcome.
+- `claw_send` is refused while a modal is open: typing text into a dialog would answer or corrupt it on the user's
+  behalf. The refusal runs before the `awaiting_user` reactivation path, so input is never typed into a live dialog.
+  A question that stays open is reminded once after 30 minutes (`ASK_STALE_MS`) and the run stays active; if the worker
+  process disappears, the run becomes `lost` and its question is marked `unresolved`.
+- `needs_user` fallback: if the modal is cancelled, unavailable (no native TUI, ask-user extension absent) or the
+  worker cannot ask, the worker still calls `claw_finish needs_user` with a summary that states the exact question, the
+  options and what each answer would change. If it instead ends the turn silently, the run goes to `idle` with a note
+  that its question was cancelled and no completion is implied. The daemon never fabricates a question from a summary.
+- Legacy `awaiting_user` runs (reported before this change) keep their report. The user answers in the worker's tab, or
+  `claw_send` reactivates the run when its tab is still live; either way the same process starts a new turn (a
+  `resumed` event) and a later `claw_finish` supersedes the earlier report.
+
+Details and event shapes: `docs/claw/worker-clarification-2026-10-22.md`.
 
 Cancel maps the Hoja issue to `Canceled` only when the worker pid is gone and its tab is not live (verified). Otherwise the Hoja state is left unchanged and the comment says so. See `docs/claw/acceptance-2026-10-21.md`.
 
@@ -53,7 +80,14 @@ See `docs/claw/e2e-evidence-2026-10-21.md` for run, Hoja, trigger and session ID
 
 ## Limitations (v1)
 
-- Permission waits are not detectable from native signals; they appear as `idle`.
+- Permission waits are not detectable from native signals; they appear as `idle`. Worker questions are the exception:
+  they are reported by the worker itself and appear as `awaiting_decision`.
+- Worker-local clarification depends on the worker running native Pi UI (`PI_TERN_UI=0`, which the launcher sets). If a
+  worker runs under the Tern TSP frontend (unbound extension UI, no local ask bridge) or the ask-user extension is not
+  installed, no modal opens; the worker falls back to `claw_finish needs_user` and the run reaches `awaiting_user` with
+  no `ask` record. Nothing is invented in that case.
+- An open question keeps the run active, so the daemon does not idle-exit while a human is deciding. Cancelling the run
+  (`claw_cancel`) is the way to abandon an unanswered question.
 - PID liveness is `kill(pid, 0)` without start-time checks; pid reuse is theoretically possible.
 - Tab naming: `/claw on` renames the pane's tab; outside Tern (`TERN_PANE` unset) or when Tern refuses, the warning says to name it `Claw` manually. Worker tabs whose rename fails are reported with `tabWarning` in `claw_read`.
 - Marker lookup uses the Hoja description filter (exact). A create that commits after the lookup can still produce a duplicate; not closed (see acceptance doc).
