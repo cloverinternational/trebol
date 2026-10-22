@@ -83,7 +83,7 @@ export default function jevKnowledgeAudit(pi: any, deps = { audit: auditWithJev 
         credentialSource=credential?.source??"missing";
         if(!credential){executionLog(ctx.cwd,"jev","audit-missing-credential",{turn:atTurn});status="missing-key: set TYPESAFE_API_KEY or vault credential typesafe-api-key";return;}
         const cacheKey = createHash("sha256").update("jev-1.13.0:rubric-v1:" + JSON.stringify({evidence:batch.evidence,supervisor})).digest("hex");
-        const result = cache.get(cacheKey) ?? await deps.audit(batch.evidence, { apiKey: credential.apiKey, signal: ctrl.signal, timeoutMs: 3000, supervisor });
+        const result = cache.get(cacheKey) ?? await deps.audit(batch.evidence, { apiKey: credential.apiKey, baseUrl: process.env.PI_SWARM_JEV_BASE_URL || undefined, model: process.env.PI_SWARM_JEV_MODEL || undefined, signal: ctrl.signal, timeoutMs: 3000, supervisor });
         if (own !== generation || ctrl.signal.aborted || !jevAuditEnabled(pi)) return;
         cache.set(cacheKey, result); if (cache.size > 32) cache.delete(cache.keys().next().value!);
         executionLog(ctx.cwd,"jev","audit-result",{turn:atTurn,findingCount:result.findings.length});

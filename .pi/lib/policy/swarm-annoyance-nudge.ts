@@ -163,6 +163,7 @@ export class AnnoyanceNudgeState {
     if (normalizeToolName(result.toolName) === "annoyed") return undefined;
     const key = `${conversation}\u0000${normalizeToolName(result.toolName)}`;
     if (classification === "clean") { this.lastFailure.delete(key); return undefined; }
+    if (normalizeToolName(result.toolName) === "bash") return undefined;
     if (!classification) return undefined;
     if (this.lastFailure.get(key) === classification.fingerprint) return undefined;
     if (this.lastFailure.size >= MAX_FAILURE_ENTRIES) this.lastFailure.clear();

@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
 import { matchesKey } from "@earendil-works/pi-tui";
 import { openRunningWorkView } from "./running-work-view.ts";
-import { state, runningWorkSnapshot, setRunningWork, removeRunningWork, onRunningWorkChange, type RunningWorkItem, type RunningWorkKind, type RunningWorkStatus } from "./running-work-store.ts";
-export { runningWorkSnapshot, setRunningWork, removeRunningWork, onRunningWorkChange };
+import { state, runningWorkSnapshot, setRunningWork, patchRunningWork, removeRunningWork, onRunningWorkChange, type RunningWorkItem, type RunningWorkKind, type RunningWorkStatus } from "./running-work-store.ts";
+export { runningWorkSnapshot, setRunningWork, patchRunningWork, removeRunningWork, onRunningWorkChange };
 export type { RunningWorkItem, RunningWorkKind, RunningWorkStatus };
 
 export const MAX_VISIBLE_RUNNING_WORK = 6;

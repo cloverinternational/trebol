@@ -948,3 +948,29 @@ test("dismissFlow cancels the tool even from editing modes", () => {
 	assert.equal(state.cancelled, true);
 	assert.equal(state.completed, true);
 });
+
+test("multi-select result returns every selected option and keeps other text", () => {
+	let state = createInitialState({
+		questions: [
+			{
+				id: "stack",
+				prompt: "Which tools?",
+				type: "multi",
+				options: [
+					{ value: "react", label: "React" },
+					{ value: "vue", label: "Vue" },
+					{ value: "svelte", label: "Svelte" },
+				],
+			},
+		],
+	} as unknown as AskParams);
+	state = toggleCurrentMultiOption(state);
+	state = moveOption(state, 1);
+	state = toggleCurrentMultiOption(state);
+	state = moveOption(state, 1);
+	state = toggleCurrentMultiOption(state);
+
+	const result = toAskResult(state);
+	assert.deepEqual(result.answers.stack.values, ["react", "vue", "svelte"]);
+	assert.deepEqual(result.answers.stack.indices, [1, 2, 3]);
+});

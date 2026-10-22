@@ -1,0 +1,36 @@
+{
+  "startedAt": "2026-10-21T18:38:04.954Z",
+  "mode": "lost-answer + delayed commit",
+  "forwardedCreates": 1,
+  "createAnswerDroppedAt": "2026-10-21T18:38:07.723Z",
+  "lateCommitAt": "2026-10-21T18:38:14.800Z",
+  "lateCommitOk": true,
+  "runId": "run-9e3d7a4bdf1dfc998e90",
+  "phase": "tab_open",
+  "status": "launching",
+  "identifier": "TREBOL-277",
+  "issueId": "75e3e5b9-a537-4994-ad0e-9e0f9c2f5a87",
+  "fakeBlocksOpened": 1,
+  "serverIssuesWithMarker": [
+    {
+      "id": "75e3e5b9-a537-4994-ad0e-9e0f9c2f5a87",
+      "identifier": "TREBOL-277",
+      "state": {
+        "name": "In Progress"
+      }
+    }
+  ],
+  "afterCancel": {
+    "status": "cancelled",
+    "outboxDone": true,
+    "serverIssues": [
+      {
+        "identifier": "TREBOL-277",
+        "state": {
+          "name": "Canceled"
+        }
+      }
+    ]
+  },
+  "finishedAt": "2026-10-21T18:38:31.136Z"
+}

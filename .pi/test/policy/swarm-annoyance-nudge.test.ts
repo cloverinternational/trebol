@@ -32,16 +32,22 @@ describe("swarm annoyance nudge port", () => {
   it("renders the exact Swarm reminder and dedupes per (conversation, tool)", () => {
     resetReminderSequences();
     const state = new AnnoyanceNudgeState();
-    const failed = { toolName: "bash", isError: true, content: [{ type: "text", text: "Error executing bash: Command exited with code 3: exit status 3 (error_id=err_aa)" }] };
+    const failed = { toolName: "read", isError: true, content: [{ type: "text", text: "Error executing read: file not found (error_id=err_aa)" }] };
     const first = state.onToolResult("c1", failed)!;
-    expect(first.startsWith('<system-reminder source="annoyance-nudge" kind="nudge" seq="1">[ANNOYANCE REVIEW]\nTool: "bash"\nFriction class: "tool-failure"\nFingerprint: "')).toBe(true);
+    expect(first.startsWith('<system-reminder source="annoyance-nudge" kind="nudge" seq="1">[ANNOYANCE REVIEW]\nTool: "read"\nFriction class: "tool-failure"\nFingerprint: "')).toBe(true);
     expect(first.endsWith("Do not publish vague frustration or duplicate this fingerprint.</system-reminder>")).toBe(true);
     expect(state.onToolResult("c1", failed)).toBeUndefined(); // same fingerprint
     expect(state.onToolResult("c2", failed)).toMatch(/seq="2"/); // other conversation
-    expect(state.onToolResult("c1", { toolName: "bash", isError: false, content: "ok" })).toBeUndefined(); // clears key
+    expect(state.onToolResult("c1", { toolName: "read", isError: false, content: "ok" })).toBeUndefined(); // clears key
     expect(state.onToolResult("c1", failed)).toMatch(/seq="3"/);
     expect(state.onToolResult("c1", { toolName: "annoyed", isError: true, content: "x" })).toBeUndefined();
     expect(state.onToolResult("c1", { toolName: "bash", isError: true, content: "x", details: { error_type: "tool.blocked_by_hook" } })).toBeUndefined();
+  });
+  it("never nudges after a bash failure", () => {
+    const state = new AnnoyanceNudgeState();
+    const bashFailed = { toolName: "bash", isError: true, content: [{ type: "text", text: "Error executing bash: Command exited with code 3: exit status 3 (error_id=err_bb)" }] };
+    expect(state.onToolResult("c1", bashFailed)).toBeUndefined();
+    expect(state.onToolResult("c1", { ...bashFailed, toolName: "Bash" })).toBeUndefined();
   });
   it("wraps like reminder.Wrap", () => {
     expect(wrapReminder("a&b", "bogus", 0, "  body ")).toBe('<system-reminder source="a&amp;b" kind="context" seq="1">body</system-reminder>');

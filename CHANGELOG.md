@@ -4,13 +4,24 @@ Release metadata is kept in `package.json`, `update-manifest.json`, and this fil
 
 ## [Unreleased]
 
+### Fixed
+
+- Tern runner no longer crashes at startup on fresh checkouts: `prepare` now builds `packages/tools/taskmanage/dist` (imported by `.pi/lib/tern/task-view.ts`), and `doctor` checks for it.
+
+## [0.7.0] - 2026-10-21
+
 ### Added
+
+- Claw: orchestrator and worker runs routed through `/claw`, with worker tabs named after their task and per-launch `provider` and `model` options (default: unset, so Pi's configured provider and model are used; a provider requires a model).
+- Hoja mode: read-only Hoja tools (`hoja_list`, `hoja_get`) registered through the `hoja-mode` extension.
+- Ask-user: multi-select questions render as checkboxes.
+- Upgrade prompt extension (`extensions/upgrade-prompt/`).
 
 - OSC 7501 program-status reporting: Trebol now tells the terminal what it is doing (`idle`/`working`/`blocked`/`done`/`error`/`clear`) via terminal-native escape sequences, so terminals, multiplexers, and agentic inboxes can show session state without screen scraping. New `swarm-program-status` extension with a TTY gate and `TREBOL_PROGRAM_STATUS=0|1` override.
 
 ### Fixed
 
-- Tern runner no longer crashes at startup on fresh checkouts: `prepare` now builds `packages/tools/taskmanage/dist` (imported by `.pi/lib/tern/task-view.ts`), and `doctor` checks for it.
+- Tern browser: `click` navigates and waits for the resulting load, `goto` waits for load, and a dead pane returns an actionable hint instead of a raw `no such pane` error.
 - Tern groups consecutive tool steps into a turn summary (live view shows active steps; finished runs collapse to done/failed/interrupted) and restores persisted tool calls on reload.
 - Ctrl+B moves the running foreground Bash command to the background.
 - `/goal` verdict judging uses an answer-only prompt (MET / NOT_MET / IMPOSSIBLE).

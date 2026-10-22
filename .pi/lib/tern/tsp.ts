@@ -217,8 +217,11 @@ function diffNode(prev: TspNode, next: TspNode): unknown[] {
 	} else if (JSON.stringify(pp) !== JSON.stringify(np)) {
 		const props: Record<string, unknown> = {};
 		for (const key of Object.keys(pp)) if (!(key in np)) props[key] = null;
-		Object.assign(props, np);
-		ops.push(["set", next.id, props]);
+		// Local host state (notably collapse) must not be reset by unrelated updates.
+		for (const key of Object.keys(np)) {
+			if (JSON.stringify(pp[key]) !== JSON.stringify(np[key])) props[key] = np[key];
+		}
+		if (Object.keys(props).length > 0) ops.push(["set", next.id, props]);
 	}
 	ops.push(...diffChildren(next.id, prev.c ?? [], next.c ?? []));
 	return ops;
@@ -319,6 +322,7 @@ export interface TranscriptMessage {
 	id: string;
 	role: "user" | "assistant" | "system";
 	text: string;
+	streaming?: boolean;
 }
 
 export function projectTranscript(messages: TranscriptMessage[]): TspNode[] {
@@ -330,7 +334,7 @@ export function projectTranscript(messages: TranscriptMessage[]): TspNode[] {
 		};
 		if (m.role === "assistant") return {
 			id, k: "col", p: { role: "pi.assistant" },
-			c: [{ id: `${id}.body`, k: "md", p: { text: m.text, stream: true } }],
+			c: [{ id: `${id}.body`, k: "md", p: { text: m.text, stream: m.streaming === true } }],
 		};
 		return { id, k: "md", p: { text: m.text } };
 	});

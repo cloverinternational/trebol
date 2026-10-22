@@ -189,11 +189,12 @@ describe("PiTernBridge command routing", () => {
 		await new Promise((resolve) => setTimeout(resolve, 5));
 		const frame = lastFrame(writes);
 		expect(frame).toContain('"model-picker-sheet"');
-		expect(frame).toContain('"title":"Model"');
-		expect(frame).toContain('"placeholder":"Search models…"');
-		expect(frame).toContain('"group":"provider:p1"');
-		expect(frame).toContain('"current":["p1/m1"]');
-		expect(frame).toContain('"selected":"p1/m1"');
+		// Static picker props are sent when added, not resent in selection patches.
+		expect(writes.join("")).toContain('"title":"Model"');
+		expect(writes.join("")).toContain('"placeholder":"Search models…"');
+		expect(writes.join("")).toContain('"group":"provider:p1"');
+		expect(writes.join("")).toContain('"current":["p1/m1"]');
+		expect(writes.join("")).toContain('"selected":"p1/m1"');
 	});
 
 	it("filters model picker results and applies only the activated model", async () => {

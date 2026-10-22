@@ -34,6 +34,10 @@ export interface GatingEnvironment {
 }
 
 /** Explicit, narrow escape hatch for registered Pi extension tools. */
+/** Claw tools: only the ones a session actually registers reach the model (orchestrator: spawn/list/read/send/cancel/trigger; worker: finish). */
+export const CLAW_TOOLS = ["claw_spawn", "claw_list", "claw_read", "claw_send", "claw_cancel", "claw_trigger", "claw_finish"] as const;
+
+/** Explicit, narrow escape hatch for registered Pi extension tools. */
 export function configuredExtraTools(env: NodeJS.ProcessEnv = process.env): Set<string> {
   return new Set(
     (env.PI_SWARM_EXTRA_TOOLS ?? "")
@@ -55,6 +59,9 @@ export function swarmSurfaceFor(environment: GatingEnvironment): Set<string> {
   // Project scaffolding is driven by the agent through /init, so the tool must
   // reach the model surface even though upstream Swarm has no equivalent.
   names.add("project_init");
+  // Tern browser, pane and tab control is an intentional model-facing capability of the Tern pane.
+  names.add("tern");
+  for (const name of CLAW_TOOLS) names.add(name);
   for (const name of ["CronCreate", "CronList", "CronDelete", "ScheduleWakeup"]) names.delete(name);
   names.add("scheduler");
   if (environment.interactive) {

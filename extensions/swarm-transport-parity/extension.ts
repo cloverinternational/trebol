@@ -8,6 +8,7 @@ import { gateActiveTools } from "../../.pi/lib/runtime/swarm-tool-gating.ts";
 import { loadSwarmCanonicalTools } from "../../.pi/lib/runtime/swarm-tool-surface.ts";
 import { HOOK_SLOT_TYPE, type HookSlotPart } from "../../.pi/lib/runtime/swarm-builtin-hooks-runtime.ts";
 import { effectiveSelection, loadPromptContextConfig } from "../../.pi/lib/context/swarm-prompt-context-config.ts";
+import { clawModeOn, clawRoutedTools } from "../../.pi/lib/claw/mode.ts";
 
 type Pi = any;
 
@@ -59,7 +60,9 @@ export function registerSwarmTransportParity(pi: Pi): void {
       const definition = pi.getToolDefinition?.(name);
       return name === "mcp" || name === "mcpScript" || name.startsWith("mcp__") || definition?.label?.startsWith("MCP:");
     });
-    const gated = gateActiveTools(selected, { interactive, remoteAsk, mcpTools }, process.env, available) ?? selected;
+    // Claw routing hides alternate spawners while /claw is on; the allowlist path must not re-add them.
+    const base = gateActiveTools(selected, { interactive, remoteAsk, mcpTools }, process.env, available) ?? selected;
+    const gated = clawModeOn() ? clawRoutedTools(base, available) : base;
     const ordered = swarmToolOrder(gated) ?? (gated === active ? undefined : gated);
     if (ordered) pi.setActiveTools?.(ordered);
   };

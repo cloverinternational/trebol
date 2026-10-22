@@ -162,6 +162,16 @@ describe("Swarm agent orchestration tools", () => {
     expect(seen[0]).toContain("[TASK]\nsay hi\n[/TASK]");
   });
 
+  it("a failed foreground Subagent is a tool error, so its step does not read done", async () => {
+    const { tools } = harness(async () => { throw new Error("child pi failed (exit 1)"); });
+    const subagent = tools.find(tool => tool.name === "Subagent");
+    await expect(subagent.execute("call_fail", { task: "say alpha" })).rejects.toThrow("Sub-agent execution failed: child pi failed (exit 1)");
+    await expect(subagent.execute("call_fail_auto", { task: "say alpha", auto_background_seconds: 5 })).rejects.toThrow("Sub-agent execution failed");
+    // Near miss: a completed run still returns its output as a normal result.
+    const ok = harness(async () => "alpha");
+    expect((await ok.tools.find(tool => tool.name === "Subagent").execute("call_ok", { task: "say alpha" })).content[0].text).toBe("alpha");
+  });
+
   it("does not pass deprecated preset alongside the modern agent_id", async () => {
     let spec: any;
     const logic = new SwarmAgentTools(new AgentManager({ runner: async ctx => { spec = ctx.spec; return "ok"; } }));
