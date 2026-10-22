@@ -7,6 +7,7 @@ import { nextCronTime, validateCron } from "../../../packages/tools/schedule/src
 import type { LaunchDeps } from "./spawn.ts";
 import { continueRun, failRun, findByKey, queueComment, queueState, runMarker, startRun, opMarker } from "./spawn.ts";
 import { liveBlocks, closeBlock, isBlockGone, sendToBlock, type TernExec } from "./launcher.ts";
+import { describeSource } from "./preflight.ts";
 import { ClawStore, readJson, TERMINAL, type ClawEvent, type Request, type Response, type Run, type RunStatus, type Trigger, type SpawnInput } from "./store.ts";
 import { validateFinish } from "./child.ts";
 
@@ -76,7 +77,11 @@ export function releaseLock(store: ClawStore): void {
 	if (readJson<{ pid: number }>(store.lockPath)?.pid === process.pid) rmSync(store.lockPath, { force: true });
 }
 
-const summary = (r: Run) => ({ id: r.id, label: r.label, status: r.status, phase: r.phase, project: r.project, assignee: r.assignee, identifier: r.hoja?.identifier, block: r.block, pid: r.pid, error: r.error, launchNote: r.launchNote, finish: r.finish });
+const summary = (r: Run) => ({
+	id: r.id, label: r.label, status: r.status, phase: r.phase, project: r.project, assignee: r.assignee, identifier: r.hoja?.identifier,
+	block: r.block, pid: r.pid, error: r.error, launchNote: r.launchNote, finish: r.finish,
+	source: r.source ? describeSource(r.source) : undefined, launchAttempts: r.launchAttempts, launchWarning: r.launchWarning,
+});
 export const isActive = (r: Run) => !TERMINAL.includes(r.status) && r.status !== "awaiting_user";
 
 /** Closes a run's worker tab once. A block Tern no longer has is already closed, not an error. Only blocks the daemon
@@ -202,7 +207,7 @@ const neverStarted = (run: Run): boolean => run.pid === undefined && run.eventsO
 /** The first actionable line of a worker's captured stderr. pi prints one line per startup failure. */
 export function startupFailureReason(log: string): string | undefined {
 	const line = log.split("\n").map((entry) => entry.trim()).find((entry) => entry.length > 0
-		&& /Failed to load extension|conflicts with|Unknown option|Cannot find module|ERR_MODULE_NOT_FOUND|SyntaxError|EACCES|EISDIR|ENOENT/i.test(entry));
+		&& /Failed to load extension|conflicts with|Unknown option|Cannot find module|ERR_MODULE_NOT_FOUND|ParseError|SyntaxError|EACCES|EISDIR|ENOENT/i.test(entry));
 	if (!line) return undefined;
 	return line.replace(/\s+/g, " ").slice(0, 300);
 }
@@ -210,10 +215,13 @@ export function startupFailureReason(log: string): string | undefined {
 /** A worker that died before its first session event is failed with the reason, never reported as "lost". */
 function failStartup(run: Run, deps: DaemonDeps): void {
 	const reason = startupFailureReason(deps.store.readWorkerLog(run.id));
+	// The checkout the worker was launched from is part of the diagnosis: a source that was moved or edited after the run
+	// was created fails here, and the operator has to know which tree to fix.
+	const source = run.source ? `; source checkout ${describeSource(run.source)}` : "";
 	run.status = "failed";
 	run.error = (reason
-		? `worker exited before session_start: ${reason}`
-		: `worker exited before session_start and wrote no reason (stderr log: ${deps.store.workerLogPath(run.id)})`).slice(0, 500);
+		? `worker exited before session_start: ${reason}${source}`
+		: `worker exited before session_start and wrote no reason (stderr log: ${deps.store.workerLogPath(run.id)})${source}`).slice(0, 500);
 	queueComment(run, `Claw: ${run.error}. No completion is implied.`);
 	deps.store.appendInbox({ kind: "run_failed", runId: run.id, text: `${run.label} failed: ${run.error}`, key: `fail:${run.id}` });
 }
@@ -398,7 +406,8 @@ export async function reconcileRun(run: Run, deps: DaemonDeps, live: Set<number>
 	if (run.status === "launching" && deps.now().getTime() - Date.parse(run.createdAt) > LAUNCH_TIMEOUT_MS) {
 		const unknown = run.phase === "create_dispatched" ? "; the Hoja create outcome was unknown, so a late issue carrying the run marker may exist and needs a manual check" : "";
 		const captured = startupFailureReason(store.readWorkerLog(run.id));
-		failRun(run, deps, `launch timed out after ${LAUNCH_TIMEOUT_MS / 1000}s in phase ${run.phase} with no worker started event${captured ? `; worker stderr: ${captured}` : ""}${unknown}`);
+		const source = run.source ? `; source checkout ${describeSource(run.source)}` : "";
+		failRun(run, deps, `launch timed out after ${LAUNCH_TIMEOUT_MS / 1000}s in phase ${run.phase} with no worker started event${captured ? `; worker stderr: ${captured}` : ""}${unknown}${source}`);
 	}
 	if (CLOSE_ON_END.includes(run.status) && live !== undefined && run.block !== undefined && !run.tabClosedAt) {
 		await closeRunTab(run, deps.tern).catch((e) => { run.tabCloseError = `tab close failed: ${(e as Error).message}`.slice(0, 300); });

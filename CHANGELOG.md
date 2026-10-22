@@ -10,6 +10,7 @@ Release metadata is kept in `package.json`, `update-manifest.json`, and this fil
 
 ### Fixed
 
+- Claw worker launches survive an extension source that is being edited: a launch gate (`.pi/lib/claw/preflight.ts`) parses the registered entry points and their local imports before a tab opens, retries transient load/parse/tool-conflict failures with bounded backoff and jitter while preserving the real error, never retries deterministic configuration errors, and refuses a launch when the source checkout moved or gained tracked edits since the run was created. The gate's refusals and the startup-failure report both name the source checkout.
 - Task enforcement: read-only domain lookups (`hoja_list`, `hoja_get`, `vault` `list`/`get`, `context_search`/`context_outline`/`context_read`/`context_inspect`, `HistorySearch`, `HistoryGet`) no longer fail with "YOU CANNOT EXECUTE ANY TOOL WITHOUT A TASK" when no task is focused. Mutating siblings (`vault` `add`/`remove`, `context_index`/`remember`/`reindex`/`delete`, spawning and sending tools) stay blocked.
 - Claw: sending input to an idle worker re-arms the idle notice for its next settled turn, and `status` reports `since` for runs awaiting the user.
 - Tern runner no longer crashes at startup on fresh checkouts: `prepare` now builds `packages/tools/taskmanage/dist` (imported by `.pi/lib/tern/task-view.ts`), and `doctor` checks for it.
