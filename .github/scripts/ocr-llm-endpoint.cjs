@@ -40,22 +40,31 @@ function resolveLlmEndpoint(input) {
   if (url.length === 0) {
     throw new Error("OCR_LLM_URL is empty");
   }
+  if (!/^https?:\/\/[^/\s]+/i.test(url)) {
+    throw new Error(`OCR_LLM_URL must be an absolute http(s) URL, got ${JSON.stringify(url)}`);
+  }
+  if (/[\r\n]/.test(url)) {
+    throw new Error("OCR_LLM_URL must not contain newlines");
+  }
 
   url = url.replace(/\/+$/, "");
-  for (const suffix of ["/chat/completions", "/v1/messages"]) {
-    if (url.endsWith(suffix)) {
-      url = url.slice(0, -suffix.length);
-    }
+  // A full endpoint may be pasted instead of a base. Strip at most one suffix,
+  // comparing case-insensitively, so "/chat/completions" can never be followed
+  // by a second strip of a fragment it revealed.
+  const lowered = url.toLowerCase();
+  const suffix = ["/chat/completions", "/v1/messages"].find((candidate) => lowered.endsWith(candidate));
+  if (suffix) {
+    url = url.slice(0, -suffix.length);
   }
   // The Anthropic SDK appends "/v1/messages" itself, so a trailing "/v1" left
   // over from OpenAI-style configuration would be duplicated.
-  if (rawProtocol === "anthropic" && url.endsWith("/v1")) {
+  if (rawProtocol === "anthropic" && url.toLowerCase().endsWith("/v1")) {
     url = url.slice(0, -"/v1".length);
   }
   url = url.replace(/\/+$/, "");
 
-  if (url.length === 0) {
-    throw new Error("OCR_LLM_URL has no host after normalization");
+  if (!/^https?:\/\/[^/\s]+/i.test(url)) {
+    throw new Error(`OCR_LLM_URL has no host after normalization: ${JSON.stringify(input?.url ?? "")}`);
   }
 
   return { url, protocol: rawProtocol };
