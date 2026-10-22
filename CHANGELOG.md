@@ -4,6 +4,10 @@ Release metadata is kept in `package.json`, `update-manifest.json`, and this fil
 
 ## [Unreleased]
 
+### Fixed
+
+- `node_modules` is no longer a tracked symlink. Commit 3746215 (PR #338) committed it as a link to the absolute path `/Users/swarm/Work/Clover/trebol/node_modules`; git stores a symlink as its target string, so every clone and every `git worktree add` materialized a link into one machine's directory — dangling elsewhere, and in its own checkout replacing the real dependency tree with a self-referential link (the Claw daemon died with `Cannot find package 'croner'`; after `npm ci` the missing directory read as `D node_modules`, which the launch gate refused as a modified source checkout). `git rm --cached node_modules` plus a `.gitignore` `node_modules` entry (no trailing slash — `node_modules/` matches directories only, which is how the symlink slipped through) removes and blocks it. Sharing dependencies between worktrees stays possible as an explicit, per-worktree, RELATIVE link via `node tools/repo/link-node-modules.mjs <source-checkout>`; nothing in the tooling or CI depended on the tracked link. `tools/repo/check-tracked-symlinks.mjs` (`npm run check:symlinks`, wired into CI as its own job that needs no install) reads the index and fails on any tracked symlink whose target is absolute or resolves outside the checkout, so the regression cannot recur.
+
 ## [0.7.1] - 2026-10-22
 
 ### Highlights
