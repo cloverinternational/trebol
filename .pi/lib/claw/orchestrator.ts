@@ -90,6 +90,7 @@ export function statusSummary(store: ClawStore) {
 		daemonPid: daemonPid(store) ?? null,
 		runs: counts,
 		active: runs.filter((r) => !TERMINAL.includes(r.status) && r.status !== "awaiting_user").map((r) => ({ id: r.id, label: r.label, status: r.status, identifier: r.hoja?.identifier, launchNote: r.launchNote })),
+		awaitingDecision: runs.filter((r) => r.ask?.state === "open").map((r) => ({ id: r.id, identifier: r.hoja?.identifier, tab: r.block, questions: r.ask?.questionIds ?? [], openedAt: r.ask?.openedAt })),
 		awaitingUser: runs.filter((r) => r.status === "awaiting_user").map((r) => ({ id: r.id, summary: r.finish?.summary, since: r.finish?.at })),
 		unresolvedCreates: runs.filter((r) => r.phase === "create_dispatched" && !TERMINAL.includes(r.status)).map((r) => ({ id: r.id, error: r.error })),
 		hojaSyncPending: runs.reduce((n, r) => n + r.outbox.filter((o) => !o.done).length, 0),
@@ -105,5 +106,7 @@ export function runListing(runs: Run[], nowMs: number) {
 		const ageSeconds = Math.max(0, Math.round((nowMs - Date.parse(r.createdAt)) / 1000));
 		const launchTimeoutInSeconds = r.status === "launching" ? Math.max(0, Math.round(LAUNCH_TIMEOUT_MS / 1000) - ageSeconds) : undefined;
 		return { id: r.id, label: r.label, status: r.status, phase: r.phase, identifier: r.hoja?.identifier, ageSeconds, launchTimeoutInSeconds, error: r.error, launchNote: r.launchNote };
+		const waiting = r.ask?.state === "open" ? { questions: r.ask.questionIds, since: r.ask.openedAt, tab: r.block } : undefined;
+		return { id: r.id, label: r.label, status: r.status, phase: r.phase, identifier: r.hoja?.identifier, ageSeconds, launchTimeoutInSeconds, error: r.error, waiting };
 	});
 }

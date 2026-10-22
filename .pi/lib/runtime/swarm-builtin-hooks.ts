@@ -140,6 +140,8 @@ export class TaskEnforcementHook {
     if (isPlanModeTool(toolName)) this.planModeUsed = true;
     if (isTaskManagementTool(toolName) || isPlanModeTool(toolName) || isSkillTool(toolName) || isUserInteractionTool(toolName) || isCodeModeTool(toolName)) return CONTINUE;
     if (isReadOnlyExplorationTool(toolName) || isReadOnlyMemoryCall(toolName, event.params)) return CONTINUE;
+    // A Claw worker reports its outcome after its own TaskManage task completed; no new task is needed for that report.
+    if (normalizeToolName(toolName) === "clawfinish" && tasks.some(t => t.status === "completed")) return CONTINUE;
     if (isBashTool(toolName)) {
       const cmd = event.params?.command;
       if (typeof cmd === "string" && isBashReadOnly(cmd)) return CONTINUE;
