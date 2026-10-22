@@ -12,13 +12,15 @@ import { writeFileSync } from "node:fs";
 import { basename, isAbsolute, resolve } from "node:path";
 import { HojaRequestError, type HojaClient, type IssueRef, type IssueView, type Resolved } from "./hoja.ts";
 import { clawSession, findRunBlock, launchTab, tabLabel, type TernExec } from "./launcher.ts";
+import { describePlan, type LaunchPlan } from "./launch-plan.ts";
 import { TERMINAL, type ClawStore, type Run, type SpawnInput, type OutboxOp } from "./store.ts";
 
 export const MAX_INTENT_ATTEMPTS = 5;
 export const RECONCILE_MS = 15_000;
 export const HOJA_START_STATE = "In Progress";
 export type ClawHoja = Pick<HojaClient, "resolve" | "createIssue" | "readIssue" | "findIssueByMarker" | "comment" | "setState">;
-export type LaunchDeps = { store: ClawStore; hoja: ClawHoja; tern: TernExec; workspace: string; now?: () => Date };
+/** `planLaunch` decides how the worker loads extensions; absent means Pi's own package discovery. */
+export type LaunchDeps = { store: ClawStore; hoja: ClawHoja; tern: TernExec; workspace: string; now?: () => Date; planLaunch?: (cwd: string) => LaunchPlan };
 
 /** The worker's model choice. Both unset means pi's configured default. pi's --provider only searches for --model, so a provider needs one. */
 export function workerModel(input: { provider?: string; model?: string }): { provider?: string; model?: string } {
@@ -276,12 +278,19 @@ export async function continueRun(run: Run, deps: LaunchDeps): Promise<Run> {
 		run.phase = "tab_opening";
 		store.saveRun(run);
 		try {
+			// A configured package and a cwd-local package that name the same repository load every extension twice
+			// and pi exits on the tool conflicts. The plan keeps one copy, preferring this worker's own checkout.
+			const plan = deps.planLaunch?.(run.cwd) ?? { mode: "discovery" as const };
 			const prompt = `Read and execute your Claw task file in full: ${store.taskPath(run.id)}`;
-			const { tab, block, named } = await launchTab(tern, { session, cwd: run.cwd, label: tabNameFor(run), runId: run.id, clawDir: store.dir, prompt, provider: run.provider, model: run.model });
+			const { tab, block, named } = await launchTab(tern, {
+				session, cwd: run.cwd, label: tabNameFor(run), runId: run.id, clawDir: store.dir, prompt, provider: run.provider, model: run.model,
+				plan, logPath: store.workerLogPath(run.id),
+			});
 			run.tab = tab;
 			run.block = block;
 			run.phase = "tab_open";
 			run.error = undefined;
+			run.launchNote = describePlan(plan);
 			run.tabWarning = named ? undefined : `worker tab is open but could not be renamed to "${tabNameFor(run)}"`;
 			store.saveRun(run);
 		} catch (error) {

@@ -30,6 +30,8 @@ export type Run = {
 	hoja?: HojaRef; attempts: number; outbox: OutboxOp[]; seen: string[]; error?: string;
 	/** The worker is running but its tab did not take the run label; shown by claw_read and status. */
 	tabWarning?: string;
+	/** How extensions were resolved for this worker when the launch differed from Pi's own package discovery. */
+	launchNote?: string;
 	/** Last Hoja write failure; the op stays pending and is retried. Kept apart from `error` so it cannot hide a launch failure. */
 	syncError?: string;
 	/** ISO instant after which no side effect may start (the spawn request's expiry). Checked before the Hoja create and before the tab. */
@@ -141,6 +143,14 @@ export class ClawStore {
 	}
 	taskPath(id: string): string { return join(this.runsDir, `${id}.task.md`); }
 	eventsPath(id: string): string { return join(this.runsDir, `${id}.events.jsonl`); }
+	/** The worker's own stderr, captured by the launch command so a startup failure can name its reason. */
+	workerLogPath(id: string): string { return join(this.runsDir, `${id}.worker.log`); }
+	readWorkerLog(id: string, maxBytes = 16_384): string {
+		try {
+			const raw = readFileSync(this.workerLogPath(id));
+			return raw.subarray(Math.max(0, raw.length - maxBytes)).toString("utf8");
+		} catch { return ""; }
+	}
 	appendEvent(event: ClawEvent): void { appendFileSync(this.eventsPath(event.runId), `${JSON.stringify(event)}\n`); }
 	readEvents(id: string, offset: number) { return readLines<ClawEvent>(this.eventsPath(id), offset); }
 

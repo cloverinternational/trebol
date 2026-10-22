@@ -7,6 +7,7 @@ Release metadata is kept in `package.json`, `update-manifest.json`, and this fil
 ### Fixed
 
 - Claw: sending input to an idle worker re-arms the idle notice for its next settled turn, and `status` reports `since` for runs awaiting the user.
+- Claw workers start in a worktree of this repository again. Pi compares package sources by lexical path, so a checkout registered in `~/.pi/agent/settings.json` plus the same repository's own `.pi/settings.json` `packages: [".."]` loaded every extension twice and pi exited on `Tool "X" conflicts with ...`. New `.pi/lib/claw/launch-plan.ts` identifies a repository by its git common dir (realpath outside git), keeps the checkout the worker runs in, and launches the worker with an explicit `-ne -e ...` extension plan; distinct repositories are untouched and the decision is recorded in `launchNote`. A worker that dies before `session_start` is now `failed` with the reason from its captured stderr (`.swarm/claw/runs/<run>.worker.log`) instead of `lost`.
 
 ## [0.7.0] - 2026-10-21
 

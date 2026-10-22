@@ -73,7 +73,7 @@ export function releaseLock(store: ClawStore): void {
 	if (readJson<{ pid: number }>(store.lockPath)?.pid === process.pid) rmSync(store.lockPath, { force: true });
 }
 
-const summary = (r: Run) => ({ id: r.id, label: r.label, status: r.status, phase: r.phase, project: r.project, assignee: r.assignee, identifier: r.hoja?.identifier, block: r.block, pid: r.pid, error: r.error, finish: r.finish });
+const summary = (r: Run) => ({ id: r.id, label: r.label, status: r.status, phase: r.phase, project: r.project, assignee: r.assignee, identifier: r.hoja?.identifier, block: r.block, pid: r.pid, error: r.error, launchNote: r.launchNote, finish: r.finish });
 export const isActive = (r: Run) => !TERMINAL.includes(r.status) && r.status !== "awaiting_user";
 
 /** Closes a run's worker tab once. A block Tern no longer has is already closed, not an error. Only blocks the daemon
@@ -190,6 +190,28 @@ export async function processRequests(deps: DaemonDeps): Promise<void> {
 	}
 }
 
+/** No event means the worker never reached `session_start`: it died while pi was still starting. */
+const neverStarted = (run: Run): boolean => run.pid === undefined && run.eventsOffset === 0 && run.phase === "tab_open";
+
+/** The first actionable line of a worker's captured stderr. pi prints one line per startup failure. */
+export function startupFailureReason(log: string): string | undefined {
+	const line = log.split("\n").map((entry) => entry.trim()).find((entry) => entry.length > 0
+		&& /Failed to load extension|conflicts with|Unknown option|Cannot find module|ERR_MODULE_NOT_FOUND|SyntaxError|EACCES|EISDIR|ENOENT/i.test(entry));
+	if (!line) return undefined;
+	return line.replace(/\s+/g, " ").slice(0, 300);
+}
+
+/** A worker that died before its first session event is failed with the reason, never reported as "lost". */
+function failStartup(run: Run, deps: DaemonDeps): void {
+	const reason = startupFailureReason(deps.store.readWorkerLog(run.id));
+	run.status = "failed";
+	run.error = (reason
+		? `worker exited before session_start: ${reason}`
+		: `worker exited before session_start and wrote no reason (stderr log: ${deps.store.workerLogPath(run.id)})`).slice(0, 500);
+	queueComment(run, `Claw: ${run.error}. No completion is implied.`);
+	deps.store.appendInbox({ kind: "run_failed", runId: run.id, text: `${run.label} failed: ${run.error}`, key: `fail:${run.id}` });
+}
+
 export function applyEvent(run: Run, ev: ClawEvent, store: ClawStore): void {
 	if (run.seen.includes(ev.eid)) return;
 	run.seen = [...run.seen, ev.eid].slice(-500);
@@ -290,7 +312,10 @@ export async function reconcileRun(run: Run, deps: DaemonDeps, live: Set<number>
 			const again = store.readEvents(run.id, run.eventsOffset);
 			for (const ev of again.items) applyEvent(run, ev, store);
 			run.eventsOffset = again.offset;
-			if (isActive(run)) {
+			// A worker that never reached session_start died starting up (a duplicate extension registration,
+			// a bad flag, a missing module). That is a failure with a reason, never a silent "lost" run.
+			if (isActive(run) && neverStarted(run)) failStartup(run, deps);
+			else if (isActive(run)) {
 				run.status = "lost";
 				run.error = "worker stopped without claw_finish (process or tab gone)";
 				queueComment(run, `Claw: ${run.error}. No completion is implied.`);
