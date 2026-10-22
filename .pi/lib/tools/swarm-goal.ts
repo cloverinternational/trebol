@@ -35,24 +35,39 @@ export type GoalHost = {
   observe(observer: (event: GoalHostEvent) => void): () => void;
 };
 const hosts = new WeakMap<object, GoalHost>();
-const pendingGoals = new WeakMap<object, { condition: string; source?: string }>();
+/** Pi gives every extension its own API object and its own module instance, so an in-process host cannot be found by
+ *  module state alone (measured: two extensions loading this file do not share the WeakMap). Extension-to-extension
+ *  state therefore lives on a process-global symbol, keyed by the session both extensions serve. */
+const HOST_TABLE = Symbol.for("pi-swarm-goal-hosts");
+type HostTable = Map<string, { host: GoalHost; pi: any }>;
+const hostTable = (): HostTable => {
+  const global = globalThis as any;
+  if (!(global[HOST_TABLE] instanceof Map)) global[HOST_TABLE] = new Map();
+  return global[HOST_TABLE] as HostTable;
+};
 
-/** The goal host registered on this Pi instance, if the goal extension is loaded. */
-export function goalHost(pi: any): GoalHost | undefined { return hosts.get(pi); }
+/** The key both extensions of one pi session can compute: they see the same session id, not the same API object. */
+export function goalSessionKey(ctx: any): string {
+  const id = ctx?.sessionManager?.getSessionId?.() ?? ctx?.sessionId;
+  return typeof id === "string" && id ? id : "process";
+}
 
-/** Establish a goal on a registered host, or queue it for the goal extension when it registers on this Pi instance. */
-export function establishGoal(pi: any, input: { condition: string; source?: string }): "established" | "existing" | "queued" {
-  const host = goalHost(pi);
-  if (!host) {
-    const queued = pendingGoals.get(pi);
-    if (!queued) pendingGoals.set(pi, { condition: input.condition, source: input.source });
-    return "queued";
-  }
+/** The goal host for THIS Pi API object (same extension), or one registered for the same object. */
+export function goalHost(pi: any): GoalHost | undefined {
+  return hosts.get(pi) ?? [...hostTable().values()].find((entry) => entry.pi === pi)?.host;
+}
+
+/** The goal host of the session this extension serves. Undefined when the goal extension is not loaded in this process. */
+export function goalHostForSession(ctx: any): GoalHost | undefined { return hostTable().get(goalSessionKey(ctx))?.host; }
+
+/** Establish a goal on a host, when one is available in this process. */
+export function establishGoal(host: GoalHost | undefined, input: { condition: string; source?: string }): "established" | "existing" | "missing" {
+  if (!host) return "missing";
   return host.establish(input).created ? "established" : "existing";
 }
 
 /** Clear the active goal before reporting a result, so the settle that follows cannot start another judge call. */
-export function clearGoal(pi: any, reason = "cleared"): boolean { return goalHost(pi)?.clear(reason) ?? false; }
+export function clearGoal(host: GoalHost | undefined, reason = "cleared"): boolean { return host?.clear(reason) ?? false; }
 type Schedule = { id: string; prompt: string; kind: "delay" | "interval" | "cron"; value: string; nextAt: number; expiresAt: number; loop: boolean; timer?: ReturnType<typeof setTimeout>; valid: () => boolean };
 const ENTRY = "pi-swarm-goal";
 const WEEK = 7 * 24 * 3600_000;
@@ -328,12 +343,8 @@ export function registerSwarmGoal(pi: any, options: SwarmGoalOptions = {}) {
       // A cleared goal restores only as its tombstone: the same source can never re-arm it.
       endedSource = last.data.source;
     }
-    // A host that asked for a goal before this extension finished registering gets it now, after the restore.
-    const queued = pendingGoals.get(pi);
-    if (queued) {
-      pendingGoals.delete(pi);
-      try { establish(queued); } catch { /* a goal already set by a human wins */ }
-    }
+    // Publish this session's host so the extension that owns the worker lifecycle (Claw) can drive the same loop.
+    hostTable().set(goalSessionKey(ctx), { host, pi });
   });
   pi.on("agent_before_settle", async (_event: any, ctx: any) => {
     if (_event.outcome !== "completed" || _event.continue || ctx.hasPendingMessages?.()) return;
@@ -382,7 +393,13 @@ export function registerSwarmGoal(pi: any, options: SwarmGoalOptions = {}) {
       }
     } finally { evaluating = false; await unlink(transcriptPath).catch(() => {}); }
   });
-  pi.on("session_shutdown", () => { live = false; revision++; for (const s of schedules.values()) clearTimeout(s.timer); schedules.clear(); removeScheduleStatus?.(); removeScheduleStatus = undefined; });
+  pi.on("session_shutdown", () => {
+    live = false; revision++;
+    for (const s of schedules.values()) clearTimeout(s.timer);
+    schedules.clear(); removeScheduleStatus?.(); removeScheduleStatus = undefined;
+    // A finished session must not leave a host another extension could drive.
+    for (const [key, entry] of hostTable()) if (entry.host === host) hostTable().delete(key);
+  });
   const api = { getGoal: () => goal };
   registrations.set(pi, api);
   return api;

@@ -15,7 +15,8 @@ Tests: `.pi/test/claw/claw.test.ts` (lifecycle, daemon, Hoja, Tern, worker) and
 - Per-chat mode: `/claw on|off` persists `claw-mode` in the session transcript; `/reload`, resume and restart restore the chat's own mode (routing and inbox ownership only, no daemon start, tab rename or store change). A new chat starts off. See `docs/claw/reload-persistence-2026-10-21.md`.
 - `/claw status` — control state, daemon pid, run counts, pending Hoja syncs, triggers.
 - `claw_spawn`, `claw_list`, `claw_read`, `claw_send`, `claw_cancel`, `claw_trigger` (add|list|remove).
-- Worker only: `claw_finish {outcome: completed|failed|needs_user, summary, evidence[]}`. `completed` needs evidence.
+- Worker only: `claw_finish {outcome: completed|failed|needs_user, summary, evidence[]}` (clears the completion goal
+  first); `claw_goal {action: status|widen, criteria?}` reads or widens the goal. `completed` needs evidence.
 
 ## Status model
 
@@ -54,6 +55,45 @@ falls back to `--no-approve`, which suppresses the project-local copy only.
 A conflict between two *different* repositories is not deduplicated. Pi reports it, the worker
 dies before `session_start`, and the run is recorded `failed` with that line instead of `lost`.
 Worker stderr is captured to `.swarm/claw/runs/<run>.worker.log` for that reason.
+
+## Completion goal (always on)
+
+Every run is spawned under a completion goal. It is not opt-in and it has **no turn cap, no deadline and no expiry**
+(`GOAL_LONG_MS` is a warning threshold, never a deadline). While the goal is active the worker's own judge loop keeps
+continuing on NOT_MET; nothing in Claw limits the number of turns.
+
+- **Derived and recorded.** `deriveGoal` (`.pi/lib/claw/goal.ts`) turns the task into a condition: the objective plus
+  the acceptance criteria the task states (bullets and requirement sentences, at most 8, bounded well under the goal
+  command's 4000-character limit). It is written to `run.goal` at spawn — before any side effect, so it is auditable even
+  when the launch fails — and to `runs/<run>.goal.json` when the task file is written. A task with no objective derives
+  nothing and the run is recorded `unavailable` instead of guessing.
+- **Established after launch, never through the prompt.** The launch prompt stays
+  `Read and execute your Claw task file in full: …`. A positional prompt beginning with `/` is dispatched by Pi as a
+  command, not as a turn, so the goal never rides it. The worker extension reads the spec and establishes it on the goal
+  host at `before_agent_start`, in the worker's own process. Pi gives every extension its own API object *and* its own
+  module instance (measured), so the host is published on a process-global symbol keyed by session id
+  (`Symbol.for("pi-swarm-goal-hosts")`), not in module state.
+- **Idempotent, restart-safe.** Establishment is keyed by the run's source (`claw:<runId>`). A resumed session restores
+  the persisted goal from its own transcript and the worker leaves it alone; a goal that already ended for that source is
+  never re-armed, and a daemon restart reads `run.goal` back from the run record without duplicating anything. Ending a
+  goal removes its spec file, so nothing can re-establish it after the fact.
+- **Semantic brakes, each exactly once.** MET, IMPOSSIBLE, `claw_finish`, cancellation, the worker's own question
+  (`awaiting_decision`) and any terminal run state. `claw_finish` clears the goal *before* recording the report, so the
+  settle that follows that turn performs **zero** further judge calls (the measured zombie-loop defect). The daemon ends
+  the goal once (`endGoal` is idempotent) and withdraws the spec; a late or duplicate goal event cannot reopen it.
+- **Widening only.** `claw_goal {action: status|widen}` reads the condition and appends acceptance criteria. There is no
+  worker-side way to shorten, clear or replace the goal; a human can still use `/goal` in the worker's tab.
+- **Observability.** `run.goal` (and therefore `claw_read`), `claw_list`, `claw_spawn`/`claw_cancel` responses and
+  `/claw status` (`goals[]`) expose the condition, turns used, judge calls, last verdict, elapsed seconds, end reason and
+  whether the long-run warning fired. When a goal has run `GOAL_LONG_MS` (1 h) the daemon appends ONE `run_goal_long`
+  inbox notice and never stops the run.
+- **Judge bounds unchanged.** Per settlement the judge still has 8 tool turns and an 8 MiB transcript cap
+  (`MAX_VERDICT_TOOL_TURNS`, `MAX_TRANSCRIPT_BYTES` in `.pi/lib/tools/swarm-goal.ts`); the *goal* has no bound.
+
+Tests: `.pi/test/claw/goal.test.ts` (derivation, recording, the loop, every brake, restart, near-misses),
+`.pi/test/tools/swarm-goal.test.ts` (host API, session lookup, observer), mutation checks in
+`tools/verify/claw-goal-mutations.mjs` (20 guards), live demonstration in `tools/e2e/claw-goal-always.mjs` (real `pi`,
+real extensions, a harmless `/tmp` condition).
 
 ## Worker-local clarification
 
@@ -153,6 +193,9 @@ See `docs/claw/e2e-evidence-2026-10-21.md` for run, Hoja, trigger and session ID
 - Inbox delivery is at-least-once in the crash window after persistence, and can drop an item in the dispatch-to-persist window. Exactly-once is not claimed.
 - A timed-out `claw_spawn` may still start a run; check `claw_list` before retrying.
 - Worker depth 1 is enforced by a `tool_call` block list (`WORKER_BLOCKED_TOOLS`); normal approval gates are unchanged.
+- The completion goal is judged by the worker's own provider. A judge provider error is a brake: the goal ends with
+  status `error` (one notice), no further judge call is made, and the run keeps its own turn and still needs a truthful
+  `claw_finish`. A goal that is never MET and is never reported keeps running by design: use `claw_cancel` to stop it.
 - The launch gate parses syntax only: a source that parses but fails while registering (a duplicate tool, a throw inside
   an extension factory) is still discovered by the worker, not by the gate. `npm run check:install` covers that case
   manually. Parse results are cached per process by path, mtime and size; a file rewritten within the same mtime tick and

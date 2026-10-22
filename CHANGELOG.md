@@ -6,6 +6,17 @@ Release metadata is kept in `package.json`, `update-manifest.json`, and this fil
 
 ### Added
 
+- Claw: every worker run now carries an **always-on** completion goal. The condition is derived from the task the run
+  was spawned for (its objective plus the acceptance criteria it states) and recorded on the run
+  (`run.goal`, `claw_read`/`claw_list`/`/claw status`), in the task file the worker reads, and in
+  `runs/<run>.goal.json`. The worker establishes it after launch in its own process — never as the positional launch
+  prompt, which Pi would dispatch as a `/goal` command — and `claw_goal` lets a task widen it (widening only; nothing
+  in the worker can remove it). There is **no turn cap, no deadline and no expiry**: while the judge answers NOT_MET the
+  loop continues. Only semantic brakes end it, each exactly once: MET, IMPOSSIBLE, `claw_finish` (cleared *before* the
+  report, so the settle that follows pays for zero judge calls), cancellation, the worker's own question, and any
+  terminal run state. Status exposes condition, turns used, judge calls, last verdict and elapsed time; a goal that runs
+  unusually long raises ONE warning notice and is never stopped by it. The judge's per-settle bound (8 tool turns, 8 MiB
+  transcript) is unchanged. See `docs/claw/README.md`.
 - Claw: worker-local clarification. A worker asks the user in its own tab through its native `ask_user_question` modal and continues the same run with the answer; the daemon reports the wait as `awaiting_decision` (distinct from the terminal `needs_user`/`awaiting_user`), refuses `claw_send` while a modal is open, never fabricates a question from a summary, and falls back to a truthful `needs_user` report when the modal is cancelled or unavailable. See `docs/claw/worker-clarification-2026-10-22.md`.
 
 ### Fixed

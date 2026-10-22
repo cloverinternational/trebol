@@ -9,7 +9,7 @@ import { pidAlive } from "../../.pi/lib/claw/daemon.ts";
 import { deliveredInboxIds, pumpInbox } from "../../.pi/lib/claw/inbox.ts";
 import { nameClawTab, ownPaneBlock, ternExec, CLAW_TAB, type TernExec } from "../../.pi/lib/claw/launcher.ts";
 import { WORKER_BLOCKED_TOOLS, askFromCompleted, askFromStarted, recordAsk, recordFinish, recordGoal, recordResumed, recordSettled, recordStarted, validateFinish, workerIdentity } from "../../.pi/lib/claw/child.ts";
-import { establishGoal, clearGoal, goalHost } from "../../.pi/lib/tools/swarm-goal.ts";
+import { clearGoal, establishGoal, goalHostForSession, type GoalHost } from "../../.pi/lib/tools/swarm-goal.ts";
 import { onAgentSettled } from "../../.pi/lib/runtime/agent-settled.ts";
 import { createSessionWakeup } from "../../.pi/lib/runtime/session-wakeup.ts";
 import { latestSessionModeEntry } from "../../.pi/lib/runtime/session-mode-entry.ts";
@@ -61,11 +61,15 @@ export function registerWorker(pi: any, identity: { runId: string; clawDir: stri
 	/** One report at most per reason, so an unavailable goal never floods the run's event file. */
 	const reportedGoalProblems = new Set<string>();
 	let observedGoal = false;
+	/** The goal loop of this worker's own session. Pi gives each extension its own API object, so it is resolved by
+	 *  session, not by module state (see goalHostForSession). */
+	let host: GoalHost | undefined;
+	/** True once this worker's session started: without it there is no session to resolve a goal host for. */
+	let sessionStarted = false;
 	const reportGoal = (event: Parameters<typeof recordGoal>[2]) => recordGoal(store, identity.runId, event);
 	/** Report this worker's own completion loop to the daemon. It changes nothing about the loop or its verdicts. */
 	const observeGoal = (): boolean => {
 		if (observedGoal) return true;
-		const host = goalHost(pi);
 		if (!host) return false;
 		observedGoal = true;
 		host.observe((event) => {
@@ -83,19 +87,21 @@ export function registerWorker(pi: any, identity: { runId: string; clawDir: stri
 	/** Establish the always-on completion goal this run was started with, after launch and in this process.
 	 *  Idempotent: any goal state this session already carries (ours, ended, or a human's) is left untouched, so a
 	 *  restart resumes the persisted goal and never duplicates or re-arms it. */
-	const ensureGoal = () => {
+	const ensureGoal = (ctx: any) => {
+		if (!host && sessionStarted) host = goalHostForSession(ctx);
 		if (!observeGoal()) return goalProblem("the goal extension is not loaded in this worker, so the always-on completion loop cannot run");
 		if (!goalSpec) return goalProblem("this run has no goal spec (no condition was derivable from its task), so no completion loop runs");
-		const state = goalHost(pi)?.status();
+		const state = host?.status();
 		if (state) return;
-		try { establishGoal(pi, { condition: goalSpec.condition, source: goalSpec.source }); }
+		try { establishGoal(host, { condition: goalSpec.condition, source: goalSpec.source }); }
 		catch (error) { goalProblem(`goal not established: ${(error as Error).message}`); }
 	};
 	pi.on?.("session_start", (_event: unknown, ctx: any) => {
+		sessionStarted = true;
 		recordStarted(store, identity.runId, process.pid, ctx?.sessionManager?.getSessionFile?.() ?? undefined);
 	});
-	pi.on?.("before_agent_start", () => {
-		ensureGoal();
+	pi.on?.("before_agent_start", (_event: unknown, ctx: any) => {
+		ensureGoal(ctx);
 		if (!reported) return;
 		reported = false;
 		recordResumed(store, identity.runId);
@@ -108,7 +114,7 @@ export function registerWorker(pi: any, identity: { runId: string; clawDir: stri
 		if (!ask) return;
 		recordAsk(store, identity.runId, ask);
 		// A question is a semantic brake: the loop ends while a human decides, so no judge call is paid for waiting.
-		clearGoal(pi, "awaiting_decision");
+		clearGoal(host, "awaiting_decision");
 	});
 	pi.events?.on?.(PI_ASK_COMPLETED_EVENT, (event: unknown) => {
 		const ask = askFromCompleted(event);
@@ -132,9 +138,9 @@ export function registerWorker(pi: any, identity: { runId: string; clawDir: stri
 		},
 		async execute(_id: string, params: { outcome: string; summary: string; evidence?: string[] }) {
 			const finish = validateFinish(params);
-				// Clear the always-on goal BEFORE reporting: the settle that follows this turn must start no further
-				// judge call, which is the measured zombie-loop defect this ordering fixes.
-				clearGoal(pi, "finish");
+			// Clear the always-on goal BEFORE reporting: the settle that follows this turn must start no further
+			// judge call, which is the measured zombie-loop defect this ordering fixes.
+			clearGoal(host, finish.outcome === "needs_user" ? "needs_user" : "finish");
 			recordFinish(store, identity.runId, finish);
 			reported = true;
 			return text(`Recorded ${finish.outcome} for ${identity.runId}. The orchestrator will be notified; Hoja Done is never set automatically.`);
@@ -155,7 +161,6 @@ export function registerWorker(pi: any, identity: { runId: string; clawDir: stri
 		},
 		async execute(_id: string, params: { action: string; criteria?: string }) {
 			observeGoal();
-			const host = goalHost(pi);
 			if (params.action === "status") return text({ goal: host?.status() ?? null, source: goalSpec?.source ?? null, criteria: goalSpec?.criteria ?? [] });
 			if (params.action !== "widen") throw new Error("action must be status or widen");
 			if (!host) throw new Error("no completion goal is active in this session (the goal extension is not loaded)");

@@ -513,9 +513,12 @@ describe("claw completion goal: brakes, restart and observability on the daemon 
 		expect(run.goal).toMatchObject({ status: "active", turns: 3, judgeCalls: 3, establishedAt });
 		expect(isActive(run)).toBe(true);
 
-		// A restarted worker re-runs its establishment: the same source is already active, so nothing is duplicated.
-		expect(applyGoalEvent(run, { state: "established", condition: run0.goal!.condition }, clock.toISOString())).toBe(true);
+		// A restarted worker re-runs its establishment: the same source is already active, so nothing is duplicated and
+		// the original establishment time (elapsed time and the long-run warning depend on it) is preserved.
+		const later = new Date(clock.getTime() + 120_000).toISOString();
+		expect(applyGoalEvent(run, { state: "established", condition: run0.goal!.condition }, later)).toBe(true);
 		expect(run.goal).toMatchObject({ turns: 3, judgeCalls: 3, establishedAt });
+		expect(run.goal!.establishedAt).toBe(establishedAt);
 		expect(store.listRuns()).toHaveLength(1);
 	});
 
@@ -526,8 +529,10 @@ describe("claw completion goal: brakes, restart and observability on the daemon 
 		let run = store.getRun(run0.id)!;
 		expect(run.status).toBe("completed");
 		expect(run.goal).toMatchObject({ status: "cleared", endReason: "finish" });
-		// The establishment arrives late (the worker started establishing as it finished). It is ignored.
+		// The establishment arrives late (the worker started establishing as it finished). It is ignored, both for a
+		// terminal run and — independently — for a goal that already ended.
 		applyEvent(run, { eid: "late", type: "goal", at: clock.toISOString(), runId: run0.id, goal: { state: "established", condition: "late" } }, store);
+		expect(applyGoalEvent({ goal: { ...run.goal! } }, { state: "established", condition: "late" }, clock.toISOString())).toBe(false);
 		expect(run.goal).toMatchObject({ status: "cleared", endReason: "finish" });
 		expect(run.goal!.condition).toBe(run0.goal!.condition);
 		store.saveRun(run);

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { boundTranscript, establishGoal, goalHost, grepTranscript, readTranscriptLines, registerSwarmGoal } from "../../lib/tools/swarm-goal.ts";
+import { boundTranscript, establishGoal, goalHost, goalHostForSession, grepTranscript, readTranscriptLines, registerSwarmGoal } from "../../lib/tools/swarm-goal.ts";
 function harness(evaluate: any = async () => "MET") {
   const tools = new Map<string, any>(), commands = new Map<string, any>(), handlers = new Map<string, any[]>();
   const ctx = { ui: { notify: vi.fn() }, sessionManager: { getBranch: () => [] } };
@@ -114,19 +114,27 @@ describe("swarm-goal", () => {
     expect(host.establish({ condition: "ship it", source: "claw:run-1" })).toMatchObject({ created: false });
     expect(host.status()).toBeUndefined();
   });
-  it("a host that asks before the goal extension registers still gets its goal, once", async () => {
+  it("another extension finds the host by session, never by module state", async () => {
     const tools = new Map<string, any>(), commands = new Map<string, any>(), handlers = new Map<string, any[]>();
     const pi = { registerTool: (t: any) => tools.set(t.name, t), registerCommand: (n: string, c: any) => commands.set(n, c), on: (n: string, h: any) => handlers.set(n, [...handlers.get(n) ?? [], h]), sendMessage: vi.fn(), appendEntry: vi.fn() };
-    const ctx = { ui: { notify: vi.fn() }, sessionManager: { getBranch: () => [] } };
-    expect(establishGoal(pi, { condition: "ship it", source: "claw:run-9" })).toBe("queued");
+    const ctx = { ui: { notify: vi.fn() }, sessionManager: { getBranch: () => [], getSessionId: () => "session-9" } };
+    // Pi hands each extension its own API object and module instance, so the host is only reachable by session.
+    expect(goalHostForSession(ctx)).toBeUndefined();
     const api = registerSwarmGoal(pi, { evaluate: async () => "MET" });
-    let result: any;
     for (const handler of handlers.get("session_start") ?? []) await handler({}, ctx);
-    expect(api.getGoal()).toMatchObject({ status: "active", source: "claw:run-9", condition: "ship it" });
-    expect(goalHost(pi)!.establish({ condition: "ship it", source: "claw:run-9" })).toMatchObject({ created: false });
+    const host = goalHostForSession(ctx)!;
+    expect(host).toBeDefined();
+    expect(establishGoal(host, { condition: "ship it", source: "claw:run-9" })).toBe("established");
+    expect(establishGoal(host, { condition: "ship it", source: "claw:run-9" })).toBe("existing");
+    // Another session in the same process gets the host of ITS id, not a neighbour's.
+    expect(goalHostForSession({ sessionManager: { getSessionId: () => "other" } })).toBeUndefined();
+    let result: any;
     for (const handler of handlers.get("agent_before_settle") ?? []) result = await handler({ outcome: "completed", continue: false, entries: [], context: { contextMessages: [] } }, ctx);
     expect(result).toBeUndefined();
-    expect(api.getGoal()).toMatchObject({ status: "met" });
+    expect(api.getGoal()).toMatchObject({ status: "met", source: "claw:run-9" });
+    for (const handler of handlers.get("session_shutdown") ?? []) await handler({}, ctx);
+    // A finished session leaves nothing another extension could drive.
+    expect(goalHostForSession(ctx)).toBeUndefined();
   });
   it("a host observer sees every verdict and cannot change the continuation", async () => {
     const verdicts = ["NOT_MET", "MET"];
