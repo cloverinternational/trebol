@@ -10,7 +10,64 @@ import { registerScheduleStatus, type PendingSchedule } from "../runtime/schedul
 export type GoalVerdict = "MET" | "NOT_MET" | "IMPOSSIBLE";
 export type GoalEvaluator = (condition: string, transcriptPath: string, ctx: any) => Promise<GoalVerdict>;
 export interface SwarmGoalOptions { evaluate?: GoalEvaluator }
-type Goal = { condition: string; status: "active" | "met" | "impossible" | "error" };
+type GoalStatus = "active" | "met" | "impossible" | "error";
+/** `source` names the owner that established the goal (for example `claw:run-1`). A goal is never resurrected for a
+ *  source that already ended, so a restarted process cannot duplicate or re-arm a finished loop. */
+type Goal = { condition: string; status: GoalStatus; source?: string; judgeCalls: number; turns: number; lastVerdict?: GoalVerdict };
+/** What a host is told about the goal lifecycle. Advisory only: an observer never changes a verdict, a continuation or
+ *  the per-settle bounds (8 judge tool turns, 8 MiB transcript). */
+export type GoalHostEvent =
+  | { kind: "established"; condition: string; source?: string }
+  | { kind: "widened"; condition: string; source?: string }
+  | { kind: "verdict"; verdict: GoalVerdict; condition: string; turns: number; judgeCalls: number }
+  | { kind: "ended"; status: GoalStatus | "cleared"; reason?: string; condition?: string; turns: number; judgeCalls: number };
+export type GoalHostState = { condition: string; status: GoalStatus | "cleared"; source?: string; turns: number; judgeCalls: number; lastVerdict?: GoalVerdict };
+/** In-process control surface for a host extension (Claw) that owns the worker lifecycle. There is deliberately no way
+ *  to remove a goal from here: a goal ends by verdict, by its owner clearing it (claw_finish), or by shutdown. */
+export type GoalHost = {
+  /** Establish the goal once. Returns created=false when this source already owns it or already ended it. */
+  establish(input: { condition: string; source?: string }): { created: boolean; state: GoalHostState };
+  /** Add acceptance criteria to an active goal. Widening only: nothing here can shorten or remove the condition. */
+  widen(criteria: string): GoalHostState;
+  clear(reason?: string): boolean;
+  status(): GoalHostState | undefined;
+  /** Returns an unsubscribe function. */
+  observe(observer: (event: GoalHostEvent) => void): () => void;
+};
+const hosts = new WeakMap<object, GoalHost>();
+/** Pi gives every extension its own API object and its own module instance, so an in-process host cannot be found by
+ *  module state alone (measured: two extensions loading this file do not share the WeakMap). Extension-to-extension
+ *  state therefore lives on a process-global symbol, keyed by the session both extensions serve. */
+const HOST_TABLE = Symbol.for("pi-swarm-goal-hosts");
+type HostTable = Map<string, { host: GoalHost; pi: any }>;
+const hostTable = (): HostTable => {
+  const global = globalThis as any;
+  if (!(global[HOST_TABLE] instanceof Map)) global[HOST_TABLE] = new Map();
+  return global[HOST_TABLE] as HostTable;
+};
+
+/** The key both extensions of one pi session can compute: they see the same session id, not the same API object. */
+export function goalSessionKey(ctx: any): string {
+  const id = ctx?.sessionManager?.getSessionId?.() ?? ctx?.sessionId;
+  return typeof id === "string" && id ? id : "process";
+}
+
+/** The goal host for THIS Pi API object (same extension), or one registered for the same object. */
+export function goalHost(pi: any): GoalHost | undefined {
+  return hosts.get(pi) ?? [...hostTable().values()].find((entry) => entry.pi === pi)?.host;
+}
+
+/** The goal host of the session this extension serves. Undefined when the goal extension is not loaded in this process. */
+export function goalHostForSession(ctx: any): GoalHost | undefined { return hostTable().get(goalSessionKey(ctx))?.host; }
+
+/** Establish a goal on a host, when one is available in this process. */
+export function establishGoal(host: GoalHost | undefined, input: { condition: string; source?: string }): "established" | "existing" | "missing" {
+  if (!host) return "missing";
+  return host.establish(input).created ? "established" : "existing";
+}
+
+/** Clear the active goal before reporting a result, so the settle that follows cannot start another judge call. */
+export function clearGoal(host: GoalHost | undefined, reason = "cleared"): boolean { return host?.clear(reason) ?? false; }
 type Schedule = { id: string; prompt: string; kind: "delay" | "interval" | "cron"; value: string; nextAt: number; expiresAt: number; loop: boolean; timer?: ReturnType<typeof setTimeout>; valid: () => boolean };
 const ENTRY = "pi-swarm-goal";
 const WEEK = 7 * 24 * 3600_000;
@@ -123,11 +180,70 @@ export function registerSwarmGoal(pi: any, options: SwarmGoalOptions = {}) {
   const wake = createSessionWakeup(pi);
   const schedules = new Map<string, Schedule>();
   let goal: Goal | undefined;
+  /** The source whose goal already ended (met, impossible, error or cleared). It is never re-established: a restarted
+   *  worker must resume the persisted goal state or end safely, never start a second loop for the same run. */
+  let endedSource: string | undefined;
+  const observers: ((event: GoalHostEvent) => void)[] = [];
   let revision = 0;
   let live = true;
   let evaluating = false;
   let context: any;
   let removeScheduleStatus: (() => void) | undefined;
+  const emit = (event: GoalHostEvent) => {
+    for (const observer of observers) {
+      // A host observer reports; it must never break the loop or change a verdict.
+      try { observer(event); } catch { /* ignore a failing observer */ }
+    }
+  };
+  const snapshot = (): GoalHostState | undefined => goal
+    ? { condition: goal.condition, status: goal.status, source: goal.source, turns: goal.turns, judgeCalls: goal.judgeCalls, lastVerdict: goal.lastVerdict }
+    : undefined;
+  const establish = (input: { condition: string; source?: string }): { created: boolean; state: GoalHostState } => {
+    const condition = String(input?.condition ?? "").trim();
+    if (!condition) throw new Error("goal condition is required");
+    if (condition.length > 4000) throw new Error("goal condition exceeds 4000 characters");
+    const source = input.source?.trim() || undefined;
+    if (goal?.status === "active") {
+      // One owner at a time. Re-establishing the same source is a no-op (idempotent across turns and restarts).
+      if (!source || goal.source === source) return { created: false, state: snapshot()! };
+      throw new Error(`a goal is already active in this session: ${clip(goal.condition, 200)}`);
+    }
+    // Ended for this source: resumed state wins over an establishment request, so no duplicate goal appears.
+    if (source && source === endedSource) return { created: false, state: snapshot() ?? { condition, status: "cleared", source, turns: 0, judgeCalls: 0 } };
+    revision++;
+    goal = { condition, status: "active", source, judgeCalls: 0, turns: 0 };
+    persist();
+    emit({ kind: "established", condition, source });
+    return { created: true, state: snapshot()! };
+  };
+  const widen = (criteria: string): GoalHostState => {
+    const extra = String(criteria ?? "").trim();
+    if (!extra) throw new Error("widening criteria are required");
+    if (!goal || goal.status !== "active") throw new Error("no active goal to widen");
+    const next = `${goal.condition}\n\nAdditional acceptance criteria:\n- ${extra}`;
+    if (next.length > 4000) throw new Error(`widened goal exceeds 4000 characters (${next.length})`);
+    revision++;
+    goal = { ...goal, condition: next };
+    persist();
+    emit({ kind: "widened", condition: next, source: goal.source });
+    return snapshot()!;
+  };
+  const clearActive = (reason = "cleared"): boolean => {
+    if (!goal || goal.status !== "active") return false;
+    revision++;
+    const ended = goal;
+    if (ended.source) endedSource = ended.source;
+    goal = undefined;
+    persist();
+    notify(`Goal cleared (${reason}): ${ended.condition}`);
+    emit({ kind: "ended", status: "cleared", reason, condition: ended.condition, turns: ended.turns, judgeCalls: ended.judgeCalls });
+    return true;
+  };
+  const host: GoalHost = { establish, widen, clear: (reason) => clearActive(reason), status: snapshot, observe: (observer) => {
+    observers.push(observer);
+    return () => { const at = observers.indexOf(observer); if (at >= 0) observers.splice(at, 1); };
+  } };
+  hosts.set(pi, host);
   const nextSchedule = (now: number): PendingSchedule | undefined => {
     if (!live) return;
     let next: Schedule | undefined;
@@ -138,7 +254,8 @@ export function registerSwarmGoal(pi: any, options: SwarmGoalOptions = {}) {
     return next ? { nextAt: next.nextAt, kind: next.loop || next.kind === "interval" ? "loop" : "schedule" } : undefined;
   };
   const notify = (text: string, level = "info") => context?.ui?.notify?.(text, level);
-  const persist = () => pi.appendEntry?.(ENTRY, goal ?? { status: "cleared" });
+  // The tombstone keeps the owning source, so a restart restores "this run's goal already ended" instead of re-arming it.
+  const persist = () => pi.appendEntry?.(ENTRY, goal ?? { status: "cleared", source: endedSource });
   const describe = (s: Schedule) => ({ id: s.id, prompt: s.prompt, kind: s.kind, value: s.value, next_fire_at: new Date(s.nextAt).toISOString(), loop: s.loop });
   const cancel = (id: string) => { const s = schedules.get(id); if (!s) throw new Error("schedule not found"); clearTimeout(s.timer); schedules.delete(id); };
   const arm = (s: Schedule) => {
@@ -176,7 +293,11 @@ export function registerSwarmGoal(pi: any, options: SwarmGoalOptions = {}) {
   const markComplete = () => {
     if (!goal || goal.status !== "active") throw new Error("no active goal to complete");
     revision++;
-    goal = { ...goal, status: "met" }; persist(); notify(`Goal met: ${goal.condition}`);
+    const ended = goal;
+    goal = { ...goal, status: "met", judgeCalls: ended.judgeCalls, turns: ended.turns };
+    if (goal.source) endedSource = goal.source;
+    persist(); notify(`Goal met: ${goal.condition}`);
+    emit({ kind: "ended", status: "met", condition: goal.condition, turns: goal.turns, judgeCalls: goal.judgeCalls });
     return goal;
   };
   pi.registerTool(withDefaultToolRenderer({ name: "goal_complete", label: "Complete goal", description: "Mark the active /goal complete. Call only after verifying with current evidence that the goal condition is fully satisfied. Fails if no goal is active.", parameters: { type: "object", properties: {} }, execute: async () => {
@@ -189,9 +310,9 @@ export function registerSwarmGoal(pi: any, options: SwarmGoalOptions = {}) {
     if (!input || input === "status") { notify(goal ? `${goal.status}: ${goal.condition}` : "No active goal"); return; }
     if (input === "complete") { markComplete(); return; }
     revision++;
-    if (input === "clear") { goal = undefined; persist(); notify("Goal cleared"); return; }
+    if (input === "clear") { if (goal?.status === "active" && goal.source) endedSource = goal.source; goal = undefined; persist(); notify("Goal cleared"); return; }
     if (input.length > 4000) throw new Error("goal condition exceeds 4000 characters");
-    goal = { condition: input, status: "active" }; persist();
+    goal = { condition: input, status: "active", judgeCalls: 0, turns: 0 }; persist();
     await wake.send({ customType: "swarm-goal", content: `Work toward this goal: ${input}`, display: true }, wake.capture());
   } });
   pi.registerCommand("loop", { description: "Repeat a task: /loop [interval] task; status or stop", handler: async (args: string, ctx: any) => {
@@ -207,13 +328,23 @@ export function registerSwarmGoal(pi: any, options: SwarmGoalOptions = {}) {
   } });
   pi.on("session_start", (_event: any, ctx: any) => {
     revision++; live = true; context = ctx; goal = undefined;
+    endedSource = undefined;
     for (const s of schedules.values()) clearTimeout(s.timer); schedules.clear();
     removeScheduleStatus?.();
     const sessionId = ctx.sessionManager?.getSessionId?.();
     removeScheduleStatus = sessionId ? registerScheduleStatus(sessionId, nextSchedule) : undefined;
     const entries = ctx.sessionManager?.getBranch?.() ?? [];
     const last = [...entries].reverse().find((e: any) => e.customType === ENTRY);
-    if (last?.data?.condition && ["active", "met", "impossible", "error"].includes(last.data.status)) goal = { ...last.data };
+    if (last?.data?.condition && ["active", "met", "impossible", "error"].includes(last.data.status)) {
+      // Counters may be absent in entries written by an older build; the goal itself is still restored.
+      goal = { judgeCalls: 0, turns: 0, ...last.data };
+      if (goal!.status !== "active" && goal!.source) endedSource = goal!.source;
+    } else if (last?.data?.status === "cleared" && typeof last.data.source === "string") {
+      // A cleared goal restores only as its tombstone: the same source can never re-arm it.
+      endedSource = last.data.source;
+    }
+    // Publish this session's host so the extension that owns the worker lifecycle (Claw) can drive the same loop.
+    hostTable().set(goalSessionKey(ctx), { host, pi });
   });
   pi.on("agent_before_settle", async (_event: any, ctx: any) => {
     if (_event.outcome !== "completed" || _event.continue || ctx.hasPendingMessages?.()) return;
@@ -237,13 +368,38 @@ export function registerSwarmGoal(pi: any, options: SwarmGoalOptions = {}) {
       const verdict = await (options.evaluate ?? defaultEvaluator)(current.condition, transcriptPath, ctx);
       if (!owner() || version !== revision || goal !== current) return;
       if (!["MET", "NOT_MET", "IMPOSSIBLE"].includes(verdict)) throw new Error("invalid goal verdict");
-      if (verdict !== "NOT_MET") { current.status = verdict === "MET" ? "met" : "impossible"; persist(); notify(`Goal ${current.status}: ${current.condition}`); return; }
+      current.judgeCalls += 1;
+      current.lastVerdict = verdict;
+      if (verdict !== "NOT_MET") {
+        current.status = verdict === "MET" ? "met" : "impossible";
+        if (current.source) endedSource = current.source;
+        persist(); notify(`Goal ${current.status}: ${current.condition}`);
+        emit({ kind: "ended", status: current.status, condition: current.condition, turns: current.turns, judgeCalls: current.judgeCalls });
+        return;
+      }
+      current.turns += 1;
+      persist();
+      emit({ kind: "verdict", verdict, condition: current.condition, turns: current.turns, judgeCalls: current.judgeCalls });
       return { continue: true, entries: [...(_event.entries ?? []), { type: "custom_message", customType: "swarm-goal", content: `Goal check: NOT_MET. Continue working toward: ${current.condition}\nOther schedules: ${JSON.stringify([...schedules.values()].map(describe))}`, display: true }] };
     } catch (error) {
-      if (owner() && version === revision && goal === current) { current.status = "error"; persist(); notify(`Goal evaluation stopped: ${error instanceof Error ? error.message : error}`, "error"); }
+      if (owner() && version === revision && goal === current) {
+        current.status = "error";
+        if (current.source) endedSource = current.source;
+        persist();
+        const message = error instanceof Error ? error.message : String(error);
+        notify(`Goal evaluation stopped: ${message}`, "error");
+        // A judge failure is a brake: the loop ends once and the worker is left with an ordinary settled turn.
+        emit({ kind: "ended", status: "error", reason: message, condition: current.condition, turns: current.turns, judgeCalls: current.judgeCalls });
+      }
     } finally { evaluating = false; await unlink(transcriptPath).catch(() => {}); }
   });
-  pi.on("session_shutdown", () => { live = false; revision++; for (const s of schedules.values()) clearTimeout(s.timer); schedules.clear(); removeScheduleStatus?.(); removeScheduleStatus = undefined; });
+  pi.on("session_shutdown", () => {
+    live = false; revision++;
+    for (const s of schedules.values()) clearTimeout(s.timer);
+    schedules.clear(); removeScheduleStatus?.(); removeScheduleStatus = undefined;
+    // A finished session must not leave a host another extension could drive.
+    for (const [key, entry] of hostTable()) if (entry.host === host) hostTable().delete(key);
+  });
   const api = { getGoal: () => goal };
   registrations.set(pi, api);
   return api;

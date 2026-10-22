@@ -556,7 +556,8 @@ describe("claw worker side", () => {
 			await expect(tools.claw_finish.execute("c1", { outcome: "completed", summary: "x", evidence: [] })).rejects.toThrow("completed requires evidence");
 			await tools.claw_finish.execute("c2", { outcome: "completed", summary: "x", evidence: ["ls"] });
 			expect(store.readEvents(run.id, 0).items.map((e) => e.type)).toEqual(["finish"]);
-			expect(Object.keys(tools)).toEqual(["claw_finish"]);
+			// claw_goal is the read/widen surface of the always-on completion goal (TREBOL-325); it cannot remove it.
+			expect(Object.keys(tools)).toEqual(["claw_finish", "claw_goal"]);
 		} finally { rmSync(dir, { recursive: true, force: true }); }
 	});
 

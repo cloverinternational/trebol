@@ -283,7 +283,10 @@ describe("claw worker-local clarification", () => {
 			handlers.before_agent_start({}, {});
 
 			const events = workerStore.readEvents(run.id, 0).items;
-			expect(events.map((e) => e.type)).toEqual(["ask", "ask", "ask", "ask", "finish", "resumed"]);
+			// No goal spec exists for this hand-built run and no goal extension is loaded, so the worker reports that
+			// once (TREBOL-325) instead of silently pretending the completion loop is running.
+			expect(events.map((e) => e.type)).toEqual(["ask", "ask", "ask", "ask", "finish", "goal", "resumed"]);
+			expect(events.find((e) => e.type === "goal")!.goal).toMatchObject({ state: "unavailable" });
 			expect(events.filter((e) => e.type === "ask").map((e) => e.ask!.state)).toEqual(["opened", "answered", "opened", "cancelled"]);
 			// Lifecycle only: no answer values are written into the run store.
 			expect(JSON.stringify(events)).not.toContain('"b"');

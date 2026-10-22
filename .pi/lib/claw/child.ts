@@ -1,6 +1,7 @@
 /** Worker-side (child pi) helpers. The worker only appends events to its own run file; the daemon applies them. */
 import { randomBytes } from "node:crypto";
 import type { ClawStore, ClawEvent, Finish } from "./store.ts";
+import type { GoalEvent } from "./goal.ts";
 
 /** Tools a worker may never call: it is a depth-1 worker and must not create workers, schedules or triggers. */
 export const WORKER_BLOCKED_TOOLS: readonly string[] = [
@@ -90,4 +91,10 @@ export function validateFinish(input: { outcome?: unknown; summary?: unknown; ev
 export function recordFinish(store: ClawStore, runId: string, finish: Omit<Finish, "at">): void {
 	const event: ClawEvent = { eid: eid(), type: "finish", at: new Date().toISOString(), runId, outcome: finish.outcome, summary: finish.summary, evidence: finish.evidence };
 	store.appendEvent(event);
+}
+
+/** The worker's own completion-loop report (established, verdict, end). Observability only: the daemon decides what an
+ *  ended goal means for the run, and the worker never writes run state. */
+export function recordGoal(store: ClawStore, runId: string, goal: GoalEvent): void {
+	store.appendEvent({ eid: eid(), type: "goal", at: new Date().toISOString(), runId, goal });
 }

@@ -21,6 +21,18 @@ Release metadata is kept in `package.json`, `update-manifest.json`, and this fil
 
 ### Added
 
+- Claw: every worker run now carries an **always-on** completion goal. The condition is derived from the task the run
+  was spawned for (its objective plus the acceptance criteria it states) and recorded on the run
+  (`run.goal`, `claw_read`/`claw_list`/`/claw status`), in the task file the worker reads, and in
+  `runs/<run>.goal.json`. The worker establishes it after launch in its own process — never as the positional launch
+  prompt, which Pi would dispatch as a `/goal` command — and `claw_goal` lets a task widen it (widening only; nothing
+  in the worker can remove it). There is **no turn cap, no deadline and no expiry**: while the judge answers NOT_MET the
+  loop continues. Only semantic brakes end it, each exactly once: MET, IMPOSSIBLE, `claw_finish` (cleared *before* the
+  report, so the settle that follows pays for zero judge calls), cancellation, the worker's own question, and any
+  terminal run state. Status exposes condition, turns used, judge calls, last verdict and elapsed time; a goal that runs
+  unusually long raises ONE warning notice and is never stopped by it. The judge's per-settle bound (8 tool turns, 8 MiB
+  transcript) is unchanged. See `docs/claw/README.md`.
+- Claw: worker-local clarification. A worker asks the user in its own tab through its native `ask_user_question` modal and continues the same run with the answer; the daemon reports the wait as `awaiting_decision` (distinct from the terminal `needs_user`/`awaiting_user`), refuses `claw_send` while a modal is open, never fabricates a question from a summary, and falls back to a truthful `needs_user` report when the modal is cancelled or unavailable. See `docs/claw/worker-clarification-2026-10-22.md`.
 - Claw supervises itself: written SLOs the daemon enforces, so check-ups no longer need a human prompt. Every run is bounded to a terminal state (launch 300 s, idle stall report 600 s, supervisor fail 3600 s), every terminal run's worker tab is closed with jittered retries and one `run_tab_orphan` report when it cannot be, each act happens at most once per run per state inside a budget, low-severity notices collapse into one `claw_digest` per 5 minutes plus a heartbeat while workers run, a `needs_user` decision flags its own tab and repeats in bounded digests, and a run that provably produced nothing (a launch failure with no tab, or a worker that died before its first settled turn) is relaunched once on the same Hoja issue, while a run stuck past its own deadline is never restarted and records `run_budget_spent` with the reason. See `docs/claw/slo-2026-10-22.md` and `tools/claw/metrics.mjs`.
 
 ### Fixed
