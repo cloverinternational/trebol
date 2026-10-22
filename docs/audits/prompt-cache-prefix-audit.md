@@ -7,6 +7,39 @@ Everything below is measured, not assumed. Sources: Plexus SQLite
 `request_usage` on `clover-plexus` (read-only), a bounded 4-request canary on the
 live route, and deterministic prompt assembly in this repository.
 
+## 0. Provenance and capture integrity
+
+Where the gateway address came from, and which slot answered (2026-10-22):
+
+- `vault/infrastructure/hosts.yml:408-419` **does** carry `plexus_vps` with
+  `tailscale_ip: 100.121.114.16` and `tailscale_hostname: clover-plexus`, so the
+  address is corroborated by the inventory rather than assumed.
+- Independently confirmed: `tailscale status` maps `100.121.114.16` to
+  `clover-plexus`; `ssh luis@100.121.114.16 hostname` returns `clover-plexus` and
+  `hostname -I` lists `100.121.114.16`; the Pi client config
+  `~/.pi/agent/models.json` uses `baseUrl http://100.121.114.16:4000/v1`.
+
+Blue/green: the live route is **green**, not blue. `GET /health` on port 4000
+returns `X-Plexus-Slot: green`, and inside `plexus-proxy`
+`/etc/plexus/active-route.conf` holds `set $plexus_slot "green"` /
+`set $plexus_upstream "plexus-green:4000"`. Both slots share
+`/opt/clover/plexus-data/plexus.db`, and only the routed slot receives proxy
+traffic, so there is no partial-capture gap: every request the gateway answers is
+recorded once.
+
+The canary rows were located back in `request_usage` to close the loop, all four
+with `prompt_tokens = 5,821` and `source_ip = 100.127.108.62`:
+
+| id | time (UTC) | uncached | cached |
+|---|---|---|---|
+| 633817 | 17:31:32 | 5,821 | 0 |
+| 633820 | 17:31:33 | 129 | 5,692 |
+| 633824 | 17:31:35 | 5,821 | 0 |
+| 633826 | 17:31:36 | 129 | 5,692 |
+
+No capture window was enabled and nothing on the gateway was changed; the canary
+is four ordinary completion requests and needed no revert.
+
 ## 1. How Plexus reports cache tokens
 
 `request_usage.tokens_input` is the **uncached** input count and
@@ -145,6 +178,9 @@ $0.25/M), 30-day month scaled from the 3-day window.
 - Which client sends the 2,823 `chat → claude-oauth` requests. Source IP
   100.98.35.125 is not a current Tailscale node, and the rows carry no
   attribution. It is not Pi's default Claude route (that path is at 97.7%).
+  A `clover-hub-api` style service that is *up but unrouted* would look like
+  this from the database, so the caller has to be identified from its own config
+  before this path is fixed.
 - Whether Plexus drops `cache_control` that a client *did* send, versus the
   client never sending it. Plexus source is not in this repository.
 - Mid-session break attribution per event. Without stored bodies, a break can be
