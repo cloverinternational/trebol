@@ -10,6 +10,7 @@ Release metadata is kept in `package.json`, `update-manifest.json`, and this fil
 
 ### Fixed
 
+- Task enforcement: read-only domain lookups (`hoja_list`, `hoja_get`, `vault` `list`/`get`, `context_search`/`context_outline`/`context_read`/`context_inspect`, `HistorySearch`, `HistoryGet`) no longer fail with "YOU CANNOT EXECUTE ANY TOOL WITHOUT A TASK" when no task is focused. Mutating siblings (`vault` `add`/`remove`, `context_index`/`remember`/`reindex`/`delete`, spawning and sending tools) stay blocked.
 - Claw: sending input to an idle worker re-arms the idle notice for its next settled turn, and `status` reports `since` for runs awaiting the user.
 - Tern runner no longer crashes at startup on fresh checkouts: `prepare` now builds `packages/tools/taskmanage/dist` (imported by `.pi/lib/tern/task-view.ts`), and `doctor` checks for it.
 - Tern ask dialog: question tabs and option rows are tappable. A tap on a single-choice row answers and advances like a digit key, multi-choice rows toggle, double-tap still activates, and the narrow (<60 column) layout keeps the same tappable rows.
