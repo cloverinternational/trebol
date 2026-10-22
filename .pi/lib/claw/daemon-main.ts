@@ -1,6 +1,7 @@
 /** Entry point for the detached /claw daemon: `node --experimental-strip-types daemon-main.ts <workspace>`. */
 import { HojaClient } from "./hoja.ts";
 import { ternExec } from "./launcher.ts";
+import { workerLaunchPlan } from "./launch-plan.ts";
 import { ClawStore } from "./store.ts";
 import { claimLock, pidAlive, releaseLock, runDaemon } from "./daemon.ts";
 
@@ -26,4 +27,5 @@ runDaemon({
 	now: () => new Date(),
 	alive: pidAlive,
 	signal: (pid, sig) => process.kill(pid, sig),
+	planLaunch: (cwd) => workerLaunchPlan(cwd),
 }, { log }).then(() => { log("claw daemon exiting"); process.exit(0); });

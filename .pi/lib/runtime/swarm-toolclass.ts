@@ -33,6 +33,29 @@ export const isReadOnlyResearchTool = (name: string) => isReadOnlyExplorationToo
 /** memory_history mixes reads and writes in one tool, so only its lookup operations are read-only. */
 export const isReadOnlyMemoryCall = (name: string, params: any) =>
   normalizeToolName(name) === "memoryhistory" && (params?.operation === "search" || params?.operation === "get");
+/**
+ * Read-only domain tools registered by this repository. Each entry was checked
+ * against its implementation, and the mutating member of every family is
+ * deliberately absent:
+ *   - hoja_list / hoja_get send fixed GraphQL `query` documents only, with no
+ *     mutation path in the extension (extensions/hoja-mode/extension.ts:18-19).
+ *   - context_search / context_outline / context_read / context_inspect are
+ *     retrieval reads over the context index; context_index, context_remember,
+ *     context_reindex and context_delete write and stay gated
+ *     (extensions/swarm-context/extension.ts:124-199).
+ *   - HistorySearch / HistoryGet only read session records through
+ *     history-reader.ts (extensions/history-search/extension.ts).
+ */
+export const READ_ONLY_DOMAIN_TOOLS = [
+  "hojalist", "hojaget",
+  "contextsearch", "contextoutline", "contextread", "contextinspect",
+  "historysearch", "historyget",
+] as const;
+export const isReadOnlyDomainTool = (name: string) =>
+  (READ_ONLY_DOMAIN_TOOLS as readonly string[]).includes(normalizeToolName(name));
+/** vault mixes reads and writes in one tool, so only its list and get actions are read-only. */
+export const isReadOnlyVaultCall = (name: string, params: any) =>
+  normalizeToolName(name) === "vault" && (params?.action === "list" || params?.action === "get");
 export const isBashTool = (name: string) => ["bash", "shell", "execute"].includes(normalizeToolName(name));
 
 interface ShellHeredoc { word: string; stripTabs: boolean }

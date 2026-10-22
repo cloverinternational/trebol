@@ -79,7 +79,7 @@ export function releaseLock(store: ClawStore): void {
 
 const summary = (r: Run) => ({
 	id: r.id, label: r.label, status: r.status, phase: r.phase, project: r.project, assignee: r.assignee, identifier: r.hoja?.identifier,
-	block: r.block, pid: r.pid, error: r.error, finish: r.finish,
+	block: r.block, pid: r.pid, error: r.error, launchNote: r.launchNote, finish: r.finish,
 	source: r.source ? describeSource(r.source) : undefined, launchAttempts: r.launchAttempts, launchWarning: r.launchWarning,
 });
 export const isActive = (r: Run) => !TERMINAL.includes(r.status) && r.status !== "awaiting_user";
@@ -199,6 +199,31 @@ export async function processRequests(deps: DaemonDeps): Promise<void> {
 		}
 		deps.store.removeRequest(req.id);
 	}
+}
+
+/** No event means the worker never reached `session_start`: it died while pi was still starting. */
+const neverStarted = (run: Run): boolean => run.pid === undefined && run.eventsOffset === 0 && run.phase === "tab_open";
+
+/** The first actionable line of a worker's captured stderr. pi prints one line per startup failure. */
+export function startupFailureReason(log: string): string | undefined {
+	const line = log.split("\n").map((entry) => entry.trim()).find((entry) => entry.length > 0
+		&& /Failed to load extension|conflicts with|Unknown option|Cannot find module|ERR_MODULE_NOT_FOUND|ParseError|SyntaxError|EACCES|EISDIR|ENOENT/i.test(entry));
+	if (!line) return undefined;
+	return line.replace(/\s+/g, " ").slice(0, 300);
+}
+
+/** A worker that died before its first session event is failed with the reason, never reported as "lost". */
+function failStartup(run: Run, deps: DaemonDeps): void {
+	const reason = startupFailureReason(deps.store.readWorkerLog(run.id));
+	// The checkout the worker was launched from is part of the diagnosis: a source that was moved or edited after the run
+	// was created fails here, and the operator has to know which tree to fix.
+	const source = run.source ? `; source checkout ${describeSource(run.source)}` : "";
+	run.status = "failed";
+	run.error = (reason
+		? `worker exited before session_start: ${reason}${source}`
+		: `worker exited before session_start and wrote no reason (stderr log: ${deps.store.workerLogPath(run.id)})${source}`).slice(0, 500);
+	queueComment(run, `Claw: ${run.error}. No completion is implied.`);
+	deps.store.appendInbox({ kind: "run_failed", runId: run.id, text: `${run.label} failed: ${run.error}`, key: `fail:${run.id}` });
 }
 
 export function applyEvent(run: Run, ev: ClawEvent, store: ClawStore): void {
@@ -355,22 +380,17 @@ export async function reconcileRun(run: Run, deps: DaemonDeps, live: Set<number>
 			const again = store.readEvents(run.id, run.eventsOffset);
 			for (const ev of again.items) applyEvent(run, ev, store);
 			run.eventsOffset = again.offset;
-			if (isActive(run)) {
-				if (run.pid === undefined && run.eventsOffset === 0) {
-					// The worker died before it wrote a single event. It never reported `started`, so nothing about the work is
-					// known; the likely cause is the extension source failing to load at launch. That is a failed launch with a
-					// reason, not a silent `lost` state a human has to guess about.
-					const source = run.source ? ` It was created from source checkout ${describeSource(run.source)}.` : "";
-					failRun(run, deps, `worker exited before it reported started; no run event was ever written. The extension source under ${run.cwd} probably failed to load.${source} Check the tab output, fix the source, then spawn a new run; Hoja ${run.hoja?.identifier ?? "(none)"} stays In Progress`);
-				} else {
-					run.status = "lost";
-					run.error = run.ask?.state === "open"
-						? "worker stopped without claw_finish while its own question modal was still open (process or tab gone); the decision was never answered"
-						: "worker stopped without claw_finish (process or tab gone)";
-					if (run.ask?.state === "open") run.ask = { ...run.ask, state: "unresolved", closedAt: deps.now().toISOString() };
-					queueComment(run, `Claw: ${run.error}. No completion is implied.`);
-					store.appendInbox({ kind: "run_lost", runId: run.id, text: `${run.label} lost: ${run.error}`, key: `lost:${run.id}` });
-				}
+			// A worker that never reached session_start died starting up (a duplicate extension registration,
+			// a bad flag, a missing module). That is a failure with a reason, never a silent "lost" run.
+			if (isActive(run) && neverStarted(run)) failStartup(run, deps);
+			else if (isActive(run)) {
+				run.status = "lost";
+				run.error = run.ask?.state === "open"
+					? "worker stopped without claw_finish while its own question modal was still open (process or tab gone); the decision was never answered"
+					: "worker stopped without claw_finish (process or tab gone)";
+				if (run.ask?.state === "open") run.ask = { ...run.ask, state: "unresolved", closedAt: deps.now().toISOString() };
+				queueComment(run, `Claw: ${run.error}. No completion is implied.`);
+				store.appendInbox({ kind: "run_lost", runId: run.id, text: `${run.label} lost: ${run.error}`, key: `lost:${run.id}` });
 			}
 		}
 	}
@@ -385,8 +405,9 @@ export async function reconcileRun(run: Run, deps: DaemonDeps, live: Set<number>
 	}
 	if (run.status === "launching" && deps.now().getTime() - Date.parse(run.createdAt) > LAUNCH_TIMEOUT_MS) {
 		const unknown = run.phase === "create_dispatched" ? "; the Hoja create outcome was unknown, so a late issue carrying the run marker may exist and needs a manual check" : "";
+		const captured = startupFailureReason(store.readWorkerLog(run.id));
 		const source = run.source ? `; source checkout ${describeSource(run.source)}` : "";
-		failRun(run, deps, `launch timed out after ${LAUNCH_TIMEOUT_MS / 1000}s in phase ${run.phase} with no worker started event${unknown}${source}`);
+		failRun(run, deps, `launch timed out after ${LAUNCH_TIMEOUT_MS / 1000}s in phase ${run.phase} with no worker started event${captured ? `; worker stderr: ${captured}` : ""}${unknown}${source}`);
 	}
 	if (CLOSE_ON_END.includes(run.status) && live !== undefined && run.block !== undefined && !run.tabClosedAt) {
 		await closeRunTab(run, deps.tern).catch((e) => { run.tabCloseError = `tab close failed: ${(e as Error).message}`.slice(0, 300); });

@@ -27,11 +27,33 @@ Tests: `.pi/test/claw/claw.test.ts` (lifecycle, daemon, Hoja, Tern, worker) and
 | awaiting_decision | the worker opened its own `ask_user_question` modal in its tab and the turn is suspended until a human answers or cancels there. Active, not a result |
 | awaiting_user | worker reported `needs_user` |
 | completed | `claw_finish completed` with evidence; Hoja moves to In Review |
-| failed | `claw_finish failed`, launch failure (gate refusal, tab-open failure, timeout), worker death before any event, or completion refused for missing evidence |
+| failed | `claw_finish failed`, launch failure (gate refusal, tab-open failure, timeout), or completion refused for missing evidence |
+| failed (startup) | worker died before `session_start`; the reason comes from the worker's captured stderr, plus the source checkout it ran from |
 | lost | worker had reported `started` (or a settle) and its process/tab then vanished without `claw_finish` |
 | cancelled | stopped by `claw_cancel` |
 
 Hoja Done is never set automatically. `agent_settled` is never treated as success.
+
+## Extension loading for workers (duplicate registration)
+
+Pi resolves package sources and the cwd-local project package by lexical path, so one repository
+registered twice - as a configured package (`~/.pi/agent/settings.json`) and again by the checkout
+the worker starts in (`.pi/settings.json` `packages: [".."]`) - loads every extension twice and pi
+exits with `Tool "X" conflicts with <other copy>` for every tool. A linked worktree has its own
+path, so the two registrations never match.
+
+`.pi/lib/claw/launch-plan.ts` names a repository by real identity (the shared git common dir, or
+the realpath outside git) and, when two sources name the same repository, launches the worker with
+an explicit extension list (`pi -ne -e <file> ... -e builtin:<name>`) built from the kept sources.
+The checkout the worker runs in wins, so a worker tests the branch it was started in; the other
+copy is skipped and named in `launchNote` (`claw_list`, `claw_read`, `claw_status`). Distinct
+repositories keep their own extensions, and nothing changes when there is no duplicate. If a
+source cannot be enumerated as local extension files (npm/git sources, glob filters), the plan
+falls back to `--no-approve`, which suppresses the project-local copy only.
+
+A conflict between two *different* repositories is not deduplicated. Pi reports it, the worker
+dies before `session_start`, and the run is recorded `failed` with that line instead of `lost`.
+Worker stderr is captured to `.swarm/claw/runs/<run>.worker.log` for that reason.
 
 ## Worker-local clarification
 
@@ -62,9 +84,9 @@ Cancel maps the Hoja issue to `Canceled` only when the worker pid is gone and it
 
 ## Launch gate
 
-A worker is a plain `pi` process whose first act is loading the extension source under its `cwd`, so a broken source used
-to kill the tab before any run event existed (the run then surfaced as a silent `lost`). `.pi/lib/claw/preflight.ts`
-decides both hazards before a tab opens.
+A worker is a plain `pi` process whose first act is loading the extension source under its `cwd`. Two source hazards
+reach it before any run event can exist; `.pi/lib/claw/preflight.ts` decides both before a tab opens. (Extension
+*duplication* is a different hazard, handled by the launch plan above; both can produce the same `pi` startup exit.)
 
 - **Source load precheck.** The gate reads the `pi.extensions` entry points of the pi package at or above the worker's
   `cwd`, parses each of them with the TypeScript parser (syntax only, no type check) and follows local relative imports
@@ -89,8 +111,9 @@ decides both hazards before a tab opens.
   reported in `launchWarning`. Snapshotting the tree was rejected as the alternative: copying a pi package (node_modules
   included) is expensive and is not the tree the orchestrator verified.
 - `claw_read` reports `source`, `launchAttempts` and `launchWarning`, so a gate refusal stays diagnosable afterwards.
-- A run that dies **before writing any event** (no `started`, no settle) is reported `failed`, saying the extension
-  source probably failed to load, naming its source checkout and the next step — never the silent `lost` state.
+- A run that dies **before writing any event** is `failed (startup)` by the daemon with the line from its captured
+  stderr (`.swarm/claw/runs/<run>.worker.log`), and now also names the source checkout it was launched from, so a
+  `ParseError` or a `Tool "X" conflicts with` line and the tree that produced it are in the same message.
 
 The gate is a parse check, not a full load: `npm run check:install` (isolated `DefaultResourceLoader`, no session, no
 model) remains the deeper manual check for registration-time failures such as a duplicate tool.

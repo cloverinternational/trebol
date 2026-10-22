@@ -337,12 +337,31 @@ describe("launch gate in the run lifecycle", () => {
 		await tick(daemon);
 		const after = runOf("run-preevent");
 		expect(after.status).toBe("failed");
-		expect(after.error).toContain("before it reported started");
+		expect(after.error).toContain("before session_start");
+		// The checkout the worker came from travels with the startup failure, so the tree to fix is named.
 		expect(after.error).toContain("source checkout");
 		expect(after.error).toContain(source);
 		const kinds = store.readInbox(0).items.map((i) => i.kind);
 		expect(kinds).toContain("run_failed");
 		expect(kinds).not.toContain("run_lost");
+	});
+
+	it("reports the captured loader line of a worker that died before session_start", async () => {
+		const at = new Date(Date.now() - 5 * 60_000).toISOString();
+		const run: Run = {
+			id: "run-preevent-log", label: "Pre log", task: "t", cwd: source, status: "launching", phase: "tab_open",
+			createdAt: at, updatedAt: at, project: TEAM.project, eventsOffset: 0, settles: 0, attempts: 0, outbox: [], seen: [],
+			block: 997,
+		};
+		store.saveRun(run);
+		writeFileSync(store.workerLogPath(run.id), "ParseError: Unexpected token extensions/claw/extension.ts:182:0\n");
+		const daemon = { ...deps, now: () => new Date(), alive: () => false, signal: () => undefined } as unknown as DaemonDeps;
+		await tick(daemon);
+		const after = runOf(run.id);
+		expect(after.status).toBe("failed");
+		// The exact shape the incident produced must survive into the failed run, not be swallowed as "no reason".
+		expect(after.error).toContain("ParseError: Unexpected token extensions/claw/extension.ts:182:0");
+		expect(store.readInbox(0).items.some((i) => i.kind === "run_failed")).toBe(true);
 	});
 
 	it("still reports a worker that started and then vanished as lost", async () => {
