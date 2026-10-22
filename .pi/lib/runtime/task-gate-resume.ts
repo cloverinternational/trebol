@@ -30,11 +30,13 @@ export const TASK_GATE_BLOCK_HEADLINE = "YOU CANNOT EXECUTE ANY TOOL WITHOUT A T
 /** Custom-message types of the injected context and of the spent-budget notice. */
 export const TASK_GATE_CONTINUE_TYPE = "swarm-task-gate-auto-continue";
 export const TASK_GATE_SPENT_TYPE = "swarm-task-gate-auto-continue-spent";
+/** ASCII sentinel inside every injected continuation, so this module finds its own turns again. */
+export const TASK_GATE_CONTINUE_SENTINEL = "TASK GATE — AUTO-CONTINUE";
 
 export interface GateBlockedCall {
   toolName: string;
   toolCallId: string;
-  /** Dedupe key: one auto-continue per blocked call, however often settle is emitted. */
+  /** One key per stop: re-emitted settles of the same stop share it, a later stop does not. */
   key: string;
 }
 
@@ -50,6 +52,11 @@ export function messageText(content: unknown): string {
     .filter((part: any) => part?.type === "text" && typeof part.text === "string")
     .map((part: any) => part.text as string)
     .join("\n");
+}
+
+/** True for a message this module injected, whichever role or entry shape Pi gives it. */
+export function isTaskGateContinuationMessage(message: unknown): boolean {
+  return messageText((message as any)?.content).includes(TASK_GATE_CONTINUE_SENTINEL);
 }
 
 /**
@@ -78,6 +85,17 @@ const lastIndexOfRole = (messages: readonly any[], role: string): number => {
   return -1;
 };
 
+/** Index of the last genuine user turn, skipping this module's own continuations. */
+const currentRunStart = (messages: readonly any[]): number => {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i];
+    if (message?.role !== "user") continue;
+    if (isTaskGateContinuationMessage(message)) continue;
+    return i;
+  }
+  return -1;
+};
+
 /**
  * Decide whether the turn that is settling was stopped by the task gate.
  *
@@ -101,9 +119,10 @@ export function classifyTaskGateStop(input: {
   const stopReason = messages[assistantIndex]?.stopReason;
   if (stopReason !== "stop") return { gate: false, reason: `stop-reason:${String(stopReason)}` };
 
-  // Everything the model sees after the last real user turn belongs to this run.
-  const userIndex = lastIndexOfRole(messages, "user");
-  const tail = messages.slice(userIndex + 1);
+  // Everything after the last genuine user turn belongs to this run. Our own
+  // continuations arrive as user-role context, so they must not cut the run
+  // short: the block they answer is still the cause of this stop.
+  const tail = messages.slice(currentRunStart(messages) + 1);
   if (hasCompletedReport(tail)) return { gate: false, reason: "completed-report" };
 
   const resultIndex = lastIndexOfRole(tail, "toolResult");
@@ -119,7 +138,11 @@ export function classifyTaskGateStop(input: {
 
   const toolName = String(result?.toolName ?? "tool");
   const toolCallId = String(result?.toolCallId ?? "");
-  return { gate: true, block: { toolName, toolCallId, key: toolCallId || `${toolName}:${resultIndex}` } };
+  // Pi can emit the settle boundary twice for one stop, and those emissions see
+  // the same transcript; a stop after an injected continue sees one extra
+  // message and is therefore a new stop the budget must count (and then stop
+  // counting).
+  return { gate: true, block: { toolName, toolCallId, key: `${toolCallId || `${toolName}:${resultIndex}`}@${messages.length}` } };
 }
 
 // ---------------------------------------------------------------------------
@@ -226,7 +249,7 @@ export function evaluateTaskGateResume(input: TaskGateResumeInput): TaskGateResu
   if (input.taskFocused) { budget.reset(input.session); return { action: "none", reason: "task-focused" }; }
 
   const verdict = classifyTaskGateStop(input);
-  if (!verdict.gate) return { action: "none", reason: verdict.reason };
+  if ("reason" in verdict) return { action: "none", reason: verdict.reason };
   const block = verdict.block;
   const claim = budget.claim(input.session, block.key);
   if (claim === "duplicate") return { action: "none", reason: "duplicate", block };

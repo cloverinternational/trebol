@@ -217,6 +217,26 @@ describe("task-gate auto-continue: bounded budget", () => {
     expect(evaluateTaskGateResume({ session: "reset", messages: blockTurn("c4"), outcome: "completed", budget }).action).toBe("continue");
   });
 
+  it("a stop that follows an injected continue is a new stop: second continue, then the spent notice", () => {
+    const budget = freshBudget();
+    const base = blockTurn("c1");
+    const first = evaluateTaskGateResume({ session: "same-block", messages: base, outcome: "completed", budget });
+    expect(first.action).toBe("continue");
+    // The continuation lands in the transcript as user-role context and the
+    // agent answers with another text-only stop, without trying anything else.
+    const afterFirst = [...base, { role: "user", content: [{ type: "text", text: first.content! }] }, assistantStop("Stopping here.")];
+    const second = evaluateTaskGateResume({ session: "same-block", messages: afterFirst, outcome: "completed", budget });
+    expect(second.action).toBe("continue");
+    expect(second.used).toBe(2);
+    const afterSecond = [...afterFirst, { role: "user", content: [{ type: "text", text: second.content! }] }, assistantStop("Stopping here.")];
+    const third = evaluateTaskGateResume({ session: "same-block", messages: afterSecond, outcome: "completed", budget });
+    expect(third.action).toBe("exhausted");
+    expect(third.content).toContain("BUDGET SPENT");
+    // And it stays settled: no further notice, no further continue.
+    const fourth = evaluateTaskGateResume({ session: "same-block", messages: [...afterSecond, assistantStop("Still here.")], outcome: "completed", budget });
+    expect(fourth.action).toBe("none");
+  });
+
   it("keeps the budget on globalThis so a reload cannot refill it", () => {
     const session = "reload-shared";
     const first = new TaskGateResumeBudget();

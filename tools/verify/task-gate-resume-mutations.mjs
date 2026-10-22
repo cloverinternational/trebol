@@ -91,6 +91,18 @@ const CASES = [
     test: "injects one continue for a blocked-tool-then-stop turn",
   },
   {
+    name: "continuation does not cut the run short",
+    from: "    if (isTaskGateContinuationMessage(message)) continue;",
+    to: "    /* mutation: own continuations treated as user turns */",
+    test: "a stop that follows an injected continue is a new stop: second continue, then the spent notice",
+  },
+  {
+    name: "one key per stop, not per call",
+    from: "key: `${toolCallId || `${toolName}:${resultIndex}`}@${messages.length}`",
+    to: "key: toolCallId || `${toolName}:${resultIndex}`",
+    test: "a stop that follows an injected continue is a new stop: second continue, then the spent notice",
+  },
+  {
     name: "real-progress reset",
     from: 'if (input.taskFocused) { budget.reset(input.session); return { action: "none", reason: "task-focused" }; }',
     to: 'if (input.taskFocused) return { action: "none", reason: "task-focused" };',
