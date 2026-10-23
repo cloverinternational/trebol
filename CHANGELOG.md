@@ -53,6 +53,26 @@ Release metadata is kept in `package.json`, `update-manifest.json`, and this fil
 
 ### Fixed
 
+- `Build and test` is green on `main` again. The job had been red since 2026-10-16, so every merge ignored a check
+  that hid real regressions:
+  - A session boundary is never warm-up gated. `registerHook` kept every hook dormant until a session had more than
+    `HOOK_WARMUP_TURNS` turns, and `session_start` fires while the count is still 0, so `SessionStart` disk hooks,
+    `session_shutdown` and `session_before_compact` handlers were permanently dead rather than dormant
+    (`.pi/lib/runtime/hook-state.ts`).
+  - Background Bash no longer invents a blank line when a 50 ms poll splits a line from its newline: `echo hi` stored
+    `hi\n\n` or `hi\n` depending on where the kernel split the pipe, which is why the suite failed under the full run
+    and passed alone (`.pi/lib/tools/swarm-bgprocess.ts`, `takeLines`).
+  - The knowledge store and supervisor settings refuse a symlink between the managed path and the *configured* root,
+    not between it and `/`. On macOS `/var` and `/tmp` are symlinks, so every temporary workspace was rejected
+    (`Unsafe knowledge directory`, `unsafe configuration path rejected`), and `memoryIdentity` now canonicalises the
+    repository path so a worktree sees the notes its main checkout wrote (`.pi/lib/state/shared-memory.ts`).
+  - The configure wizard compares a workspace file with the workspace's real path, so ordinary files are no longer
+    rejected on macOS, and `paseo-service.mjs` compares canonical script paths so `render` runs from any directory.
+  - Tests that predated an intentional change now assert the new contract: hook tests model a session past warm-up
+    (`establishedHookContext`), `TaskBrowserView` takes the real `pi-tui` layout, the artifact-preview test waits for
+    its own blob instead of the startup card's image, the Mermaid follow-up names its sources only for questions about
+    that hook, memory search asserts the any-term BM25 ranking, and the Tern command tests read the accumulated surface
+    instead of the last frame, which the asynchronous startup refresh could overwrite.
 - Crash and portability fixes around the edges of a session: an MCP server that dies or closes its pipes now surfaces
   as a transport failure instead of an uncaught `EPIPE` (its last stderr line, control codes stripped and credentials
   redacted, becomes the error), a skill watcher that hits inotify's `ENOSPC` is dropped instead of aborting the
