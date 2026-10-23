@@ -233,7 +233,10 @@ export function diffChildren(parent: string, prev: TspNode[], next: TspNode[]): 
 }
 
 function diffNode(prev: TspNode, next: TspNode): unknown[] {
-	if (JSON.stringify(prev) === JSON.stringify(next)) return [];
+	// Compare this node's own kind and props, never the whole subtree: JSON of a
+	// node includes its children, so the old early return re-serialised every
+	// descendant at every level — quadratic in transcript size on every render
+	// and the reason diffing 20 nodes could take milliseconds.
 	const pp = prev.p ?? {};
 	const np = next.p ?? {};
 	const ops: unknown[] = [];

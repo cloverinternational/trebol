@@ -68,6 +68,22 @@ Release metadata is kept in `package.json`, `update-manifest.json`, and this fil
     repository path so a worktree sees the notes its main checkout wrote (`.pi/lib/state/shared-memory.ts`).
   - The configure wizard compares a workspace file with the workspace's real path, so ordinary files are no longer
     rejected on macOS, and `paseo-service.mjs` compares canonical script paths so `render` runs from any directory.
+  - `diffNode` compared `JSON.stringify(prev) === JSON.stringify(next)`, and a node's JSON
+    includes its children, so every render re-serialised each descendant at every level:
+    quadratic in transcript size for the live TUI and the dominant cost of the
+    `live-card-identity` property. It now compares a node's own kind and props and recurses
+    into children, which emits the same ops in linear time (`.pi/lib/tern/tsp.ts`).
+  - The four `turn-work` properties check 300 generated sessions at every intermediate state. They
+    collected one `expect()` per state, so a single test posted tens of thousands of task updates to
+    the vitest worker channel — the reason they took 150-370 ms locally and tens of seconds on a
+    shared runner. They now collect violations and assert them once: same scenarios, same checks.
+  - Tern and Claw tests no longer read the host checkout: bridges in `turn-work` and `mcp-bridge`
+    start on a throwaway workspace (a `git status` plus a recursive watcher over a tree with seven
+    submodules ran inside a 5 s test), the MCP test waits for the startup card to settle instead of
+    sleeping 250 ms, `daemon-reload` waits for the daemon's banner instead of reading its log the
+    instant the lock appears, and `launch-resilience` warms the TypeScript compiler in a `beforeAll`.
+    CI installs `zsh`, because the shell-setup suite executes the generated dispatch in every shell
+    the product supports and the runner image ships bash only.
   - Tests that predated an intentional change now assert the new contract: hook tests model a session past warm-up
     (`establishedHookContext`), `TaskBrowserView` takes the real `pi-tui` layout, the artifact-preview test waits for
     its own blob instead of the startup card's image, the Mermaid follow-up names its sources only for questions about
