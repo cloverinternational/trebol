@@ -806,12 +806,16 @@ stays silent to avoid duplicate hooks. Explicit hook-off policy remains honored.
 `node tools/experiments/jev-audit/task-enforcement-smoke.mjs` proves actual Pi
 blocked write -> TaskManage create -> successful write in a temporary workspace.
 `memory_history` `search`/`get` are exempt from this gate (`isReadOnlyMemoryCall`
-in `.pi/lib/runtime/swarm-toolclass.ts`); its write operations stay gated. All
+in `.pi/lib/runtime/swarm-toolclass.ts`); its write operations stay gated. Per-turn
 hooks are dormant for the first 5 turns (`HOOK_WARMUP_TURNS`), except composition
 hooks registered with `{ warmup: false }` (swarm-prompt, so the selected prompt reaches the first
 request; e2e `node tools/e2e/forge-prompt-first-turn.mjs`), so gate smokes
 must pad warm-up turns: `node tools/e2e/memory-gate.mjs` does, while the
 task-enforcement smoke above does not and currently passes its first write.
+Session boundary events (`session_start`, `session_switch`,
+`session_before_compact`, `session_shutdown`, `shutdown`) are never warm-up
+gated: each happens once, and `session_start` happens while the turn count is
+still 0, so a turn-count gate would leave it permanently unreachable.
 Reviewed, citable project facts promoted from memory candidates live in
 `docs/reference/project-findings.md` under stable `F-NNNN` headings.
 
