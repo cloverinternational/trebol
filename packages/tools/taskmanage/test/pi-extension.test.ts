@@ -9,6 +9,7 @@ import thinkingExtension from "../../../../extensions/swarm-thinking/extension.t
 import { taskManageSchema, InteractionBroker } from "../src/index.js";
 import { PERMISSIVE_PARAMETERS, loadSwarmToolSurface, overlaySwarmToolSchemas } from "../../../../.pi/lib/runtime/swarm-tool-surface.ts";
 import { bashCallComponent, bashResultComponent } from "../../../../.pi/lib/tools/swarm-bash.ts";
+import { establishedHookContext } from "../../../../.pi/test/support/hook-session.ts";
 
 type Handler = (event: any, ctx: any) => unknown;
 
@@ -158,28 +159,31 @@ describe("root Pi TaskManage extension", () => {
   it("embeds the task-enforcement advisory into the successful tool result like agent_tools.go", async () => {
     const runtime = fakePi();
     registerTaskManageExtension(runtime.pi, { enforcementMode: "advise" });
+    // Tool gates and result nudges are dormant for the first HOOK_WARMUP_TURNS turns.
+    const ctx = establishedHookContext();
     const beforeStarts = runtime.handlers.get("before_agent_start")!;
     let startEvent: any = { prompt: "do it", systemPrompt: "base" };
-    for (const beforeStart of beforeStarts) startEvent = (await beforeStart(startEvent, {})) ?? startEvent;
+    for (const beforeStart of beforeStarts) startEvent = (await beforeStart(startEvent, ctx)) ?? startEvent;
     const toolCall = runtime.handlers.get("tool_call")![0];
-    await expect(toolCall({ toolName: "write", toolCallId: "w1", input: {} }, {})).resolves.toBeUndefined();
+    await expect(toolCall({ toolName: "write", toolCallId: "w1", input: {} }, ctx)).resolves.toBeUndefined();
     const toolResults = runtime.handlers.get("tool_result")!;
     let patched: any = { toolName: "write", toolCallId: "w1", input: {}, content: [{ type: "text", text: "Wrote 1 file" }], isError: false };
-    for (const toolResult of toolResults) patched = (await toolResult(patched, {})) ?? patched;
+    for (const toolResult of toolResults) patched = (await toolResult(patched, ctx)) ?? patched;
     expect(patched.content[0].text).toBe('<system-reminder source="task-enforcement-hook" kind="nudge" seq="1">No active task is focused; consider a TaskManage create/update before multi-step work.</system-reminder>\n\n---\n\nWrote 1 file');
     // one budgeted nudge per turn window: the next call is silent
-    await toolCall({ toolName: "write", toolCallId: "w2", input: {} }, {});
+    await toolCall({ toolName: "write", toolCallId: "w2", input: {} }, ctx);
     let silent: any = { toolName: "write", toolCallId: "w2", input: {}, content: [{ type: "text", text: "x" }], isError: false };
-    for (const toolResult of toolResults) silent = (await toolResult(silent, {})) ?? silent;
+    for (const toolResult of toolResults) silent = (await toolResult(silent, ctx)) ?? silent;
     expect(silent.content[0].text).toBe("x");
   });
 
   it("covers the full Pi task lifecycle: block, activate, audit", async () => {
     const runtime = fakePi();
     registerTaskManageExtension(runtime.pi, { enforcementMode: "block" });
+    const ctx = establishedHookContext();
     const befores = runtime.handlers.get("tool_call")!;
     let blocked: any;
-    for (const before of befores) blocked = (await before({ toolName: "write", toolCallId: "blocked", input: {} }, {})) ?? blocked;
+    for (const before of befores) blocked = (await before({ toolName: "write", toolCallId: "blocked", input: {} }, ctx)) ?? blocked;
     expect(blocked).toMatchObject({ block: true });
     expect(blocked.reason.startsWith("Tool 'write' blocked by hook: <system-reminder source=\"task-enforcement-hook\" kind=\"block\" seq=\"")).toBe(true);
     expect(blocked.reason).toContain("[TASK ENFORCEMENT - BLOCKED] YOU CANNOT EXECUTE ANY TOOL WITHOUT A TASK");
@@ -188,15 +192,15 @@ describe("root Pi TaskManage extension", () => {
     await tool.execute("create", { operations: [{ key: "work", op: "create", subject: "Do work" , questions: [{ id: "accept", text: "Is the work verified?" }] }] });
     // pending only: still blocked (Swarm requires an in_progress + active focus)
     let blocked2: any;
-    for (const before of befores) blocked2 = (await before({ toolName: "write", toolCallId: "blocked2", input: {} }, {})) ?? blocked2;
+    for (const before of befores) blocked2 = (await before({ toolName: "write", toolCallId: "blocked2", input: {} }, ctx)) ?? blocked2;
     expect(blocked2).toMatchObject({ block: true });
     await tool.execute("activate", { operations: [{ key: "activate", op: "update", taskId: "1", status: "in_progress", active: true }] });
     let allowed: any;
-    for (const before of befores) allowed = (await before({ toolName: "write", toolCallId: "ok", input: {} }, {})) ?? allowed;
+    for (const before of befores) allowed = (await before({ toolName: "write", toolCallId: "ok", input: {} }, ctx)) ?? allowed;
     expect(allowed).toBeUndefined();
 
     const after = runtime.handlers.get("tool_result")![1];
-    await after({ toolName: "bash", toolCallId: "audit", input: { command: "pwd" }, result: {}, isError: false }, {});
+    await after({ toolName: "bash", toolCallId: "audit", input: { command: "pwd" }, result: {}, isError: false }, ctx);
     const audited = await tool.execute("audit-get", { operations: [{ key: "get", op: "get", taskId: "1", include_audit: true }] });
     expect(JSON.parse(audited.content[0].text).results[0].data.task.audit_events).toEqual(expect.arrayContaining([
       expect.objectContaining({ type: "tool", tool: "bash", tool_call_id: "audit" }),
@@ -206,9 +210,10 @@ describe("root Pi TaskManage extension", () => {
   it("handles Pi lifecycle payloads whose event name is not in the payload", async () => {
     const runtime = fakePi();
     registerTaskManageExtension(runtime.pi, { enforcementMode: "block" });
+    const ctx = establishedHookContext();
     const toolCalls = runtime.handlers.get("tool_call")!;
     let blocked: any;
-    for (const toolCall of toolCalls) blocked = (await toolCall({ toolName: "write", input: {} }, {})) ?? blocked;
+    for (const toolCall of toolCalls) blocked = (await toolCall({ toolName: "write", input: {} }, ctx)) ?? blocked;
     expect(blocked).toMatchObject({ block: true });
   });
 

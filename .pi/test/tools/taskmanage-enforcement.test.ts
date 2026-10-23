@@ -1,9 +1,11 @@
 import {it,expect} from "vitest";
 import {registerTaskManageExtension} from "../../../extensions/taskmanage/extension.ts";
+import {establishedHookContext} from "../support/hook-session.ts";
 it("default adapter blocks mutation until an active task exists while allowing recovery and reads",async()=>{
  const handlers=new Map<string,Function[]>();const pi={on:(n:string,f:Function)=>handlers.set(n,[...(handlers.get(n)??[]),f]),appendEntry(){},registerTool(){}};
  const {manager}=registerTaskManageExtension(pi);
- const ctx={sessionId:"default-enforcement-test",hasUI:true};
+ // The gate is dormant for the first HOOK_WARMUP_TURNS turns of a session.
+ const ctx={...establishedHookContext(),sessionId:"default-enforcement-test",hasUI:true};
  async function before(name:string,input:any){const results=[];for(const f of handlers.get("tool_call")??[])results.push(await f({toolName:name,input,toolCallId:Math.random().toString()},ctx));return results.find(r=>r?.block);}
  expect(await before("apply_patch",{input:"patch"})).toMatchObject({block:true});
  expect(await before("TaskManage",{operations:[]})).toBeUndefined();expect(await before("Read",{path:"file"})).toBeUndefined();

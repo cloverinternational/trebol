@@ -1,6 +1,9 @@
 import { expect, it, vi } from "vitest";
-import { dispatchRegisteredHook, registerHook } from "../../lib/runtime/hook-state.ts";
+import { dispatchRegisteredHook, noteHookTurn, registerHook, HOOK_WARMUP_TURNS } from "../../lib/runtime/hook-state.ts";
 function host(id: string) {
+  // Hooks are dormant for the first HOOK_WARMUP_TURNS turns of a session, so a
+  // session that is meant to dispatch has to be past warm-up.
+  for (let turn = 0; turn < HOOK_WARMUP_TURNS + 1; turn++) noteHookTurn(id);
   const handlers = new Map<string, Function[]>();
   const pi = { on: (name: string, fn: Function) => handlers.set(name, [...handlers.get(name) ?? [], fn]), appendEntry: vi.fn() };
   const ctx = { sessionManager: { getSessionId: () => id } };
