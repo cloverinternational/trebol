@@ -1,5 +1,0 @@
-# Autonomous retrieval run (sealed before running)
-- Pair-01 (artifacts/memory-pilot/pair-01.json). T1 run and its memory store are reused unchanged from runs/pair-01-218ba13 (copied), so only the product differs: T2 runs on HEAD e889b64 (ranked memory_history search, embeddings via PI_SWARM_MEMORY_EMBED_URL tunnel to spark). Reps 3 x arms A (empty store) / B (T1 store). Output: artifacts/memory-pilot/runs/pair-01-e889b64-ranked.
-- Primary (descriptive; n=3, no inferential claim): in B, number of reps where a T1 record appears in a T2 memory tool result (analyze.mjs "surfaced"). Baseline at 218ba13: 0 of its B reps.
-- Secondary: T2 tool calls and model calls, A vs B; whether the final answer states the cause (tool:Name must be the exact registered tool name, here Bash, with a current-branch result index), judged against packages/tools/taskmanage/src/task-manage.ts L700.
-- Not run (recorded reason): paired pass-rate run on the 15 q tasks with leak-safe curated seeds: only 2/15 tasks have any seeded fact citing their gold span (seed manifest artifacts/memory-bench/autonomy-seeds/manifest.json), so it cannot detect a memory effect.

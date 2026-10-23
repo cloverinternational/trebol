@@ -1,5 +1,0 @@
-M bootstrap-called 0/75 q-runs-zero-citations 3
-F bootstrap-called 44/75 q-runs-zero-citations 9
-Fnb bootstrap-called 0/75 q-runs-zero-citations 6
-M vs F per task: win 11 loss 0 tie 14
-largest M-F: [('q-T18', 1.0), ('fix-9ddef13', 0.6666666666666667), ('q-T16', 0.6666666666666667), ('q-T35', 0.6666666666666667), ('q-T21', 0.6666666666666666)]

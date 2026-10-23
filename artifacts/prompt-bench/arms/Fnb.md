@@ -1,1 +1,0 @@
-{{forge-body-no-bootstrap}}
