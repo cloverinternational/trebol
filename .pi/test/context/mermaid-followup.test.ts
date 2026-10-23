@@ -33,7 +33,10 @@ describe("missing-Mermaid follow-up", () => {
     expect(h.sent).toHaveLength(1);
     expect(h.sent[0][0]).toMatchObject({ customType: "pi-swarm-mermaid-followup", display: false });
     expect(h.sent[0][0].content).toContain("Do not claim the previous reply was replaced");
-    expect(h.sent[0][0].content).toContain("use available read tools to inspect extensions/mermaid-response/extension.ts");
+    // f35d6a0 (fix(mermaid): keep the follow-up on the original request, #299)
+    // names this hook's own source files only when the question is about the
+    // hook; otherwise the model walks the Mermaid hook instead of answering.
+    expect(h.sent[0][0].content).not.toContain("use available read tools to inspect");
     expect(h.sent[0][0].content).toContain("Do not draw a speculative diagram of unknown implementation");
     expect(h.sent[0][1]).toEqual({ deliverAs: "followUp", triggerTurn: true });
     expect(message.content[0].text).toBe(explanation);
@@ -45,6 +48,13 @@ describe("missing-Mermaid follow-up", () => {
     await h.emit("input", { source: "interactive", text: "Fix the test" });
     await h.emit("turn_end", { message });
     expect(h.sent).toHaveLength(1);
+  });
+  it("names its own source files only when the question is about this hook", async () => {
+    const h = harness();
+    await h.emit("input", { source: "interactive", text: "Explain how the Mermaid response hook works" });
+    await h.emit("turn_end", { message: final(explanation) });
+    expect(h.sent).toHaveLength(1);
+    expect(h.sent[0][0].content).toContain("use available read tools to inspect extensions/mermaid-response/extension.ts");
   });
   it("does not request on diagrams, short answers, tool calls, pending work, errors or aborts", async () => {
     const h = harness();
