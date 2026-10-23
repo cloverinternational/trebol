@@ -38,6 +38,8 @@ interface ProcessRecord {
   /** Bytes read from the child but not yet turned into lines (executor.go polls every 50ms). */
   pendingStdout: Buffer[];
   pendingStderr: Buffer[];
+  /** A poll left a line still open on this stream; its terminating newline may arrive next. */
+  openLine: { stdout: { open: boolean }; stderr: { open: boolean } };
   completion: Promise<void>;
   /** Resolves once the child has spawned or failed to (Node reports both asynchronously). */
   spawned: Promise<Error | undefined>;
@@ -153,6 +155,27 @@ export function detectBufferingMethod(shell: string, command: string): Buffering
 
 /** A PTY reports every newline as CRLF; restore normal line endings. */
 export const ptyNewlines = (text: string) => text.includes("\r") ? text.replaceAll("\r\n", "\n") : text;
+
+/**
+ * Line accumulator for one stream's 50ms polls. A poll can read a partial line,
+ * so the chunk after it may begin with the newline that terminates it; that
+ * newline closes the open line and must not add an empty one. Without this the
+ * stored output of `echo hi` depends on where the pipe split ("hi\n" one chunk
+ * vs "hi" then "\n"), which made the background-bash tests flaky and added a
+ * phantom blank line to real command output.
+ */
+export function takeLines(state: { open: boolean }, text: string): string[] {
+  const lines: string[] = [];
+  let start = 0;
+  if (state.open && text.startsWith("\n")) { start = 1; state.open = false; }
+  for (let i = start; i < text.length; i++) {
+    if (text[i] !== "\n") continue;
+    lines.push(text.slice(start, i));
+    start = i + 1;
+  }
+  if (start < text.length) { lines.push(text.slice(start)); state.open = true; }
+  return lines;
+}
 /** executor.go detectShell (unix). */
 const detectShell = () => process.env.SHELL || (existsSync("/bin/bash") ? "/bin/bash" : "/bin/sh");
 
@@ -268,14 +291,11 @@ export class SwarmBackgroundProcessManager {
     const text = chunk.toString("utf8");
     if (stream === "stdout") rec.stdout += text; else rec.stderr += text;
     // Go's tailer turns every read fragment into one or more OutputLines and
-    // excludes newline bytes from Size().
-    let start = 0;
-    for (let i = 0; i < text.length; i++) {
-      if (text[i] !== "\n") continue;
-      this.addLine(rec, stream, text.slice(start, i));
-      start = i + 1;
+    // excludes newline bytes from Size(). A fragment boundary inside a line must
+    // not turn its terminator into a line of its own; see takeLines.
+    for (const content of takeLines(rec.openLine[stream], text)) {
+      this.addLine(rec, stream, content);
     }
-    if (start < text.length) this.addLine(rec, stream, text.slice(start));
   }
 
   private addLine(rec: ProcessRecord, stream: "stdout" | "stderr", content: string): void {
@@ -302,7 +322,7 @@ export class SwarmBackgroundProcessManager {
     const rec: ProcessRecord = {
       owner: this.captureOwner?.(),
       id, command, cwd: params.cwd ?? "", env, state: "running", child, pid: child.pid ?? 0,
-      startedMs, lines: [], bytesWritten: 0, stdout: "", stderr: "", pendingStdout: [], pendingStderr: [], completion, spawned, backgrounded: false,
+      startedMs, lines: [], bytesWritten: 0, stdout: "", stderr: "", pendingStdout: [], pendingStderr: [], openLine: { stdout: { open: false }, stderr: { open: false } }, completion, spawned, backgrounded: false,
     };
     this.processes.set(id, rec);
     // The drawer inspects running commands live: drain any buffered chunks
