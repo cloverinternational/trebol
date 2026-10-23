@@ -38,7 +38,9 @@ export const isReadOnlyMemoryCall = (name: string, params: any) =>
  * against its implementation, and the mutating member of every family is
  * deliberately absent:
  *   - hoja_list / hoja_get send fixed GraphQL `query` documents only, with no
- *     mutation path in the extension (extensions/hoja-mode/extension.ts:18-19).
+ *     mutation path in the extension (extensions/hoja-mode/extension.ts:12-15);
+ *     filters travel as typed variables, never as query text
+ *     (.pi/test/tools/hoja-mode.test.ts).
  *   - context_search / context_outline / context_read / context_inspect are
  *     retrieval reads over the context index; context_index, context_remember,
  *     context_reindex and context_delete write and stay gated
