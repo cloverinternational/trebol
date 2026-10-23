@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { Policy, PolicyError, runProcess, createAutonomyPolicy } from "../src/index.js";
 
 const setup = async () => { const root = await mkdtemp(join(tmpdir(), "swarm-policy-")); await mkdir(join(root, "inside")); await writeFile(join(root, "inside", "x"), "ok"); return root; };
@@ -18,7 +18,10 @@ describe("deterministic policy", () => {
     const root = await setup(); const outside = await mkdtemp(join(tmpdir(), "outside-")); await writeFile(join(outside, "secret"), "no"); await symlink(join(outside, "secret"), join(root, "inside", "link"));
     const p = new Policy({ workspace: root, allowedTools: ["read"] });
     await expect(p.authorizePath({ tool: "read", operation: "read", path: join(root, "inside", "link") })).rejects.toMatchObject({ code: "path.boundary" });
-    await expect(p.authorizePath({ tool: "read", operation: "read", path: join(root, "inside", "x") })).resolves.toBe(resolve(root, "inside/x"));
+    // authorizePath answers with the resolved real path, which differs from the
+    // requested spelling wherever the temporary directory is a symlink (macOS
+    // /var -> /private/var).
+    await expect(p.authorizePath({ tool: "read", operation: "read", path: join(root, "inside", "x") })).resolves.toBe(await realpath(join(root, "inside", "x")));
   });
   it("requires exact approval and bounds process output", async () => {
     const p = new Policy({ workspace: await setup(), allowedTools: ["bash"], maxOutputBytes: 8, timeoutMs: 1000 });
