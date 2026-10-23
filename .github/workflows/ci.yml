@@ -88,6 +88,12 @@ jobs:
         with:
           node-version: '24'
           cache: npm
+      # The shell-setup suite executes the dispatch the product generates in every
+      # shell it supports, and Trebol installs a zsh dispatcher. The runner image
+      # ships bash only, so that half used to fail on spawnSync's ENOENT instead
+      # of testing the dispatcher.
+      - name: Install zsh for the shell-setup tests
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq zsh
       - run: npm ci
       - run: npm run build
       - run: node tools/repo/rewrite-imports.mjs --check

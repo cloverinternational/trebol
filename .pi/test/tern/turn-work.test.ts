@@ -3,8 +3,10 @@
 // PI_TERN_EVENT_LOG (see .pi/test/tern/live/extract-corpus.py); *.session.jsonl is Pi's persisted branch
 // for the same session. No event in the corpus is hand-written.
 import { readdirSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PiTernBridge, TranscriptProjector, type PiEventLike, type PiSessionLike } from "../../lib/tern/bridge.ts";
 import { diffChildren, ESC, parseTspMessages, type TspNode } from "../../lib/tern/tsp.ts";
 import { isTurnBoundary, summaryText } from "../../lib/tern/turn-groups.ts";
@@ -111,10 +113,16 @@ function fakeSession() {
 		prompt: () => new Promise<void>(() => {}),
 		abort: async () => {},
 		dispose() {},
-		sessionManager: { getSessionId: () => "replay", getEntries: () => [] },
+		// The bridge reads the repository of the session's cwd on start (git
+		// subprocesses plus a worktree watcher). Pointing it at a throwaway
+		// workspace keeps these projector tests off the host checkout, where a
+		// submodule-heavy tree made every start() cost seconds under CI load.
+		sessionManager: { getSessionId: () => "replay", getEntries: () => [], getCwd: () => WORKSPACE },
 		emit(e: PiEventLike) { for (const l of listeners) l(e); },
 	} as unknown as PiSessionLike & { emit(e: PiEventLike): void };
 }
+const WORKSPACE = mkdtempSync(join(tmpdir(), "turn-work-"));
+afterAll(() => rmSync(WORKSPACE, { recursive: true, force: true }));
 
 describe("replay through the bridge: emitted TSP frames", () => {
 	beforeEach(() => vi.useFakeTimers({ now: 1_000_000 }));

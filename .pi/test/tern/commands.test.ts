@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
 	autocompleteCommands,
 	buildCatalog,
@@ -53,11 +53,24 @@ function fakeSession(commands = source) {
 	return { session, calls, bridge, writes };
 }
 
-function lastFrame(writes: string[]): string {
-	const last = writes.filter((w) => w.startsWith(`${ESC}_tsp;f;`)).at(-1);
-	if (!last) throw new Error("no frame");
-	return JSON.stringify(parseTspMessages(last)[0]?.body);
+/**
+ * The surface as Tern would hold it after every frame: ops are applied in order
+ * instead of reading only the last frame. The bridge refreshes its startup card
+ * and git facts asynchronously (readRepoStatus/readGitFacts in bridge.ts), so
+ * "the last frame written" is whatever refresh happened to land last, not the
+ * state a key press produced.
+ */
+function surfaceTree(writes: string[]) {
+	const nodes = new Map<string, { id: string; k: string; p?: Record<string, unknown>; c?: unknown[] }>();
+	for (const w of writes) for (const m of parseTspMessages(w)) for (const op of ((m.body as { ops?: unknown[][] }).ops ?? [])) {
+		const walk = (n: { id: string; k: string; p?: Record<string, unknown>; c?: unknown[] }) => { nodes.set(n.id, n); for (const c of (n.c ?? []) as typeof n[]) walk(c); };
+		if (op[0] === "add") walk(op[4] as never);
+		if (op[0] === "del") nodes.delete(op[1] as string);
+		if (op[0] === "set") { const n = nodes.get(op[1] as string); if (n) n.p = { ...n.p, ...(op[2] as object) }; }
+	}
+	return nodes;
 }
+const surfaceJson = (writes: string[]) => JSON.stringify([...surfaceTree(writes).values()]);
 
 describe("buildCatalog", () => {
 	it("marks builtins unsupported and includes live extension, template and skill names", () => {
@@ -186,22 +199,21 @@ describe("PiTernBridge command routing", () => {
 	it("opens OMP-style searchable model picker with provider groups, current marker and preview", async () => {
 		const { bridge, writes } = fakeSession();
 		bridge.handle({ verb: "e", body: { ev: "action", id: "model", act: "model.select" } } as TspMessage);
-		await new Promise((resolve) => setTimeout(resolve, 5));
-		const frame = lastFrame(writes);
-		expect(frame).toContain('"model-picker-sheet"');
+		await vi.waitFor(() => expect(surfaceTree(writes).has("model-picker-sheet")).toBe(true));
 		// Static picker props are sent when added, not resent in selection patches.
-		expect(writes.join("")).toContain('"title":"Model"');
-		expect(writes.join("")).toContain('"placeholder":"Search models…"');
-		expect(writes.join("")).toContain('"group":"provider:p1"');
-		expect(writes.join("")).toContain('"current":["p1/m1"]');
-		expect(writes.join("")).toContain('"selected":"p1/m1"');
+		const picker = JSON.stringify(surfaceTree(writes).get("model-picker-sheet"));
+		expect(picker).toContain('"title":"Model"');
+		expect(picker).toContain('"placeholder":"Search models…"');
+		expect(picker).toContain('"group":"provider:p1"');
+		expect(picker).toContain('"current":["p1/m1"]');
+		expect(picker).toContain('"selected":"p1/m1"');
 	});
 
 	it("filters model picker results and applies only the activated model", async () => {
 		const { bridge, calls, writes } = fakeSession();
 		bridge.handle({ verb: "e", body: { ev: "action", id: "model", act: "model.select" } } as TspMessage);
 		bridge.appendDraft("Model Two");
-		expect(lastFrame(writes)).toContain('"selected":"p2/m2"');
+		expect(surfaceJson(writes)).toContain('"selected":"p2/m2"');
 		bridge.handle({ verb: "e", body: { ev: "activate", id: "model-picker-sheet", item: "p2/m2" } } as TspMessage);
 		await Promise.resolve();
 		expect(calls).toEqual(["model:p2/m2"]);
@@ -217,10 +229,10 @@ describe("PiTernBridge command routing", () => {
 		};
 		const opening = session.bridge.handle({ verb: "e", body: { ev: "action", id: "model", act: "model.select" } } as TspMessage);
 		await Promise.resolve();
-		expect(lastFrame(session.writes)).toContain('"state":"loading"');
+		expect(surfaceJson(session.writes)).toContain('"state":"loading"');
 		pending.resolve?.(models);
 		await opening;
-		expect(lastFrame(session.writes)).toContain('"p3/late"');
+		expect(surfaceJson(session.writes)).toContain('"p3/late"');
 	});
 
 	it("cancels model picker without changing selected model", () => {
@@ -239,8 +251,7 @@ describe("PiTernBridge command routing", () => {
 	it("opens the model chooser for bare /model and applies the selected model", async () => {
 		const { calls, bridge, writes } = fakeSession();
 		const selecting = bridge.submit("/model");
-		await new Promise((resolve) => setTimeout(resolve, 5));
-		expect(lastFrame(writes)).toContain('"model-picker-sheet"');
+		await vi.waitFor(() => expect(surfaceTree(writes).has("model-picker-sheet")).toBe(true));
 		bridge.handle({ verb: "e", body: { ev: "activate", id: "model-picker-sheet", item: "p2/m2" } } as TspMessage);
 		await selecting;
 		expect(calls).toEqual(["model:p2/m2"]);
@@ -256,9 +267,9 @@ describe("PiTernBridge command routing", () => {
 	it("never sends an unknown or builtin slash command to the model", async () => {
 		const { calls, bridge, writes } = fakeSession();
 		await bridge.submit("/nope");
-		expect(lastFrame(writes)).toContain("not sent to the model");
+		expect(surfaceJson(writes)).toContain("not sent to the model");
 		await bridge.submit("/tree");
-		expect(lastFrame(writes)).toContain("unavailable in Tern");
+		expect(surfaceJson(writes)).toContain("unavailable in Tern");
 		expect(calls).toEqual([]);
 	});
 
@@ -267,7 +278,7 @@ describe("PiTernBridge command routing", () => {
 		const { calls, bridge, writes } = fakeSession(broken);
 		await bridge.submit("/unknown");
 		expect(calls).toEqual([]);
-		expect(lastFrame(writes)).toContain("not sent to the model");
+		expect(surfaceJson(writes)).toContain("not sent to the model");
 	});
 
 	it("dispatches an extension command while the session is busy", async () => {
@@ -286,16 +297,7 @@ describe("PiTernBridge command routing", () => {
 		expect(calls).toEqual(["prompt:hi"]);
 	});
 
-	const layer = (writes: string[]) => {
-		const nodes = new Map<string, { k: string; p?: Record<string, unknown>; c?: unknown[] }>();
-		for (const w of writes) for (const m of parseTspMessages(w)) for (const op of ((m.body as { ops?: unknown[][] }).ops ?? [])) {
-			const walk = (n: { id: string; k: string; p?: Record<string, unknown>; c?: unknown[] }) => { nodes.set(n.id, n); for (const c of (n.c ?? []) as typeof n[]) walk(c); };
-			if (op[0] === "add") walk(op[4] as never);
-			if (op[0] === "del") nodes.delete(op[1] as string);
-			if (op[0] === "set") { const n = nodes.get(op[1] as string); if (n) n.p = { ...n.p, ...(op[2] as object) }; }
-		}
-		return nodes;
-	};
+	const layer = surfaceTree;
 	const settle = () => new Promise((r) => setTimeout(r, 0));
 	const listOf = (writes: string[]) => {
 		const nodes = layer(writes);
@@ -358,7 +360,7 @@ describe("PiTernBridge command routing", () => {
 		expect(bridge.draft).toBe("/settings ");
 		await bridge.submitDraft();
 		expect(calls).toEqual([]);
-		expect(lastFrame(writes)).toContain("pi -nt");
+		expect(surfaceJson(writes)).toContain("pi -nt");
 	});
 
 	it("Tab on a command with argument completions opens them, as OMP does", async () => {
