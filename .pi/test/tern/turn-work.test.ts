@@ -252,46 +252,57 @@ const PROPERTY_BUDGET_MS = 30_000;
 describe("turn-work properties", () => {
 	it("every tool call appears in exactly one group (corpus and generated, every intermediate state)", () => {
 		const sources = [...corpus.map((c) => ({ label: c.name, events: c.events })), ...SEEDS.map((s) => ({ label: `seed ${s}`, events: generate(s).events }))];
+		// Violations are collected and asserted once. The property runs over every
+		// seed and every intermediate state, and one expect() per state made the
+		// worker post tens of thousands of task updates — which is what made these
+		// tests time out on CI while taking milliseconds locally.
+		const violations: string[] = [];
 		for (const { label, events } of sources) {
 			for (const { index, items, nodes } of liveStates(events)) {
 				const groups = nodes.filter((n) => n.p?.role === "tern.work" || n.p?.role === "tern.work-live");
 				// Every card, live or settled, holds one native step per tool call in its turn: the step ids say which.
 				const members = groups.flatMap((g) => stepsOf(g).map((step) => String(step.id)));
 				const expected = toolIds(items);
-				expect([...members].sort(), `${label} @${index}`).toEqual([...expected].sort());
-				expect(new Set(members).size, `${label} @${index} duplicates`).toBe(members.length);
+				if (JSON.stringify([...members].sort()) !== JSON.stringify([...expected].sort())) violations.push(`${label} @${index}: ${JSON.stringify([...members].sort())} is not ${JSON.stringify([...expected].sort())}`);
+				if (new Set(members).size !== members.length) violations.push(`${label} @${index}: ${JSON.stringify(members)} repeats a step`);
 			}
 		}
+		expect(violations).toEqual([]);
 	}, PROPERTY_BUDGET_MS);
 
 	it("a running turn renders one live card, opened to its own steps, with no step renderer outside it", () => {
+		const violations: string[] = [];
+		const note = (where: string, what: string) => { violations.push(`${where}: ${what}`); };
 		for (const seed of SEEDS) {
 			const { events, checkpoints } = generate(seed);
 			const states = [...liveStates(events)];
 			for (const { index, open } of checkpoints) {
 				if (!open) continue;
+				const where = `seed ${seed} @${index}`;
 				const { items, nodes } = states[index - 1]!;
 				const lastUser = items.findLastIndex((i) => isTurnBoundary(i));
 				const turnHasTools = items.slice(lastUser + 1).some((i) => i.role === "tool");
 				const live = nodes.filter((n) => n.p?.role === "tern.work-live");
-				expect(live.length, `seed ${seed} @${index}`).toBe(turnHasTools ? 1 : 0);
+				if (live.length !== (turnHasTools ? 1 : 0)) note(where, `${live.length} live cards`);
 				const turnTools = items.slice(lastUser + 1).filter((i) => i.role === "tool").length;
 				for (const n of live) {
 					// Native card: opened by default, holding one step head per tool call and no invented rows.
-					expect(n.k).toBe("tool");
-					expect(n.c?.length, `seed ${seed} @${index}`).toBeGreaterThan(0);
-					expect(n.p).toMatchObject({ key: n.id, status: "running", collapsible: true, collapsed: false });
-					expect(stepsOf(n).length, `seed ${seed} @${index}`).toBe(turnTools);
-					expect(n.c?.some((c) => c.k === "list" || c.k === "item"), `seed ${seed} @${index}`).toBe(false);
+					if (n.k !== "tool") note(where, `live card kind ${n.k}`);
+					if (!(n.c?.length)) note(where, "live card has no children");
+					if (n.p?.key !== n.id || n.p?.status !== "running" || n.p?.collapsible !== true || n.p?.collapsed !== false) note(where, `live card props ${JSON.stringify(n.p)}`);
+					if (stepsOf(n).length !== turnTools) note(where, `${stepsOf(n).length} steps for ${turnTools} calls`);
+					if (n.c?.some((c) => c.k === "list" || c.k === "item")) note(where, "live card invents a list row");
 					// A live head carries the turn clock so Tern keeps counting it without new frames.
-					expect(typeof n.p?.age, `seed ${seed} @${index}`).toBe("number");
-					expect(String(n.p?.text)).not.toContain("\n");
+					if (typeof n.p?.age !== "number") note(where, "live card has no age");
+					if (String(n.p?.text).includes("\n")) note(where, "live card text spans lines");
 				}
 				// Nothing rendered after the turn's user message is a tool row outside the live card.
 				const after = nodes.slice(nodes.findLastIndex(isBoundaryNode) + 1);
-				expect(after.filter((n) => n.k === "tool" && n.p?.role !== "tern.work-live"), `seed ${seed} @${index}`).toEqual([]);
+				const outside = after.filter((n) => n.k === "tool" && n.p?.role !== "tern.work-live");
+				if (outside.length) note(where, `${outside.length} tool rows outside the live card`);
 			}
 		}
+		expect(violations).toEqual([]);
 	}, PROPERTY_BUDGET_MS);
 
 	it("a settled turn renders exactly one collapsed summary and no live line", () => {
@@ -355,31 +366,35 @@ describe("turn-work properties", () => {
 		// The streaming tail under a running turn's line is part of its work, not a transcript row.
 		const top = (nodes: readonly TspNode[]) => nodes.filter((n) => n.p?.role !== "tern.work" && n.p?.role !== "tern.work-live" && n.p?.role !== "tern.work-tail")
 			.map((n) => `${String(n.p?.role ?? n.k)} ${String(n.c?.[0]?.p?.text ?? n.p?.text ?? "")}`);
+		const violations: string[] = [];
 		let narrated = 0, failedTurns = 0, recovered = 0;
 		for (const seed of SEEDS) {
 			const { events, branch } = generate(seed);
 			for (const { index, nodes } of liveStates(events)) {
 				for (const line of top(nodes)) {
-					expect(line, `seed ${seed} @${index}`).not.toMatch(/system-reminder|checking \d/);
+					if (/system-reminder|checking \d/.test(line)) violations.push(`seed ${seed} @${index}: ${line}`);
 				}
 			}
 			const live = new TranscriptProjector();
 			for (const e of events) live.apply(e);
 			const restored = new TranscriptProjector();
 			restored.replaceFromSessionBranch(branch);
-			expect(top(restored.nodes()), `seed ${seed}`).toEqual(top(live.nodes()));
+			if (JSON.stringify(top(restored.nodes())) !== JSON.stringify(top(live.nodes()))) violations.push(`seed ${seed}: restored transcript differs from the live one`);
 			// Each turn's outcome comes from how the turn ended, never from one step's error.
 			const outcomes = events.filter((e) => e.type === "message_end" && (e.message as { role?: string }).role === "assistant" && (e.message as { stopReason?: string }).stopReason !== "toolUse");
 			const cards = live.nodes().filter((n) => n.p?.role === "tern.work");
 			const turnsWithWork = cards.length;
-			expect(cards.filter((n) => n.p?.title === "Failed").length).toBeLessThanOrEqual(outcomes.filter((e) => (e.message as { errorMessage?: string }).errorMessage === "529 overloaded").length);
+			const failed = cards.filter((n) => n.p?.title === "Failed").length;
+			const providerFailures = outcomes.filter((e) => (e.message as { errorMessage?: string }).errorMessage === "529 overloaded").length;
+			if (failed > providerFailures) violations.push(`seed ${seed}: ${failed} failed cards for ${providerFailures} provider failures`);
 			for (const c of cards) {
 				if (c.p?.title === "Failed") failedTurns++;
 				if (c.p?.title === "Done" && failedBadge(c)) recovered++;
 				narrated += (c.c ?? []).filter((x) => x.k === "md").length;
 			}
-			expect(turnsWithWork).toBeLessThanOrEqual(outcomes.length);
+			if (turnsWithWork > outcomes.length) violations.push(`seed ${seed}: ${turnsWithWork} cards for ${outcomes.length} outcomes`);
 		}
+		expect(violations).toEqual([]);
 		expect({ narrated: narrated > 0, failedTurns: failedTurns > 0, recovered: recovered > 0 }).toEqual({ narrated: true, failedTurns: true, recovered: true });
 	}, PROPERTY_BUDGET_MS);
 });
@@ -418,17 +433,22 @@ describe("turn line and running-work bar announce each piece of work once", () =
 describe("live card identity", () => {
 	it("the work card keeps its id through streaming, expansion and settlement: never removed or re-added by a patch", () => {
 		const isWork = (n: TspNode) => n.p?.role === "tern.work" || n.p?.role === "tern.work-live";
+		const violations: string[] = [];
 		for (const seed of SEEDS) {
 			let prev: TspNode[] = [];
+			let index = 0;
 			for (const { nodes } of liveStates(generate(seed).events)) {
+				index += 1;
 				const ops = diffChildren("main", prev, nodes) as unknown[][];
 				const next = new Set(nodes.filter(isWork).map((n) => n.id));
 				for (const id of prev.filter(isWork).map((n) => n.id).filter((id) => next.has(id))) {
-					expect(ops.filter((op) => (op[0] === "del" || op[0] === "add") && op[1] === id), `seed ${seed}`).toEqual([]);
+					const patched = ops.filter((op) => (op[0] === "del" || op[0] === "add") && op[1] === id);
+					if (patched.length) violations.push(`seed ${seed} @${index}: ${id} ${JSON.stringify(patched)}`);
 				}
 				prev = nodes;
 			}
 		}
+		expect(violations).toEqual([]);
 	}, PROPERTY_BUDGET_MS);
 });
 
