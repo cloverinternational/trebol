@@ -24,6 +24,9 @@ const cardText = (n: TspNode) => summaryText(
 	Number(String((n.p?.meta as string[] | undefined)?.[0] ?? "0").split(" ")[0]),
 );
 const cardLine = (n: TspNode) => [cardText(n), ...((n.p?.meta as string[] | undefined) ?? []).slice(1)].join(" · ");
+// The native step heads a work card holds, in call order.
+const stepsOf = (group: TspNode) => (group.c ?? []).filter((n) => n.k === "tool" && String(n.id).startsWith("t-"));
+const failedBadge = (card: TspNode) => ((card.p?.badges as Array<{ text: string }> | undefined) ?? []).some((b) => / failed$/.test(b.text));
 const workView = (nodes: readonly TspNode[]) => nodes.flatMap((n) =>
 	n.p?.role === "tern.work-live" ? [`LIVE ${String(n.p.text)}`] : n.p?.role === "tern.work" ? [`SUMMARY ${cardLine(n)}`] : []);
 
@@ -35,7 +38,7 @@ describe("replay corpus", () => {
 		const cards = p.nodes().filter((n) => n.p?.role === "tern.work");
 		expect([...new Set(cards.map((n) => n.p?.title))].sort()).toEqual(["Done", "Interrupted"]);
 		// A real step failure the agent recovered from: the turn reads Done and counts the failed step.
-		expect(cards.some((n) => n.p?.title === "Done" && (n.p?.meta as string[]).some((m) => / failed$/.test(m)))).toBe(true);
+		expect(cards.some((n) => n.p?.title === "Done" && failedBadge(n))).toBe(true);
 		const parallel = corpus.some(({ events }) => {
 			let running = 0, max = 0;
 			for (const e of events) {
@@ -63,7 +66,7 @@ describe("replay corpus", () => {
 			// The user turn: its card, then its final answer; the wakeup turn: its card, then its answer.
 			expect(roles.slice(roles.lastIndexOf("pi.user"))).toEqual(["pi.user", "tern.work", "pi.assistant", "tern.notice", "tern.work", "pi.assistant"]);
 			const cards = nodes.filter((n) => n.p?.role === "tern.work");
-			expect(cards.at(-2)!.c!.filter((c) => c.k === "list").flatMap((list) => (list.c ?? []).map((row) => row.p?.label))).toEqual(["Tasks", "Subagent", "Subagent"]);
+			expect(stepsOf(cards.at(-2)!).map((step) => String(step.p?.title))).toEqual(["Tasks", "Subagent", "Subagent"]);
 		}
 		expect(workView(restored.nodes())).toEqual(workView(live.nodes()));
 	});
@@ -237,15 +240,8 @@ describe("turn-work properties", () => {
 		for (const { label, events } of sources) {
 			for (const { index, items, nodes } of liveStates(events)) {
 				const groups = nodes.filter((n) => n.p?.role === "tern.work" || n.p?.role === "tern.work-live");
-				// A live card's activity panel lists only running steps, so its members come from the turn's items:
-				// the tool items from its first call (g-<first call>) up to the next user message. Settled cards list all steps.
-				const members = groups.flatMap((g) => {
-					if (g.c && g.p?.role === "tern.work") return g.c.filter((c) => c.k === "list").flatMap((list) => (list.c ?? []).map((row) => row.id.replace(/^row-/, "")));
-					const from = items.findIndex((i) => i.id === String(g.id).slice(2));
-					const out: string[] = [];
-					for (let k = from; k >= 0 && k < items.length && (k === from || !isTurnBoundary(items[k]!)); k++) if (items[k]!.role === "tool") out.push(items[k]!.id);
-					return out;
-				});
+				// Every card, live or settled, holds one native step per tool call in its turn: the step ids say which.
+				const members = groups.flatMap((g) => stepsOf(g).map((step) => String(step.id)));
 				const expected = toolIds(items);
 				expect([...members].sort(), `${label} @${index}`).toEqual([...expected].sort());
 				expect(new Set(members).size, `${label} @${index} duplicates`).toBe(members.length);
@@ -253,7 +249,7 @@ describe("turn-work properties", () => {
 		}
 	});
 
-	it("a running turn renders one live card, opened to its activity panel, with no step renderers beneath it", () => {
+	it("a running turn renders one live card, opened to its own steps, with no step renderer outside it", () => {
 		for (const seed of SEEDS) {
 			const { events, checkpoints } = generate(seed);
 			const states = [...liveStates(events)];
@@ -264,12 +260,16 @@ describe("turn-work properties", () => {
 				const turnHasTools = items.slice(lastUser + 1).some((i) => i.role === "tool");
 				const live = nodes.filter((n) => n.p?.role === "tern.work-live");
 				expect(live.length, `seed ${seed} @${index}`).toBe(turnHasTools ? 1 : 0);
+				const turnTools = items.slice(lastUser + 1).filter((i) => i.role === "tool").length;
 				for (const n of live) {
-					// Native card: opened by default; its activity panel holds rows, not step renderers.
+					// Native card: opened by default, holding one step head per tool call and no invented rows.
 					expect(n.k).toBe("tool");
 					expect(n.c?.length, `seed ${seed} @${index}`).toBeGreaterThan(0);
 					expect(n.p).toMatchObject({ key: n.id, status: "running", collapsible: true, collapsed: false });
-					expect(n.c?.some((c) => c.k === "tool"), `seed ${seed} @${index}`).toBe(false);
+					expect(stepsOf(n).length, `seed ${seed} @${index}`).toBe(turnTools);
+					expect(n.c?.some((c) => c.k === "list" || c.k === "item"), `seed ${seed} @${index}`).toBe(false);
+					// A live head carries the turn clock so Tern keeps counting it without new frames.
+					expect(typeof n.p?.age, `seed ${seed} @${index}`).toBe("number");
 					expect(String(n.p?.text)).not.toContain("\n");
 				}
 				// Nothing rendered after the turn's user message is a tool row outside the live card.
@@ -307,8 +307,11 @@ describe("turn-work properties", () => {
 				}
 				if (n.p?.role === "tern.work") {
 					turnCards++;
-					turnTools += (n.c ?? []).flatMap((c) => (c.k === "list" ? c.c ?? [] : [])).length;
+					turnTools += stepsOf(n).length;
 					expect(n.p).toMatchObject({ collapsible: true, collapsed: true });
+					// A settled card carries no live clock; its duration appears only when every step reported one.
+					expect(n.p?.age, `seed ${seed} turn ${turn}`).toBeUndefined();
+					expect(n.p?.took === undefined || typeof n.p?.took === "number", `seed ${seed} turn ${turn}`).toBe(true);
 				}
 			}
 			check();
@@ -357,7 +360,7 @@ describe("turn-work properties", () => {
 			expect(cards.filter((n) => n.p?.title === "Failed").length).toBeLessThanOrEqual(outcomes.filter((e) => (e.message as { errorMessage?: string }).errorMessage === "529 overloaded").length);
 			for (const c of cards) {
 				if (c.p?.title === "Failed") failedTurns++;
-				if (c.p?.title === "Done" && (c.p?.meta as string[]).length > 1) recovered++;
+				if (c.p?.title === "Done" && failedBadge(c)) recovered++;
 				narrated += (c.c ?? []).filter((x) => x.k === "md").length;
 			}
 			expect(turnsWithWork).toBeLessThanOrEqual(outcomes.length);
@@ -442,12 +445,21 @@ describe("expansion", () => {
 			["tool", "tern.work-live", "running", true, "1 running · go"],
 			["text", "tern.work-tail", undefined, undefined, "build log"],
 		]);
-		expect(folded2[0]!.c?.map((c) => c.id)).toEqual(["g-t-a-rows-0", "m2-note", "g-t-a-activity", "g-t-a-collapse"]);
+		expect(folded2[0]!.c?.map((c) => c.id)).toEqual(["g-t-a-controls", "t-a", "m2-note"]);
 		// Ctrl+O clears local folds: the same card (id and key) opens in place in All steps, narration inside, no tail.
 		running.clearGroupViews();
 		const open2 = running.nodes(true).slice(1);
 		expect(open2.map((n) => [n.id, n.k, n.p?.role, n.p?.status, n.p?.collapsed, n.p?.key])).toEqual([[folded2[0]!.id, "tool", "tern.work-live", "running", false, folded2[0]!.id]]);
-		expect(open2[0]!.c?.map((c) => [c.k, c.p?.role, c.p?.text])).toEqual([["list", "tern.work-rows", undefined], ["md", "tern.work-note", "Now checking the\nbuild log"], ["text", "tern.work-mode", "Activity"], ["text", "tern.work-collapse", "Collapse work"]]);
+		expect(open2[0]!.c?.map((c) => [c.k, c.p?.role, c.p?.text])).toEqual([
+			["row", "tern.work-controls", undefined],
+			["tool", "omp.tool.bash", undefined],
+			["md", "tern.work-note", "Now checking the\nbuild log"],
+		]);
+		// The chips are one row: Activity, then Collapse work.
+		expect(open2[0]!.c![0]!.c?.map((chip) => [chip.p?.role, chip.p?.text])).toEqual([
+			["tern.work-mode", "Activity"],
+			["tern.work-collapse", "Collapse work"],
+		]);
 		running.apply({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: " now" } });
 		running.setGroupCollapsed("g-t-a", true);
 		expect(running.nodes(false).at(-1)?.p?.text).toBe("build log now");

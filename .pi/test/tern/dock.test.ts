@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PiTernBridge, type PiEventLike, type PiSessionLike } from "../../lib/tern/bridge.ts";
 import { ESC, parseTspMessages } from "../../lib/tern/tsp.ts";
 import { PI_COMPOSER_CSS } from "../../lib/tern/composer-style.ts";
+import { TERN_WORK_CSS } from "../../lib/tern/work-style.ts";
+import { removeRunningWork, setRunningWork } from "../../lib/ui/running-work-store.ts";
 
 interface FakeOptions {
 	sessionId?: unknown;
@@ -267,9 +269,50 @@ describe("Tern regions and dock structure", () => {
 		expect(nodes.get("task-pop-3")?.p?.tone).toBe("success");
 		expect(PI_COMPOSER_CSS).toMatch(/\[data-role='pi\.tasks\.pop'\] \{[^}]*display: none;/);
 		expect(PI_COMPOSER_CSS).toContain("[data-role='pi.tasks']:hover [data-role='pi.tasks.pop'] { display: flex; }");
-		expect(PI_COMPOSER_CSS).toContain("[data-role='pi.assistant']:not(:has(~ .sf-col[data-role='pi.assistant'])) .sf-md .md { font-family: var(--sans); }");
+		expect(PI_COMPOSER_CSS).toContain(".sf-col[data-role='pi.assistant']:last-child .sf-md .md { font-family: var(--sans); }");
 		expect(PI_COMPOSER_CSS).toContain("[data-role='pi.user'] .sf-md .md { font-family: var(--sans); }");
 		expect(PI_COMPOSER_CSS).toMatch(/\[data-role='pi\.tasks\.pop'\] \{[^}]*background: var\(--card\);/);
+	});
+
+	// Tern rejects the whole rule (and reports {"ev":"error","sheet":"composer"}) for selectors it does not
+	// support: no :has(), no ~ combinator, and no leading region element, since a program sheet is prefixed
+	// with [data-scope] and "can't restyle .sf-main" (docs/reference/tern-site/styles/css.md).
+	it("every work-card selector stays inside the subset Tern supports", () => {
+		const selectors = TERN_WORK_CSS.replace(/\/\*[\s\S]*?\*\//g, "")
+			.split("}")
+			.map((block) => block.split("{")[0] ?? "")
+			.join("\n")
+			.split("\n")
+			.map((line) => line.trim())
+			.filter((line) => line && !line.startsWith("@"));
+		expect(selectors.length).toBeGreaterThan(0);
+		for (const selector of selectors) {
+			expect(selector).not.toContain(":has(");
+			expect(selector.replace(/~=/g, "")).not.toContain("~");
+			expect(selector).not.toMatch(/^\.sf-(main|dock|layer)\b/);
+			for (const argument of selector.matchAll(/:(?:not|is|where)\(([^)]*)\)/g)) {
+				expect(argument[1]).not.toMatch(/[\s>+~]/);
+			}
+		}
+	});
+
+	it("every composer selector stays inside the subset Tern supports", () => {
+		const selectors = PI_COMPOSER_CSS.replace(/\/\*[\s\S]*?\*\//g, "")
+			.split("}")
+			.map((block) => block.split("{")[0] ?? "")
+			.join("\n")
+			.split("\n")
+			.map((line) => line.trim())
+			.filter((line) => line && !line.startsWith("@"));
+		expect(selectors.length).toBeGreaterThan(0);
+		for (const selector of selectors) {
+			expect(selector).not.toContain(":has(");
+			expect(selector.replace(/~=/g, "")).not.toContain("~");
+			expect(selector).not.toMatch(/^\.sf-(main|dock|layer)\b/);
+			for (const argument of selector.matchAll(/:(?:not|is|where)\(([^)]*)\)/g)) {
+				expect(argument[1]).not.toMatch(/[\s>+~]/);
+			}
+		}
 	});
 
 	it("clicking a task references it in the draft without sending a prompt", () => {
@@ -292,6 +335,33 @@ describe("Tern regions and dock structure", () => {
 		expect(replay(writes).has("task-question-0")).toBe(true);
 	});
 
+	it("draws a running subagent as Tern's agent row, and shows the turn clock only while busy", async () => {
+		const writes: Writes = [];
+		const fake = fakeSession();
+		const bridge = new PiTernBridge(fake, { write: (d) => writes.push(d), surfaceId: "pi", credits: 1000 });
+		bridge.start();
+		try {
+			setRunningWork({ id: "bg-1", kind: "bash", label: "make", status: "running", startedAt: Date.now(), detail: "make -j8", foreground: false });
+			setRunningWork({ id: "agent-1", kind: "subagent", label: "Agent agent-1", status: "running", startedAt: Date.now() - 9000, detail: "Review the parser", tokens: 18400, foreground: false });
+			fake.emit({ type: "agent_start" } as never);
+			const nodes = replay(writes);
+			const agent = nodes.get("bg-work-agent-1");
+			expect(agent).toMatchObject({ k: "agent", p: { role: "pi.background.agent", name: "Agent agent-1", task: "Review the parser", status: "running" } });
+			// The label already names the agent, so the task is not repeated inside it.
+			expect(String(agent?.p?.name)).not.toContain("Review the parser");
+			expect((agent?.p?.stats as Record<string, unknown>).age).toBeGreaterThanOrEqual(9000);
+			expect((agent?.p?.stats as Record<string, unknown>).tokens).toBe(18400);
+			// The dock's own clock: an `elapsed` next to Stop while the turn runs, and nothing once it settles.
+			expect(nodes.get("composer-turn")?.p).toMatchObject({ role: "omp.composer.turn", format: "short" });
+			fake.emit({ type: "agent_end" } as never);
+			expect(replay(writes).has("composer-turn")).toBe(false);
+		} finally {
+			removeRunningWork("bg-1");
+			removeRunningWork("agent-1");
+			bridge.close();
+		}
+	});
+
 	it("reloads the live named Tern stylesheet without sending a model prompt", async () => {
 		const writes: Writes = [];
 		let called = 0;
@@ -301,7 +371,7 @@ describe("Tern regions and dock structure", () => {
 		bridge.start();
 		await bridge.submit("/reload");
 		expect(called).toBe(1);
-		expect(writes.filter(w => w.startsWith(`${ESC}_tsp;s;`))).toHaveLength(3); // composer, startup, reloaded named sheet
+		expect(writes.filter(w => w.startsWith(`${ESC}_tsp;s;`))).toHaveLength(4); // composer, startup, work, reloaded named sheet
 		expect(textsUnder(writes, "main").join(" ")).toContain("Reloaded Pi resources");
 		bridge.close();
 	});
@@ -320,7 +390,7 @@ describe("Tern regions and dock structure", () => {
 		fake.emit({ type: "agent_end" });
 		await bridge.submit("/reload");
 		expect(called).toBe(1);
-		expect(writes.filter(w => w.startsWith(`${ESC}_tsp;s;`))).toHaveLength(2); // composer, startup
+		expect(writes.filter(w => w.startsWith(`${ESC}_tsp;s;`))).toHaveLength(3); // composer, startup, work
 		expect(textsUnder(writes, "main").join(" ")).toContain("reload failed: invalid resource");
 		bridge.close();
 	});

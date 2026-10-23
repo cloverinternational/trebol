@@ -80,6 +80,13 @@ const commandIdentity = (args: unknown): string | undefined => {
 
 const bashTarget = (args: unknown) => argText(args, "description") ?? commandIdentity(args);
 
+// The command line itself, bounded. Tern ellipsizes a collapsed command target and wraps it expanded.
+const MAX_COMMAND = 400;
+const commandText = (args: unknown): string | undefined => {
+	const command = rawArg(args, "command");
+	return command !== undefined && command.trim() ? oneLine(command, MAX_COMMAND) : undefined;
+};
+
 const KNOWN: Record<string, { label: string; target: (args: unknown) => string | undefined }> = {
 	read: { label: "Read", target: pathTarget },
 	Read: { label: "Read", target: pathTarget },
@@ -95,6 +102,77 @@ const KNOWN: Record<string, { label: string; target: (args: unknown) => string |
 	search: { label: "Search", target: searchTarget },
 	TaskManage: { label: "Tasks", target: operationsTarget },
 };
+
+/** How the terminal draws a step's `target`, as Tern's `tool` element defines it. */
+export type StepTargetKind = "command" | "pattern" | "path" | "query" | "text";
+
+/** The data head of one tool step: what the terminal draws, never a rendered row. */
+export interface StepHead {
+	/** Tern's icon name for the tool family (`bash`, `read`, `edit`, `grep`, `todo`, …). */
+	name: string;
+	/** The verb a user reads ("Bash", "Read", "Patch"). */
+	verb: string;
+	/** The primary argument, drawn once. */
+	target?: string;
+	targetKind?: StepTargetKind;
+	/** The model's own intent for the step, when the tool carries one (a bash description). */
+	intent?: string;
+}
+
+interface HeadSpec {
+	name: string;
+	verb: string;
+	kind: StepTargetKind;
+	target: (args: unknown) => string | undefined;
+	intent?: (args: unknown) => string | undefined;
+}
+
+const intentOf = (args: unknown) => argText(args, "description");
+
+// One table for the icon, verb and typed target of each known tool family. Only the argument the tool really
+// carries is named; an unknown tool keeps its own name and shows no invented target.
+const HEADS: Record<string, HeadSpec> = {
+	bash: { name: "bash", verb: "Bash", kind: "command", target: commandText, intent: intentOf },
+	Bash: { name: "bash", verb: "Bash", kind: "command", target: commandText, intent: intentOf },
+	read: { name: "read", verb: "Read", kind: "path", target: pathTarget },
+	Read: { name: "read", verb: "Read", kind: "path", target: pathTarget },
+	write: { name: "write", verb: "Write", kind: "path", target: pathTarget },
+	Write: { name: "write", verb: "Write", kind: "path", target: pathTarget },
+	edit: { name: "edit", verb: "Edit", kind: "path", target: pathTarget },
+	Edit: { name: "edit", verb: "Edit", kind: "path", target: pathTarget },
+	apply_patch: { name: "edit", verb: "Patch", kind: "text", target: patchTarget },
+	grep: { name: "grep", verb: "Search", kind: "pattern", target: searchTarget },
+	Grep: { name: "grep", verb: "Search", kind: "pattern", target: searchTarget },
+	search: { name: "grep", verb: "Search", kind: "pattern", target: searchTarget },
+	Glob: { name: "glob", verb: "Glob", kind: "pattern", target: searchTarget },
+	glob: { name: "glob", verb: "Glob", kind: "pattern", target: searchTarget },
+	TaskManage: { name: "todo", verb: "Tasks", kind: "text", target: operationsTarget },
+	Task: { name: "task", verb: "Agent", kind: "query", target: searchTarget },
+	web_fetch: { name: "web", verb: "Fetch", kind: "query", target: searchTarget },
+	deepwiki: { name: "globe", verb: "Docs", kind: "query", target: searchTarget },
+	browser_get_page: { name: "globe", verb: "Page", kind: "query", target: searchTarget },
+};
+
+/** A tool name as a Tern icon/role name: lowercase, punctuation folded, bounded. */
+const iconName = (name: string): string => name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 32) || "tool";
+
+/** The head data for one step. Unknown tools keep their own name and make no claim about arguments. */
+export function stepHead(name: string | undefined, args: unknown): StepHead {
+	const raw = name ?? "tool";
+	const spec = HEADS[raw];
+	if (!spec) return { name: iconName(raw), verb: oneLine(raw, 40) };
+	const target = spec.target(args);
+	const intent = spec.intent?.(args);
+	return {
+		name: spec.name,
+		verb: spec.verb,
+		...(target !== undefined ? { target, targetKind: spec.kind } : {}),
+		...(intent !== undefined ? { intent } : {}),
+	};
+}
+
+/** The running steps' slice the compact activity panel shows. */
+export const MAX_ACTIVE_STEPS = MAX_ACTIVE;
 
 const formatMs = (ms: number): string => (ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`);
 
@@ -121,6 +199,13 @@ export function summarizeWorkStep(step: WorkStep): WorkRow {
 		result: text,
 		tone,
 	};
+}
+
+// The activity view's heading: the current task when one is known, else the bounded request. The turn card's head
+// already shows the request, so its body does not repeat it; the pure view keeps it for non-card consumers.
+function focusHeading(task: CurrentTask | undefined, request?: string): string | undefined {
+	if (task) return currentTaskLine(task);
+	return request?.trim() ? `Request · ${oneLine(request, MAX_REQUEST)}` : undefined;
 }
 
 /** The authoritative current task, labelled as such. Callers pass it only for the active work group. */
@@ -154,7 +239,7 @@ export function activityView(steps: readonly WorkStep[], task?: CurrentTask, req
 	const lastDone = finished.reduce<WorkStep | undefined>((best, step) => (best === undefined || step.doneSeq! > best.doneSeq! ? step : best), undefined);
 	const failures = steps.filter((step) => step.status === "error" && step.cancelled !== true);
 	const lastFailure = failures.reduce<WorkStep | undefined>((best, step) => (best === undefined || (step.doneSeq ?? 0) > (best.doneSeq ?? 0) ? step : best), undefined);
-	const heading = task ? currentTaskLine(task) : request?.trim() ? `Request · ${oneLine(request, MAX_REQUEST)}` : undefined;
+	const heading = focusHeading(task, request);
 	return {
 		...(heading !== undefined ? { heading } : {}),
 		active: shown,

@@ -97,14 +97,16 @@ try {
   assert.equal(card.p.role, "tasks.call", "rendered with the task-card role");
   assert.equal(card.p.title, "Tasks", "card titled Tasks, not the tool name");
   const childrenOf = (id) => [...nodes].filter(([, v]) => v.parent === id).map(([, v]) => v.node);
-  assert.equal(nodes.get("t-call-1-op-0")?.node.k, "col", "task card stacks its contents vertically");
-  assert.equal(nodes.get("t-call-1-op-0-head")?.parent, "t-call-1-op-0", "operation occupies its own header row");
-  assert.equal(childrenOf("t-call-1-op-0-head").find((n) => n.p.role === "tasks.op")?.p.text, "create #4");
-  assert.equal(nodes.get("t-call-1-op-0-subject")?.parent, "t-call-1-op-0", "subject occupies a separate line");
-  assert.equal(nodes.get("t-call-1-op-0-subject")?.node.p.text, operations[0].subject, "full long subject survives TSP projection");
-  assert.equal(childrenOf("t-call-1-op-1-head").find((n) => n.p.role === "tasks.op")?.p.text, "update #2");
-  assert.ok(childrenOf("t-call-1-op-1").some((c) => c.p.role === "tasks.error" && /blocked/.test(c.p.text)), "failed row shows the error text");
-  assert.match(PI_COMPOSER_CSS, /\[data-role='tasks\.subject'\][^}]*white-space: normal;[^}]*overflow-wrap: anywhere;/, "subjects wrap instead of ellipsizing");
+  // The batch is one checklist: Tern draws the progress ring, the item states and the `.fresh` check.
+  const list = nodes.get("t-call-1-list")?.node;
+  assert.equal(list?.k, "checklist", "task batch renders as a checklist");
+  assert.equal(list?.p.role, "tasks.list", "checklist keeps the task role");
+  const phase = list?.p.phases?.[0];
+  assert.equal(phase?.items?.length, 2, "one item per operation");
+  assert.equal(phase?.items?.[0]?.text, `create #4 · ${operations[0].subject.slice(0, operations[0].subject.length)}`.slice(0, phase?.items?.[0]?.text?.length), "operation and its subject share one item");
+  assert.match(String(phase?.items?.[0]?.text), /^create #4 · /, "the operation verb leads the item");
+  assert.equal(phase?.items?.[1]?.status, "blocked", "a failed operation is a blocked item");
+  assert.match(String(phase?.items?.[1]?.note), /blocked/, "the blocked item carries its error as a note");
   const everything = JSON.stringify([...nodes.values()].map((n) => n.node.p));
   assert.ok(!everything.includes('"results"') && !everything.includes('"batch"') && !everything.includes("operations"), "no raw JSON in the rendered tree");
   console.log("PASS tern TaskManage card: Hoja-style task rows from a live bridge, no raw JSON rendered");

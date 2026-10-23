@@ -24,9 +24,13 @@ export interface ComposerFacts {
 	selection?: { start: number; end: number };
 	ghost?: string;
 	busy: boolean;
+	/** Wall time of the running turn, drawn as a terminal-clocked timer beside Stop. */
+	turnAgeMs?: number;
 	queuedFollowUp?: number;
 	context?: ContextFacts;
 	model?: string;
+	/** False when Pi has no model runtime here, so the chip is a label and not a dead click target. */
+	modelSelectable?: boolean;
 	thinking?: string;
 	effortKind: boolean;
 	git?: GitFacts;
@@ -109,7 +113,10 @@ export function composerNodes(f: ComposerFacts, above: TspNode[] = []): TspNode[
 		? {
 			id: "model",
 			k: "row",
-			p: { role: "omp.composer.model", gap: "xs", align: "center", title: "Model", actions: { click: "model.select" } },
+			p: {
+				role: "omp.composer.model", gap: "xs", align: "center", title: "Model",
+				...(f.modelSelectable === false ? {} : { actions: { click: "model.select" } }),
+			},
 			c: [
 				effortInModel
 					? { id: "model-effort", k: "effort", p: { level, role: "omp.composer.model.effort", title: `Thinking effort: ${level}`, actions: { click: "thinking.cycle" } } }
@@ -132,6 +139,10 @@ export function composerNodes(f: ComposerFacts, above: TspNode[] = []): TspNode[
 		: undefined;
 	const git = f.git ? gitSeg(f.git) : undefined;
 	const usage = f.cost !== undefined && f.cost > 0 ? `$${f.cost.toFixed(2)}` : "";
+	// The turn's own clock while it runs: Tern counts it, so an idle or busy bar costs the same frames.
+	const turn: TspNode | undefined = f.busy && f.turnAgeMs !== undefined
+		? { id: "composer-turn", k: "elapsed", p: { role: "omp.composer.turn", age: Math.max(0, Math.round(f.turnAgeMs)), format: "short", title: "This turn’s wall time" } }
+		: undefined;
 	const submit: TspNode = f.busy
 		? { id: "stop", k: "text", p: { role: "omp.composer.stop", text: `Stop${f.queuedFollowUp ? ` · ${f.queuedFollowUp} queued` : ""}`, tone: "error", title: `Stop  esc · Alt+Enter queues follow-up${f.queuedFollowUp ? ` · ${f.queuedFollowUp} queued` : ""}`, actions: { click: "interrupt" } } }
 		: { id: "send", k: "kbd", p: { role: "omp.composer.send", keys: ["enter"], title: "Send  ⏎", actions: { click: "submit" } } };
@@ -143,6 +154,7 @@ export function composerNodes(f: ComposerFacts, above: TspNode[] = []): TspNode[
 			...(model ? [model] : []),
 			...(effort ? [effort] : []),
 			{ id: "extras", k: "status", p: { role: "omp.composer.extras", transparent: true, grow: 1 }, c: git ? [git] : [] },
+			...(turn ? [turn] : []),
 			{ id: "usage", k: "text", p: { role: "omp.composer.usage", text: usage, wrap: "none", ...(usage ? { title: `Session cost ${usage}` } : {}), actions: { click: "status.cost" } } },
 			submit,
 		],

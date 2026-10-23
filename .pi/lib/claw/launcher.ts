@@ -1,6 +1,7 @@
 /** Tern side of /claw: find the session that holds the Claw tab, open a named worker tab running pi
- *  through a login shell (so LINEAR_TOKEN and the rest of ~/.zshrc reach the worker), and probe liveness. */
+ *  through a login shell (so LINEAR_TOKEN and the rest of the profile reach the worker), and probe liveness. */
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
 import { promisify } from "node:util";
 import type { LaunchPlan } from "./launch-plan.ts";
 
@@ -86,6 +87,24 @@ export function launchArguments(plan: LaunchPlan | undefined): string[] {
 	];
 }
 
+/** Login shells a worker can run in. Only zsh and bash support both `-lic` and the `2> >(tee ...)` stderr capture the
+ *  launch line uses, so the resolution never hands the worker a shell that would silently drop its log. */
+const WORKER_SHELLS = ["zsh", "bash"] as const;
+
+/** The shell and flags for a worker: `PI_CLAW_SHELL` first, then the user's login shell (`$SHELL`), then the usual zsh
+ *  and bash locations. A hardcoded zsh breaks every launch on a machine without it, so the choice is probed, not assumed. */
+export function workerShell(env: NodeJS.ProcessEnv = process.env, exists: (path: string) => boolean = existsSync): { shell: string; flags: string } {
+	const candidates = [env.PI_CLAW_SHELL, env.SHELL, "/bin/zsh", "/usr/bin/zsh", "/bin/bash", "/usr/bin/bash"];
+	for (const candidate of candidates) {
+		const path = candidate?.trim();
+		if (!path?.startsWith("/")) continue;
+		const name = path.slice(path.lastIndexOf("/") + 1);
+		if (!(WORKER_SHELLS as readonly string[]).includes(name)) continue;
+		if (exists(path)) return { shell: path, flags: "-lic" };
+	}
+	throw new Error("no zsh or bash to launch a worker in: set PI_CLAW_SHELL to an absolute path of one of them");
+}
+
 export function workerCommand(spec: LaunchSpec): string[] {
 	// PI_TERN_UI=0 is the documented bypass of the Tern shell dispatch (docs/reference/tern-pi-shell-dispatch.md):
 	// the worker is a plain terminal pi with its normal tools, not the Tern-native preview.
@@ -98,7 +117,8 @@ export function workerCommand(spec: LaunchSpec): string[] {
 	const resume = spec.sessionFile ? ` --session ${shellQuote(spec.sessionFile)}` : "";
 	const first = spec.prompt === undefined ? "" : ` ${shellQuote(spec.prompt)}`;
 	const line = `exec env PI_TERN_UI=0 PI_CLAW_RUN=${shellQuote(spec.runId)} PI_CLAW_DIR=${shellQuote(spec.clawDir)} pi --name ${shellQuote(spec.label)}${spec.provider ? ` --provider ${shellQuote(spec.provider)}` : ""}${spec.model ? ` --model ${shellQuote(spec.model)}` : ""}${resume}${flags}${first}${log}`;
-	return ["/bin/zsh", "-lic", line];
+	const { shell, flags: shellFlags } = workerShell();
+	return [shell, shellFlags, line];
 }
 
 export async function launchTab(tern: TernExec, spec: LaunchSpec): Promise<{ tab: number; block: number; named: boolean }> {

@@ -506,6 +506,52 @@ Whenever work touches or adds a Tern-related feature (for example
 `tools/e2e/tern-*.mjs`), fetch and read
 https://docs.stencil.so/tern/index.md first, before planning or editing.
 
+### Live work rendering contract
+
+The transcript's turn card (`.pi/lib/tern/bridge.ts`, `work-summary.ts`) is a **data** projection, not a
+hand-drawn table. Tern 0.9.5 draws and *clocks* the parts that change every second:
+
+- One native `tool` head per tool call, in call order, nested in the turn card (a nested `tool` draws
+  unframed). The head carries the verb (`stepHead`: Bash/Read/Edit/Patch/Search/Tasks), a typed `target`
+  (`command` for bash — the head's Copy button copies it, the description becomes `intent`; `path` for file
+  tools; `pattern` for searches), `status`, `age` while running / `took` once settled, `exit`, `note`.
+  Tern spins the glyph and counts `age` on its own, so **never** re-render on a timer to advance a clock and
+  never hand-format an elapsed row.
+- The group head is the turn, not the first step: title is `N running` / `Done`, target is the request,
+  `age`/`took` is the turn's own clock, and a recovered failure is a `warning` badge (`1 failed`). The
+  tracked task is the only extra heading line; never repeat the request the head already shows.
+- A running step is **open** over a bounded live window (`tailWindow`, `STEP_LIVE_LINES`); a settled step is
+  folded to its head, and Ctrl+O opens every step. Do not clamp with a `tool` `preview`: Tern's previews give
+  way inside an open tool, and removing a preview does not re-fold a step, so the body would stay visible.
+- The dock carries the turn too: an `elapsed` (`omp.composer.turn`) sits beside Stop only while busy, and a
+  fact chip with no reachable action is a plain label (`modelSelectable`), because a click that can only write
+  "unavailable" into the transcript is a trap.
+- A command longer than `STEP_HEAD_TARGET` (or multiline) is truncated in the head and repeated **in full**
+  in the body, where it can wrap; the head keeps the copyable `command` prop. A short command is never
+  duplicated into the body.
+- An `apply_patch` is a diff, not a status word: `patchSections` splits the V4A body per file (dropping the
+  `***` markers), the head names the files with `+a −d`, and each file draws a Tern `diff` node. Folded once
+  settled, like every other step.
+- Spacing is deliberate, not incidental: steps are separated in `work-style.ts` (`.sf-tool + .sf-tool`), the
+  run box uses `gap: "sm"` for command/output/foot, and the patch body gets its own margins. Do not compress
+  these back; the card is scanned, not read.
+- `activityBody` lists the running steps as the same heads plus `Last`/`failed`/`+N more` lines and a
+  `shimmer` "Preparing next action"; the chips (`Activity` / `All steps` / `Collapse work`) live in **one**
+  `row` (`tern.work-controls`), styled by `.pi/lib/tern/work-style.ts` — keep every selector inside Tern's
+  subset (no `:has()`, no `~`, no leading region element).
+- Subagents are `agent` nodes in the background card (`stats.age`, `stats.tokens`, `task`), and a TaskManage
+  batch is one `checklist` (a blocked operation is a `blocked` item whose `note` is its error). Only fields
+  the running-work store and the batch really carry are sent; no invented progress, context or cost.
+- `diffChildren` in `.pi/lib/tern/tsp.ts` matches children **by id** and reorders with `move` ops. A
+  positional diff deleted and re-added every sibling after an insert or removal, which threw away the
+  terminal-side state (local fold, ansi scroll, highlighted block) and repainted the card on every settle.
+  Keep id matching; text that only grows must still go out as `text append`.
+
+Visual check without a model: `node tools/e2e/tern-live-work-demo.mjs` renders one scripted turn
+(`EXPAND=1` = Ctrl+O, `SPEED=n` = slower) into its own pane; `tern ctl shot <name>` writes
+`target/shots/tern/live/<name>.png` to look at. Behaviour is asserted by
+`.pi/test/tern/work-table.test.ts`, `turn-work.test.ts`, `turn-groups.test.ts` and `tsp.test.ts`.
+
 ## Validation
 
 ```sh
@@ -942,3 +988,17 @@ Session replacement/shutdown clear ownership and bridge close unsubscribes.
 Tests: `.pi/test/tern/{startup-card-mcp,mcp-bridge}.test.ts`,
 `.pi/test/tools/{mcp-status,mcp-fallback-status}.test.ts`, and
 `packages/tools/mcp/test/index.test.ts`.
+
+### Startup card watcher budget
+
+`watchRepo()` in the same module must never recurse over the whole worktree or
+the git directory: `fs.watch(..., { recursive: true })` costs one inotify watch
+per directory there (thousands in a JavaScript checkout, almost all
+`node_modules` and `.git`), and `fs.inotify.max_user_watches` is shared by the
+whole session. Recursion is limited to the top-level worktree entries, with the
+root and the git directory watched without it. Every watcher is created through
+`watchSafely()`, which owns the asynchronous `'error'` event — a `try/catch`
+around `watch()` cannot see `ENOSPC`, and an unlistened event aborts the
+process. A watcher that fails is dropped, and the card keeps its last state.
+Tests: `.pi/test/tern/startup-card-watch.test.ts` and the live watcher checks in
+`tools/e2e/tern-startup-card.mjs`.

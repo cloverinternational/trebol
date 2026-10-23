@@ -222,7 +222,9 @@ export class SkillLoader {
     let skills=[...selected.values()].sort((a,b)=>a.name.localeCompare(b.name)); const allowed = this.options.allowedNames ?? this.options.allowedSkills; if (allowed) skills=skills.filter(s=>allowed.includes(s.name)); return {skills,diagnostics,searchPaths:paths};
   }
   find(name:string):LoadedSkill|undefined{return this.load().skills.find(s=>s.name===name)}
-  watch(onChange:(result:SkillLoadResult)=>void):()=>void { this.closeWatchers(); for(const p of this.paths()){ if(!existsSync(p.path)) continue; try{this.watchers.push(watch(p.path,{recursive:true},()=>onChange(this.load())))}catch{} } return ()=>this.closeWatchers(); }
+  // A watcher that hits inotify's limit (ENOSPC) reports it as an async 'error' event, not a throw: without
+  // a listener Node rethrows it and the session exits. Drop the failed watcher instead; skills stay loaded.
+  watch(onChange:(result:SkillLoadResult)=>void):()=>void { this.closeWatchers(); for(const p of this.paths()){ if(!existsSync(p.path)) continue; try{const w=watch(p.path,{recursive:true},()=>onChange(this.load())); w.on("error",()=>{ try{w.close()}catch{} }); this.watchers.push(w)}catch{} } return ()=>this.closeWatchers(); }
   closeWatchers(){for(const w of this.watchers)w.close();this.watchers=[];}
 }
 export { parseSkillMDContent, fatalValidationError, validateName, validateDescription, extractDescriptionFromMarkdown, MAX_DESCRIPTION_LENGTH, MAX_NAME_LENGTH } from "./skillmd.js";

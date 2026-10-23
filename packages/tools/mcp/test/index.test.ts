@@ -68,7 +68,7 @@ describe("MCP manager", () => {
 });
 
 const STDIO_FIXTURE = String.raw`import { createInterface } from "node:readline";
-import { existsSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, writeFileSync } from "node:fs";
 const [crashFlag = "", mode = ""] = process.argv.slice(2);
 const write = (message) => process.stdout.write(JSON.stringify({ jsonrpc: "2.0", ...message }) + "\n");
 createInterface({ input: process.stdin }).on("line", (line) => {
@@ -84,6 +84,8 @@ createInterface({ input: process.stdin }).on("line", (line) => {
   if (msg.method === "resources/list") {
     reply({ resources: [] });
     if (mode === "exit-idle") setTimeout(() => process.exit(0), 50);
+    // Stays alive but closes the read end of the client's pipe: every later write raises EPIPE.
+    if (mode === "close-stdin") { process.stdin.on("error", () => {}); closeSync(0); setInterval(() => {}, 1000); }
     return;
   }
   if (msg.method === "tools/call") {
@@ -129,6 +131,19 @@ describe("MCP connection lifecycle", () => {
     await manager.discover("idle");
     expect(manager.connectedServers()).toEqual(["idle"]);
     await waitUntil(() => manager.connectedServers().length === 0);
+    await manager.close();
+  });
+
+  // A dead pipe reports EPIPE as an async 'error' event on the child's stdin. Without a listener Node
+  // rethrows it and the whole session exits, so it has to surface as a transport failure instead.
+  it("turns a closed server pipe into a transport failure instead of an uncaught EPIPE", async () => {
+    const changes = vi.fn();
+    const manager = new MCPManager([stdio("pipe", "", "close-stdin")], { onConnectionChange: changes });
+    await manager.discover("pipe");
+    expect(manager.connectedServers()).toEqual(["pipe"]);
+    await expect(manager.call("pipe", "echo", {})).rejects.toMatchObject({ kind: "transport" });
+    expect(manager.connectedServers()).toEqual([]);
+    expect(changes).toHaveBeenCalled();
     await manager.close();
   });
 

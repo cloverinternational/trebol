@@ -26,9 +26,26 @@ Release metadata is kept in `package.json`, `update-manifest.json`, and this fil
   generation source so the goal extension's per-source tombstone (which stops a restart from resurrecting a finished
   loop) does not silently block a deliberate resume; a failed resume rolls the re-arm back. See
   `docs/claw/README.md` and `tools/claw/mutation-check.mjs` (14 mutations, all killed).
+- Tern turn card as a data projection: one native `tool` head per tool call, nested in the card in call order, carrying
+  the verb, a typed target (`command`/`path`/`pattern`), status, live `age` while running and `took` once settled,
+  `exit`, `note` and `intent`; the card head is the turn itself with its own clock and a `warning` badge for a
+  recovered failure; a running step is open over a bounded live window and a settled one folds to its head;
+  `apply_patch` draws per-file `diff` nodes instead of a status word; subagents are `agent` rows and a TaskManage batch
+  is one `checklist`. Tern draws and clocks the parts that change every second, so the bridge never re-renders on a
+  timer. `diffChildren` now matches children by id and reorders with `move` ops, so a settling step no longer deletes
+  and re-adds its siblings (which discarded Tern's per-node fold, scroll and highlight state), and the spacing rules
+  moved into `.pi/lib/tern/work-style.ts`. See `AGENTS.md` §Live work rendering contract and
+  `node tools/e2e/tern-live-work-demo.mjs` (renders one scripted turn in its own pane).
 
 ### Fixed
 
+- Crash and portability fixes around the edges of a session: an MCP server that dies or closes its pipes now surfaces
+  as a transport failure instead of an uncaught `EPIPE` (its last stderr line, control codes stripped and credentials
+  redacted, becomes the error), a skill watcher that hits inotify's `ENOSPC` is dropped instead of aborting the
+  process, the startup card no longer watches the whole worktree and git directory recursively, `/claw` launches
+  workers in a login shell it probed (`PI_CLAW_SHELL`, `$SHELL`, then the usual zsh/bash paths) instead of a
+  hardcoded `/bin/zsh`, and `.pi/mcp.json` resolves the GitHub MCP binary from `PATH`, `$GITHUB_MCP_SERVER` or
+  `~/.local/bin` with the token taken from the active `gh` login (never stored).
 - The same change is merged in `cloverinternational/plataforma` (#468) with both repositories' variables flipped: live dispatches now show `messages → claude-oauth` runs of 154 and 135 requests with **358** and **330** uncached tokens against 4.0M and 2.0M cache reads.
 - OCR workflow: the resolved Plexus endpoint is exported into the preflight step itself, not only through `GITHUB_ENV` (which reaches later steps). Without it `ocr llm test` ran with no `OCR_LLM_URL`/`OCR_LLM_MODEL`, failed with "no valid LLM endpoint configured" and every review bailed at preflight.
 - `node_modules` is no longer a tracked symlink. Commit 3746215 (PR #338) committed it as a link to the absolute path `/Users/swarm/Work/Clover/trebol/node_modules`; git stores a symlink as its target string, so every clone and every `git worktree add` materialized a link into one machine's directory — dangling elsewhere, and in its own checkout replacing the real dependency tree with a self-referential link (the Claw daemon died with `Cannot find package 'croner'`; after `npm ci` the missing directory read as `D node_modules`, which the launch gate refused as a modified source checkout). `git rm --cached node_modules` plus a `.gitignore` `node_modules` entry (no trailing slash — `node_modules/` matches directories only, which is how the symlink slipped through) removes and blocks it. Sharing dependencies between worktrees stays possible as an explicit, per-worktree, RELATIVE link via `node tools/repo/link-node-modules.mjs <source-checkout>`; nothing in the tooling or CI depended on the tracked link. `tools/repo/check-tracked-symlinks.mjs` (`npm run check:symlinks`, wired into CI as its own job that needs no install) reads the index and fails on any tracked symlink whose target is absolute or resolves outside the checkout, so the regression cannot recur.

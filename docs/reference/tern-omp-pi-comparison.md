@@ -151,3 +151,23 @@ the intended OMP pane, so its result is **not** evidence of a visual match.
 - OMP's bundle is minified. Byte offsets are stable for this install but may change if the package is reinstalled.
 - I did not run OMP or Tern. Grades reflect source reads only.
 - The OMP grep for "tsp" in `src` found no TSP sources, so the TSP reconciler exists only in the bundle (C for source-level details).
+
+## Update: work rendering after the live-work pass
+
+The claims above are a dated research ledger. For the work area specifically, the bridge no longer projects a
+hand-built row table, and the reference for what Tern draws is now the current OMP source and the Tern SDK:
+
+- Reference moves from the minified 18.9.1 bundle to source. `artifacts/omp-cli-source` holds the cloned
+  `can1357/oh-my-pi` tag `v18.12.6` (the release the installed binary reports), and `artifacts/tern-sdk` holds
+  `stencil-hq/tern-sdk`. Both are gitignored; the pinned `vendor/oh-my-pi` submodule is 18.1.14 and predates
+  OMP's Tern frontend entirely, so it is not the reference for this area.
+- One `tool` head per step, nested in the turn card, with a typed target (`command`/`path`/`pattern`), live
+  `age`/settled `took`, `exit` and `note`; subagents are `agent` nodes and a TaskManage batch is a `checklist`.
+  See `AGENTS.md#live-work-rendering-contract`.
+- `diffChildren` matches children by id and reorders with protocol `move`, so a settling step no longer deletes
+  and re-adds its siblings (which discarded Tern's per-node fold, scroll and highlight state).
+- The dock carries the turn clock (`omp.composer.turn`) while busy; a chip with no reachable action renders as
+  a label.
+- Visual check without a model: `tools/e2e/tern-live-work-demo.mjs` renders one scripted turn in its own Tern
+  tab (`TERN_LIVE_DEMO=1`, optional `EXPAND=1`/`SPEED=n`); `tern ctl shot <name>` writes
+  `target/shots/tern/live/<name>.png`. Behaviour is asserted in `.pi/test/tern/{work-table,turn-work,turn-groups,tsp,dock}.test.ts`.

@@ -5,9 +5,9 @@
       "command": "/bin/sh",
       "args": [
         "-c",
-        "GITHUB_PERSONAL_ACCESS_TOKEN=$(/opt/homebrew/bin/gh auth token) exec /Users/swarm/.local/bin/github-mcp-server stdio"
+        "TOKEN=$(gh auth token 2>/dev/null || /opt/homebrew/bin/gh auth token 2>/dev/null); [ -n \"$TOKEN\" ] || { echo 'github MCP: no gh login (run: gh auth login)' >&2; exit 78; }; SERVER=$(command -v github-mcp-server 2>/dev/null || echo \"${GITHUB_MCP_SERVER:-$HOME/.local/bin/github-mcp-server}\"); GITHUB_PERSONAL_ACCESS_TOKEN=$TOKEN exec \"$SERVER\" stdio"
       ],
-      "description": "GitHub MCP server v2.0.3 binary: repositories, issues, pull requests, code search (token taken from the active gh CLI login at launch)"
+      "description": "GitHub MCP server v2.0.3 binary: repositories, issues, pull requests, code search (token taken from the active gh CLI login at launch, never stored). Command resolution is portable: `github-mcp-server` on PATH, else $GITHUB_MCP_SERVER, else ~/.local/bin/github-mcp-server; `gh` is found on PATH (Linux) or in Homebrew's prefix (macOS)."
     }
   }
 }

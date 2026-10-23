@@ -71,8 +71,9 @@ export default function bgCardProbe(pi: any) {
   setRunningWork({ id: "agent-probe", kind: "subagent", label: "Agent agent-probe", status: "running", startedAt: Date.now() - 4000, detail: "Review the parser" });
   await new Promise((r) => setTimeout(r, 300));
   const agentRow = writes.slice(manyFrames).join("");
-  assert.ok(agentRow.includes('"text":"Agent agent-probe · Review the parser"'), "subagent row shows its label and task");
-  assert.ok(agentRow.includes('"text":"◆"'), "subagent row uses the agent mark");
+  assert.ok(agentRow.includes('"id":"bg-work-agent-probe","k":"agent"'), "a subagent renders as Tern's agent row, not a text row");
+  assert.ok(agentRow.includes('"task":"Review the parser"'), "agent row carries the assignment");
+  assert.ok(agentRow.includes('"role":"pi.background.agent"'), "agent row keeps its own role");
   removeRunningWork("agent-probe");
   console.log("PASS tern background card: one item shown and removed on completion; six items capped at five rows");
 } catch (error) {

@@ -287,4 +287,42 @@ describe("diffChildren", () => {
 		const node = { id: "x", k: "md", p: { text: "same" } };
 		expect(diffChildren("main", [node], [{ ...node, p: { text: "same" } }])).toEqual([]);
 	});
+
+	// A positional diff deleted and re-added every sibling after a removal. The terminal loses its per-node
+	// state with each re-add (local fold, ansi scroll, highlighted block), so a work card repainted its whole
+	// step list whenever one child disappeared.
+	it("removes one child without re-adding the siblings that follow it", () => {
+		const a = { id: "a", k: "md", p: { text: "a" } };
+		const b = { id: "b", k: "md", p: { text: "b" } };
+		const c = { id: "c", k: "md", p: { text: "c" } };
+		expect(diffChildren("main", [a, b, c], [a, c])).toEqual([["del", "b"]]);
+		expect(diffChildren("main", [a, b, c], [b, c])).toEqual([["del", "a"]]);
+	});
+
+	it("adds a child before the existing ones without touching them", () => {
+		const a = { id: "a", k: "md", p: { text: "a" } };
+		const b = { id: "b", k: "md", p: { text: "b" } };
+		const step = { id: "s", k: "tool", p: { status: "running" } };
+		// The new child is appended, then the last survivor is moved behind it: no sibling is rebuilt.
+		expect(diffChildren("main", [a, b], [a, step, b])).toEqual([
+			["add", "s", "main", null, step],
+			["move", "b", "main", null],
+		]);
+	});
+
+	it("moves a surviving child instead of rebuilding its subtree", () => {
+		const a = { id: "a", k: "tool", p: { status: "running" }, c: [{ id: "a-out", k: "ansi", p: { text: "x" } }] };
+		const b = { id: "b", k: "text", p: { text: "note" } };
+		// The note moves below the still-running step: no del/add for `a`, only its new position.
+		expect(diffChildren("main", [b, a], [a, b])).toEqual([["move", "b", "main", null]]);
+	});
+
+	it("re-adds a child whose kind changed, since a node cannot be re-kinded in place", () => {
+		const before = { id: "x", k: "text", p: { text: "a" } };
+		const after = { id: "x", k: "shimmer", p: { text: "a" } };
+		expect(diffChildren("main", [before], [after])).toEqual([
+			["del", "x"],
+			["add", "x", "main", null, after],
+		]);
+	});
 });

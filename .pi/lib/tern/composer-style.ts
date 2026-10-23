@@ -2,10 +2,15 @@
  * Pi surface styles. The composer carries OMP's omp.editor / omp.composer.* roles
  * (composer-view.ts), so Tern's built-in omp-composer.css and omp-chat-reader.css
  * draw it; nothing here restyles it.
+ *
+ * Stick to the selector subset Tern supports (docs/reference/tern-site/styles/css.md):
+ * no `:has()`, no `~` combinator, and no leading region element — a program sheet is
+ * prefixed with `[data-scope]`, so `.sf-main > …` can never match and only buys a
+ * `{"ev":"error","sheet":"composer"}` at startup.
  */
 export const PI_COMPOSER_CSS = `
 .sf-col[data-role='pi.assistant'] { gap: var(--sf-inner-gap); padding: 0 2px; }
-.sf-main > .sf-col[data-role='pi.assistant']:not(:has(~ .sf-col[data-role='pi.assistant'])) .sf-md .md { font-family: var(--sans); }
+.sf-col[data-role='pi.assistant']:last-child .sf-md .md { font-family: var(--sans); }
 .sf-card[data-role='pi.user']:not(:first-child) { margin-top: 8px; }
 .sf-card[data-role='pi.user'] .sf-md .md { font-family: var(--sans); }
 [data-role='pi.tasks'] {
@@ -86,14 +91,5 @@ export const PI_COMPOSER_CSS = `
 [data-role='pi.tasks.head'][data-action='tasks.view'] { cursor: pointer; }
 [data-role='tasks.call'] { font-family: var(--tv-font, var(--mono)); }
 [data-role='tasks.body'] { gap: 3px; padding: 4px 2px; }
-[data-role='tasks.row'] { display: flex; flex-direction: column; gap: 4px; min-width: 0; padding: 7px 10px; border-radius: 6px; border: 1px solid var(--l2); background: var(--card); }
-[data-role='tasks.row.head'] { display: flex; gap: 8px; align-items: center; }
-[data-role='tasks.row'][data-tone='success'] { border-left: 2px solid var(--ok); }
-[data-role='tasks.row'][data-tone='accent'] { border-left: 2px solid var(--accent); }
-[data-role='tasks.row'][data-tone='error'] { border-left: 2px solid var(--danger, var(--warn)); }
-[data-role='tasks.mark'] { color: var(--t2); width: 1.2em; text-align: center; }
-[data-role='tasks.op'] { color: var(--t3); font-size: 10px; white-space: nowrap; }
-[data-role='tasks.subject'] { display: block; color: var(--t1); min-width: 0; white-space: normal; overflow-wrap: anywhere; line-height: 1.45; }
-[data-role='tasks.error'] { color: var(--warn); font-size: 10px; white-space: normal; overflow-wrap: anywhere; }
 [data-role='tasks.state'] { color: var(--t3); font-size: 10px; padding: 2px 4px 0; }
 `;

@@ -26,6 +26,21 @@ describe("OMP composer port", () => {
 		expect(modelDisplayName({ id: "gpt-x" })).toBe("gpt-x");
 	});
 
+	it("shows the turn's own clock while it runs, and nothing while idle", () => {
+		const bar = (facts: Record<string, unknown>) => {
+			const [col] = composerNodes({ draft: "", busy: false, ...facts } as never);
+			const barNode = (col.c ?? []).find((n: any) => n.p?.role === "omp.composer.bar")!;
+			return (barNode.c ?? []).map((n: any) => n.id);
+		};
+		expect(bar({ busy: true, turnAgeMs: 4200 })).toContain("composer-turn");
+		// Tern counts the timer on from `age`, so the node carries no text and no ticking frame is needed.
+		const [col] = composerNodes({ draft: "", busy: true, turnAgeMs: 4200 });
+		expect(find([col], "composer-turn")?.p).toMatchObject({ age: 4200, format: "short", role: "omp.composer.turn" });
+		// Idle, or a turn whose start was never observed: no clock is invented.
+		expect(bar({ busy: false, turnAgeMs: 4200 })).not.toContain("composer-turn");
+		expect(bar({ busy: true })).not.toContain("composer-turn");
+	});
+
 	it("mirrors OMP's dock frame for the same facts", () => {
 		const [col] = composerNodes({
 			draft: "",
@@ -74,6 +89,9 @@ describe("OMP composer fact parity", () => {
 		expect(find(nodes, "git").p).toMatchObject({ tone: "warning", actions: { click: "git.open" } });
 		expect(find(nodes, "ctx").p.actions).toEqual({ click: "status.context" });
 		expect(find(nodes, "model").p.actions).toEqual({ click: "model.select" });
+		// A chip that cannot act is a label: a click that only writes "unavailable" into the transcript is a trap.
+		const inert = composerNodes({ draft: "", busy: false, effortKind: false, model: "M", modelSelectable: false });
+		expect(find(inert, "model").p.actions).toBeUndefined();
 		expect(find(nodes, "usage").p.actions).toEqual({ click: "status.cost" });
 		const clean = composerNodes({ draft: "", busy: false, effortKind: false, git: { branch: "main", staged: 0, unstaged: 0, untracked: 0 } });
 		expect(find(clean, "git").p.tone).toBeUndefined();

@@ -2,7 +2,8 @@
 // The blob is sent once when the bridge starts; the node list only references it by SHA-256 id.
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFileSync, realpathSync, watch, type FSWatcher } from "node:fs";
+import { readdirSync, readFileSync, realpathSync, watch, type FSWatcher } from "node:fs";
+import { join } from "node:path";
 import type { ArtifactBlob } from "./artifact-previews.ts";
 import { readGitSnapshot, type GitEntry, type GitSection, type GitSnapshot, type GitStat } from "./git-status.ts";
 import type { McpStatus } from "../tools/mcp-status.ts";
@@ -76,6 +77,37 @@ export async function readRepoStatus(cwd: string): Promise<RepoStatus> {
 
 // Debounced watch on the worktree and the git directory. Lock files, objects and node_modules are ignored.
 // Returns a disposer; nothing polls.
+//
+// A recursive watch on the whole root costs one inotify watch per directory — thousands in a JavaScript
+// checkout, almost all of them node_modules and .git — and can exhaust fs.inotify.max_user_watches.
+// That failure arrives as an async 'error' event on the FSWatcher, so a try/catch around watch() never
+// sees it and an unlistened event aborts the process. So: no recursion over the root or the git
+// directory, recursion only into the top-level worktree entries, and every watcher owned by watchSafely.
+const UNWATCHED = new Set([".git", "node_modules"]);
+const MAX_WATCHED_TREES = 256;
+
+function watchSafely(target: string, recursive: boolean, onEvent: (name: string | null) => void): FSWatcher | undefined {
+	let watcher: FSWatcher | undefined;
+	let closed = false;
+	// Drop a watcher that failed: the card keeps its last state and the process survives the error.
+	const drop = () => {
+		closed = true;
+		try { watcher?.close(); } catch { /* already closed */ }
+	};
+	try {
+		watcher = watch(target, { recursive }, (_event, name) => { if (!closed) onEvent(typeof name === "string" ? name : null); });
+	} catch { return undefined; }
+	watcher.on("error", drop);
+	watcher.on("close", () => { closed = true; });
+	return watcher;
+}
+
+function topLevelDirectories(root: string): string[] {
+	try {
+		return readdirSync(root, { withFileTypes: true }).filter((entry) => entry.isDirectory() && !UNWATCHED.has(entry.name)).map((entry) => entry.name);
+	} catch { return []; }
+}
+
 export function watchRepo(root: string, gitDir: string | undefined, onChange: () => void): () => void {
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	const fire = () => {
@@ -83,16 +115,17 @@ export function watchRepo(root: string, gitDir: string | undefined, onChange: ()
 		timer = setTimeout(onChange, 400);
 	};
 	const watchers: FSWatcher[] = [];
+	const add = (target: string, recursive: boolean, allowed: (name: string | null) => boolean) => {
+		const watcher = watchSafely(target, recursive, (name) => { if (allowed(name)) fire(); });
+		if (watcher) watchers.push(watcher);
+	};
 	const onWorktree = (name: string | null) => !name || !(name === ".git" || name.startsWith(".git/") || name.includes("node_modules/"));
 	const onGitDir = (name: string | null) => !name || !(name.endsWith(".lock") || name.startsWith("objects/"));
-	try {
-		watchers.push(watch(root, { recursive: true }, (_event, name) => { if (onWorktree(name)) fire(); }));
-	} catch { /* root is not watchable; the card keeps its last state */ }
-	if (gitDir) {
-		try {
-			watchers.push(watch(gitDir, { recursive: true }, (_event, name) => { if (onGitDir(name)) fire(); }));
-		} catch { /* same */ }
-	}
+	// Top-level entries that nobody recurred into still refresh the card: their creation and removal land here.
+	add(root, false, onWorktree);
+	const trees = topLevelDirectories(root).slice(0, MAX_WATCHED_TREES);
+	for (const entry of trees) add(join(root, entry), true, onWorktree);
+	if (gitDir) add(gitDir, false, onGitDir);
 	return () => {
 		clearTimeout(timer);
 		for (const w of watchers) w.close();

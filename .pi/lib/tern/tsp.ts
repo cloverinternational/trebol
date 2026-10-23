@@ -189,13 +189,46 @@ export function shouldProbe(env: Record<string, string | undefined>): boolean {
 // Keyed diff between the last applied children and the next children. Matching is by id and kind
 // over a shared prefix; growing text becomes a `text append`, other prop changes a `set`, and the
 // remaining tail is deleted and re-added in order. Streaming therefore costs only the new bytes.
+// Children are matched by id, never by position. A positional diff re-adds every sibling after an insert or a
+// removal, which destroys the state the terminal keeps per node (a local fold, an ansi scroll position, a
+// highlighted block) and repaints the whole tail of a work card every time a step settles. Instead: delete what
+// is gone, diff a matched id in place, add new ids at the end, then move the children that ended up out of order
+// (protocol `move id parent before`).
 export function diffChildren(parent: string, prev: TspNode[], next: TspNode[]): unknown[] {
-	let m = 0;
-	while (m < prev.length && m < next.length && prev[m].id === next[m].id && prev[m].k === next[m].k) m += 1;
 	const ops: unknown[] = [];
-	for (let i = 0; i < m; i += 1) ops.push(...diffNode(prev[i], next[i]));
-	for (let i = prev.length - 1; i >= m; i -= 1) ops.push(["del", prev[i].id]);
-	for (let i = m; i < next.length; i += 1) ops.push(["add", next[i].id, parent, null, next[i]]);
+	const prevById = new Map<string, TspNode>();
+	for (const child of prev) if (!prevById.has(child.id)) prevById.set(child.id, child);
+	const nextIds = new Set(next.map((child) => child.id));
+	for (const child of prev) if (!nextIds.has(child.id)) ops.push(["del", child.id]);
+	// The order the terminal now holds: the survivors in their old order, then the new children in next order.
+	const order = prev.filter((child) => nextIds.has(child.id)).map((child) => child.id);
+	const kinds = new Map<string, string>();
+	for (const child of prev) kinds.set(child.id, child.k);
+	for (const child of next) {
+		const old = prevById.get(child.id);
+		if (old && old.k === child.k) {
+			ops.push(...diffNode(old, child));
+			continue;
+		}
+		// A new id, or an id whose kind changed: the terminal cannot re-k the node, so replace it.
+		if (old) {
+			ops.push(["del", child.id]);
+			const at = order.indexOf(child.id);
+			if (at >= 0) order.splice(at, 1);
+		}
+		ops.push(["add", child.id, parent, null, child]);
+		order.push(child.id);
+	}
+	// Place from the end, so each move's `before` sibling is already final.
+	for (let i = next.length - 1; i >= 0; i -= 1) {
+		const id = next[i]!.id;
+		const at = order.indexOf(id);
+		if (at === i) continue;
+		if (at < 0) continue;
+		ops.push(["move", id, parent, i + 1 < next.length ? next[i + 1]!.id : null]);
+		order.splice(at, 1);
+		order.splice(i, 0, id);
+	}
 	return ops;
 }
 

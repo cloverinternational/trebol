@@ -55,7 +55,9 @@ describe("claw routing mode", () => {
 
 	it("worker launch is plain terminal pi via the documented PI_TERN_UI=0 bypass, never -nt", () => {
 		const [shell, flag, line] = workerCommand({ session: 1, cwd: "/w", label: "x", runId: "run-1", clawDir: "/c", prompt: "p" });
-		expect([shell, flag]).toEqual(["/bin/zsh", "-lic"]);
+		// A hardcoded zsh broke every launch where zsh is not installed, so the launch probes for a zsh or bash login shell.
+		expect(flag).toBe("-lic");
+		expect(shell).toMatch(/\/(zsh|bash)$/);
 		expect(line).toContain("PI_TERN_UI=0");
 		expect(line).toMatch(/PI_TERN_UI=0 PI_CLAW_RUN=/);
 		expect(line).not.toMatch(/\s-nt\b/);

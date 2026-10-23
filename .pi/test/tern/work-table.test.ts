@@ -1,5 +1,6 @@
-// Work table in the Tern transcript: one list of factual rows per run of tool steps, detail beneath the
-// selected row, the group's own fold driven by native toggle events, and a bottom Collapse work control.
+// Work card in the Tern transcript: one native `tool` head per step (status glyph, terminal-clocked timer,
+// typed target, exit chip), narration kept in place, the group's own fold driven by native toggle events, and
+// a bottom Collapse work control. No hand-built row list: Tern draws and clocks each step.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PiTernBridge, TranscriptProjector, type PiEventLike, type PiSessionLike } from "../../lib/tern/bridge.ts";
 import type { TspNode } from "../../lib/tern/tsp.ts";
@@ -10,27 +11,30 @@ const start = (p: TranscriptProjector, toolCallId: string, args: unknown = { com
 const end = (p: TranscriptProjector, toolCallId: string) => p.apply({ type: "tool_execution_end", toolCallId, toolName: "bash", result: { content: [{ type: "text", text: "ok" }], details: { exit_code: 0, duration_ms: 10 } }, isError: false });
 const user = (p: TranscriptProjector, text: string) => p.apply({ type: "message_start", message: { role: "user", content: [{ type: "text", text }] } });
 const groups = (nodes: readonly TspNode[]) => nodes.filter((n) => n.p?.role === "tern.work" || n.p?.role === "tern.work-live");
-const lists = (group: TspNode) => (group.c ?? []).filter((n) => n.k === "list");
-const rows = (group: TspNode) => lists(group).flatMap((l) => (l.c ?? []).map((item) => item));
+const steps = (group: TspNode) => (group.c ?? []).filter((n) => n.k === "tool");
+const step = (group: TspNode, id: string) => steps(group).find((n) => n.id === id);
+const text = (group: TspNode, role: string) => (group.c ?? []).find((n) => n.p?.role === role)?.p?.text;
+// The group's chips live in one controls row; a chip is addressed by its own role.
+const controlChip = (group: TspNode, role: string) => (group.c ?? []).flatMap((n) => (n.p?.role === "tern.work-controls" ? n.c ?? [] : [])).find((n) => n.p?.role === role);
 
-describe("work rows (projector)", () => {
-	it("renders one aligned factual row per tool step, in order, with stable row ids", () => {
+describe("work steps (projector)", () => {
+	it("renders one native tool head per step, in order, with the verb, typed target and intent Tern draws", () => {
 		const p = new TranscriptProjector();
 		user(p, "fix login");
 		start(p, "a", { description: "Check build", command: "npm test" });
 		start(p, "b", { path: "src/login.ts" }, "read");
 		end(p, "a");
-		// The default live view is the activity panel (running steps only); this checks the all-steps rows.
+		// The default live view is the activity panel (running steps only); this checks the all-steps body.
 		p.setGroupView("g-t-a", "all");
 		const [live] = groups(p.nodes(false, { currentTask: CURRENT }));
-		expect(rows(live!).map((r) => [r.id, r.p?.label, r.p?.detail, r.p?.value])).toEqual([
-			["row-t-a", "Run", "Check build", "Done · 10 ms"],
-			["row-t-b", "Read", "src/login.ts", "Running"],
-		]);
-		expect(lists(live!)[0]!.p).toMatchObject({ role: "tern.work-rows" });
+		expect(steps(live!).map((s) => s.id)).toEqual(["t-a", "t-b"]);
+		expect(step(live!, "t-a")?.p).toMatchObject({ name: "bash", title: "Bash", status: "done", target: "npm test", targetKind: "command", intent: "Check build", took: 10 });
+		expect(step(live!, "t-b")?.p).toMatchObject({ name: "read", title: "Read", status: "running", target: "src/login.ts", targetKind: "path" });
+		// Nothing hand-drawn is left behind: the terminal owns the row rendering.
+		expect((live!.c ?? []).some((n) => n.k === "list" || n.k === "item")).toBe(false);
 	});
 
-	it("keeps narration between tool steps in chronological order around separate lists", () => {
+	it("keeps narration between tool steps in chronological order around the steps", () => {
 		const p = new TranscriptProjector();
 		user(p, "go");
 		start(p, "a");
@@ -39,8 +43,8 @@ describe("work rows (projector)", () => {
 		p.apply({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "Next step" } });
 		start(p, "b");
 		const [live] = groups(p.nodes(true, { currentTask: CURRENT }));
-		// Focus, two lists around the narration, then the All-steps mode's Activity control and Collapse work.
-		expect((live!.c ?? []).map((n) => n.k)).toEqual(["text", "list", "md", "list", "text", "text"]);
+		// The controls and the heading come first, then the steps with the narration kept between them.
+		expect((live!.c ?? []).filter((n) => n.k !== "text" && n.p?.role !== "tern.work-controls").map((n) => n.k)).toEqual(["tool", "md", "tool"]);
 	});
 
 	it("shows the current task only in the active group, and only when one is supplied", () => {
@@ -55,18 +59,93 @@ describe("work rows (projector)", () => {
 		const [settled, active] = withTask;
 		expect(settled!.p?.role).toBe("tern.work");
 		expect((settled!.c ?? []).some((n) => n.p?.role === "tern.work-focus")).toBe(false);
-		expect((active!.c ?? [])[0]).toMatchObject({ k: "text", p: { role: "tern.work-focus", text: "Current task · #7 Fix login" } });
+		expect((active!.c ?? []).find((n) => n.p?.role === "tern.work-focus")).toMatchObject({ k: "text", p: { text: "Current task · #7 Fix login" } });
 		// Without a supplied task the heading is the labelled request, never the current task.
 		expect(groups(p.nodes(false)).flatMap((g) => g.c ?? []).some((n) => String(n.p?.text).startsWith("Current task"))).toBe(false);
 	});
 
-	it("drops the work-rows selection of a group the moment its items are replaced by a new session", () => {
+	it("gives the group head a live age, then the settled duration and a failure badge", () => {
+		const p = new TranscriptProjector();
+		user(p, "go");
+		p.apply({ type: "agent_start" });
+		start(p, "a", { command: "exit 1" });
+		const [live] = groups(p.nodes(false));
+		expect(live!.p).toMatchObject({ status: "running" });
+		expect(typeof live!.p?.age).toBe("number");
+		expect(live!.p?.took).toBeUndefined();
+		p.apply({ type: "tool_execution_end", toolCallId: "a", toolName: "bash", result: { content: [{ type: "text", text: "boom" }], details: { exit_code: 1, duration_ms: 40 } }, isError: true });
+		start(p, "b");
+		end(p, "b");
+		p.apply({ type: "agent_end" });
+		const [settled] = groups(p.nodes(false));
+		expect(settled!.p).toMatchObject({ status: "done", meta: ["2 steps"] });
+		expect(typeof settled!.p?.took).toBe("number");
+		expect(settled!.p?.badges).toEqual([{ text: "1 failed", tone: "warning" }]);
+		expect(step(settled!, "t-a")?.p).toMatchObject({ status: "error", exit: 1 });
+	});
+
+	it("keeps the head to one line and shows a long command in full inside the body", () => {
+		const p = new TranscriptProjector();
+		user(p, "go");
+		const long = "pnpm exec vitest run src/auth/login.test.ts src/auth/session.test.ts --reporter=verbose --coverage.enabled=false --pool=forks 2>&1 | tee /tmp/login.log";
+		start(p, "long", { command: long, description: "Run the login tests" });
+		const stepNode = step(groups(p.nodes(false))[0]!, "t-long")!;
+		expect(String(stepNode.p?.target).length).toBe(64);
+		expect(String(stepNode.p?.target)).toMatch(/…$/);
+		// The full command is in the body, where it can wrap; the head keeps the copyable command prop.
+		const body = stepNode.c?.[0]?.c ?? [];
+		expect(body[0]).toMatchObject({ k: "code", p: { role: "omp.tool.bash.command", lang: "bash", text: long } });
+		expect(stepNode.p?.command).toBe(long);
+		// A short command is not repeated: the head already names it.
+		start(p, "short", { command: "npm test" });
+		expect((step(groups(p.nodes(false))[0]!, "t-short")!.c?.[0]?.c ?? []).some((n) => n.k === "code")).toBe(false);
+	});
+
+	it("draws an apply_patch as a diff with its own +a −d, and folds it once settled", () => {
+		const p = new TranscriptProjector();
+		user(p, "go");
+		const input = [
+			"*** Begin Patch",
+			"*** Update File: src/auth/login.ts",
+			"@@ export function login(user) {",
+			"   const session = open(user);",
+			"-  calls++;",
+			"+  calls = 1;",
+			"*** Add File: src/auth/notes.md",
+			"+keep the session counter at one",
+			"*** End Patch",
+		].join("\n");
+		p.apply({ type: "tool_execution_start", toolCallId: "p1", toolName: "apply_patch", args: { input } });
+		const running = step(groups(p.nodes(false))[0]!, "t-p1")!;
+		expect(running.p).toMatchObject({ name: "edit", title: "Patch", status: "running", collapsed: false, meta: ["+2 −1"] });
+		expect(running.p?.target).toBe("src/auth/login.ts, src/auth/notes.md");
+		const diffs = (running.c?.[0]?.c ?? []) as TspNode[];
+		expect(diffs.map((d) => [d.k, d.p?.path])).toEqual([["diff", "src/auth/login.ts"], ["diff", "src/auth/notes.md"]]);
+		// The `***` markers never reach the diff as context lines.
+		expect(String(diffs[0]?.p?.text)).toBe("@@ export function login(user) {\n   const session = open(user);\n-  calls++;\n+  calls = 1;");
+		expect(String(diffs[1]?.p?.text)).toBe("+keep the session counter at one");
+		p.apply({ type: "tool_execution_end", toolCallId: "p1", toolName: "apply_patch", result: { content: [{ type: "text", text: "2 files changed" }] }, isError: false });
+		expect(step(groups(p.nodes(false))[0]!, "t-p1")?.p).toMatchObject({ status: "done", collapsed: true });
+	});
+
+	it("folds a settled step to its head and opens it with Ctrl+O", () => {
+		const p = new TranscriptProjector();
+		user(p, "go");
+		start(p, "a");
+		end(p, "a");
+		p.apply({ type: "agent_end" });
+		const folded = () => step(groups(p.nodes(false))[0]!, "t-a");
+		expect(folded()?.p).toMatchObject({ collapsible: true, collapsed: true });
+		expect(folded()?.c?.[0]?.c?.[0]).toMatchObject({ k: "ansi" });
+		expect(step(groups(p.nodes(true))[0]!, "t-a")?.p).toMatchObject({ collapsed: false });
+	});
+
+	it("drops every group view the moment its items are replaced by a new session", () => {
 		const p = new TranscriptProjector();
 		user(p, "go");
 		start(p, "a");
 		const [live] = groups(p.nodes(false));
 		p.setGroupCollapsed(live!.id, false);
-		p.selectRow(live!.id, "row-t-a");
 		p.replaceFromSessionBranch([]);
 		expect(p.nodes(false)).toEqual([]);
 		user(p, "go");
@@ -74,11 +153,10 @@ describe("work rows (projector)", () => {
 		const [again] = groups(p.nodes(false));
 		expect(again!.id).toBe(live!.id);
 		expect(again!.p?.collapsed).toBe(false);
-		expect(lists(again!)[0]!.p?.selected).toBeUndefined();
 	});
 });
 
-describe("work rows through the bridge (native events)", () => {
+describe("work card through the bridge (native events)", () => {
 	beforeEach(() => vi.useFakeTimers({ now: 1_000_000 }));
 	afterEach(() => vi.useRealTimers());
 
@@ -101,7 +179,63 @@ describe("work rows through the bridge (native events)", () => {
 	const send = (bridge: PiTernBridge, body: Record<string, unknown>) => bridge.handle({ verb: "e", body } as Msg);
 	const toggle = (bridge: PiTernBridge, id: string, collapsed: boolean) => send(bridge, { ev: "toggle", id, collapsed });
 	const collapseWork = (bridge: PiTernBridge, id: string) => send(bridge, { ev: "action", sf: "pi", act: "work.collapse", value: id });
-	const select = (bridge: PiTernBridge, listId: string, item: string) => send(bridge, { ev: "select", sf: "pi", id: listId, item });
+
+	it("a running step shows its live output and a run timer without the user selecting anything", () => {
+		const h = harness();
+		h.session.emit({ type: "message_start", message: { role: "user", content: [{ type: "text", text: "go" }] } });
+		h.session.emit({ type: "tool_execution_start", toolCallId: "live", toolName: "bash", args: { command: "printf first; sleep 1", description: "Print" } });
+		h.session.emit({ type: "tool_execution_update", toolCallId: "live", partialResult: { content: [{ type: "text", text: "first" }] } });
+		const [live] = groups(h.nodes());
+		const running = step(live!, "t-live")!;
+		// Open while it runs, so its output shows live without a click.
+		expect(running.p).toMatchObject({ status: "running", collapsed: false, target: "printf first; sleep 1", targetKind: "command", intent: "Print", age: 0 });
+		// The body is the OMP run box: tailing output and the terminal-clocked foot.
+		expect(running.c?.[0]).toMatchObject({ k: "col", p: { role: "omp.run" } });
+		expect(running.c?.[0]?.c?.[0]).toMatchObject({ k: "ansi", p: { text: "first", follow: true } });
+		h.session.emit({ type: "tool_execution_update", toolCallId: "live", partialResult: { content: [{ type: "text", text: "firstsecond" }] } });
+		expect(step(groups(h.nodes())[0]!, "t-live")?.c?.[0]?.c?.[0]?.p?.text).toBe("firstsecond");
+		// Once it settles the step folds to its head and carries its final duration.
+		h.session.emit({ type: "tool_execution_end", toolCallId: "live", toolName: "bash", result: { content: [{ type: "text", text: "firstsecond" }], details: { exit_code: 0, duration_ms: 1200 } }, isError: false });
+		// Settling folds the step to its head: command, state, exit and duration stay, the body closes.
+		expect(step(groups(h.nodes())[0]!, "t-live")?.p).toMatchObject({ status: "done", took: 1200, collapsed: true });
+	});
+
+	it("windows a long running output with an honest count instead of pushing the turn off screen", () => {
+		const h = harness();
+		h.session.emit({ type: "message_start", message: { role: "user", content: [{ type: "text", text: "go" }] } });
+		h.session.emit({ type: "tool_execution_start", toolCallId: "long", toolName: "bash", args: { command: "seq 1 40" } });
+		const lines = Array.from({ length: 40 }, (_, i) => `line ${i + 1}`);
+		h.session.emit({ type: "tool_execution_update", toolCallId: "long", partialResult: { content: [{ type: "text", text: lines.join("\n") }] } });
+		const body = step(groups(h.nodes())[0]!, "t-long")?.c?.[0]?.c?.[0]?.p?.text as string;
+		// 40 lines in, 12 shown: the head of the window is an explicit count, never a silent cut.
+		expect(body.split("\n")[0]).toBe("… 28 earlier lines");
+		expect(body.split("\n").at(-1)).toBe("line 40");
+		expect(body).not.toContain("line 1\n");
+		// Once it settles the whole output is in the body again, behind the folded head.
+		h.session.emit({ type: "tool_execution_end", toolCallId: "long", toolName: "bash", result: { content: [{ type: "text", text: lines.join("\n") }], details: { exit_code: 0, duration_ms: 90 } }, isError: false });
+		const settled = step(groups(h.nodes())[0]!, "t-long")!;
+		expect(settled.p).toMatchObject({ collapsed: true });
+		expect(String(settled.c?.[0]?.c?.[0]?.p?.text)).toBe(lines.join("\n"));
+	});
+
+	it("a running TaskManage call is a checklist of pending items, and an abort leaves one cancelled step", () => {
+		const p = new TranscriptProjector();
+		user(p, "go");
+		p.apply({ type: "agent_start" });
+		p.apply({ type: "tool_execution_start", toolCallId: "t1", toolName: "TaskManage", args: { operations: [{ key: "a", op: "create", subject: "First" }, { key: "b", op: "create", subject: "Second" }] } });
+		const running = step(groups(p.nodes(false))[0]!, "t-t1")!;
+		expect(running.p).toMatchObject({ status: "running", name: "todo", title: "Tasks" });
+		const checklist = running.c?.[0]?.c?.[0];
+		expect(checklist).toMatchObject({ k: "checklist", p: { role: "tasks.list" } });
+		const items = (checklist?.p?.phases as Array<{ items: Array<{ status: string; text: string }> }>)[0]!.items;
+		expect(items.map((i) => i.status)).toEqual(["pending", "pending"]);
+		expect(items.map((i) => i.text)).toEqual(["create · First", "create · Second"]);
+		// An abort closes the call: the step reads cancelled and carries no note repeating its own status.
+		p.apply({ type: "agent_end" });
+		const aborted = step(groups(p.nodes(false))[0]!, "t-t1")!;
+		expect(aborted.p).toMatchObject({ status: "cancelled" });
+		expect(aborted.p?.note).toBeUndefined();
+	});
 
 	it("a toggle event sets only its group's fold, and an expanded group hides the duplicate streaming tail", () => {
 		const h = harness();
@@ -133,27 +267,10 @@ describe("work rows through the bridge (native events)", () => {
 		toggle(h.bridge, first!.id, true);
 		toggle(h.bridge, second!.id, false);
 		expect(groups(h.nodes()).map((g) => g.p?.collapsed)).toEqual([true, false]);
-		const control = (groups(h.nodes())[0]!.c ?? []).at(-1);
-		expect(control).toMatchObject({ p: { role: "tern.work-collapse", actions: { click: `work.collapse=${first!.id}` } } });
+		const control = controlChip(groups(h.nodes())[0]!, "tern.work-collapse");
+		expect(control).toMatchObject({ p: { actions: { click: `work.collapse=${first!.id}` } } });
 		collapseWork(h.bridge, second!.id);
 		expect(groups(h.nodes()).map((g) => g.p?.collapsed)).toEqual([true, true]);
-	});
-
-	it("selecting a row opens its existing renderer beneath that row and keeps the selection while the result settles", () => {
-		const h = harness();
-		h.session.emit({ type: "message_start", message: { role: "user", content: [{ type: "text", text: "go" }] } });
-		h.session.emit({ type: "tool_execution_start", toolCallId: "a", toolName: "bash", args: { description: "Check build", command: "npm test" } });
-		const gid = groups(h.nodes())[0]!.id;
-		select(h.bridge, `${gid}-rows-0`, "row-t-a");
-		const open = groups(h.nodes())[0]!;
-		expect(lists(open)[0]!.p?.selected).toBe("row-t-a");
-		const detail = (open.c ?? []).find((n) => n.id === "t-a");
-		expect(detail).toMatchObject({ k: "tool", p: { status: "running", collapsed: false } });
-		h.session.emit({ type: "tool_execution_end", toolCallId: "a", toolName: "bash", result: { content: [{ type: "text", text: "all green" }] }, isError: false });
-		const settled = groups(h.nodes())[0]!;
-		expect(lists(settled)[0]!.p?.selected).toBe("row-t-a");
-		expect((settled.c ?? []).find((n) => n.id === "t-a")?.p?.status).toBe("done");
-		expect(rows(settled)[0]).toMatchObject({ p: { label: "Run", detail: "Check build", value: expect.stringMatching(/^Done/) } });
 	});
 
 	it("Ctrl+O overrides local folds for every group and then returns each group to the global state", () => {
@@ -180,44 +297,41 @@ describe("work rows through the bridge (native events)", () => {
 		next.session.emit({ type: "tool_execution_start", toolCallId: "a", toolName: "bash", args: { command: "x" } });
 		expect(groups(next.nodes())[0]).toMatchObject({ id: gid, p: { collapsed: false } });
 	});
-	it("a long output stays behind its row: the bottom Collapse work closes only its group, and reopening keeps the selection and raw output", () => {
+
+	it("a long output stays inside its own step: Collapse work folds only its group and reopening keeps the output", () => {
 		const h = harness();
-		const text = Array.from({ length: 500 }, (_, i) => `line ${i + 1}`).join("\n");
+		const body = Array.from({ length: 500 }, (_, i) => `line ${i + 1}`).join("\n");
 		h.session.emit({ type: "message_start", message: { role: "user", content: [{ type: "text", text: "go" }] } });
 		h.session.emit({ type: "tool_execution_start", toolCallId: "long", toolName: "bash", args: { command: "seq 1 500", description: "Count" } });
-		h.session.emit({ type: "tool_execution_update", toolCallId: "long", partialResult: { content: [{ type: "text", text }] } });
-		h.session.emit({ type: "tool_execution_end", toolCallId: "long", toolName: "bash", result: { content: [{ type: "text", text }] }, isError: false });
+		h.session.emit({ type: "tool_execution_update", toolCallId: "long", partialResult: { content: [{ type: "text", text: body }] } });
+		h.session.emit({ type: "tool_execution_end", toolCallId: "long", toolName: "bash", result: { content: [{ type: "text", text: body }] }, isError: false });
 		const gid = groups(h.nodes())[0]!.id;
-		select(h.bridge, `${gid}-rows-0`, "row-t-long");
 		const open = groups(h.nodes())[0]!;
-		expect(open.c!.at(-1)).toMatchObject({ id: `${gid}-collapse`, p: { role: "tern.work-collapse", actions: { click: `work.collapse=${gid}` } } });
-		const renderer = open.c!.find((n) => n.id === "t-long")!;
-		expect(renderer.c?.[0]?.c?.[1]).toMatchObject({ k: "ansi", p: { text, follow: true } });
+		expect(controlChip(open, "tern.work-collapse")).toMatchObject({ id: `${gid}-collapse`, p: { actions: { click: `work.collapse=${gid}` } } });
+		expect(step(open, "t-long")?.c?.[0]?.c?.[0]).toMatchObject({ k: "ansi", p: { text: body, follow: true } });
 		collapseWork(h.bridge, gid);
 		expect(groups(h.nodes())[0]).toMatchObject({ id: gid, p: { collapsed: true } });
 		toggle(h.bridge, gid, false);
 		const reopened = groups(h.nodes())[0]!;
 		expect(reopened.p?.collapsed).toBe(false);
-		expect(lists(reopened)[0]!.p?.selected).toBe("row-t-long");
-		expect(reopened.c!.find((n) => n.id === "t-long")?.c?.[0]?.c?.[1]?.p?.text).toBe(text);
+		expect(step(reopened, "t-long")?.c?.[0]?.c?.[0]?.p?.text).toBe(body);
 	});
 });
 
 describe("live activity panel (default, modes, persistence)", () => {
 	const act = (p: TranscriptProjector, id: string) => p.apply({ type: "tool_execution_start", toolCallId: id, toolName: "read", args: { path: `${id}.ts` } });
 	const finish = (p: TranscriptProjector, id: string, isError = false) => p.apply({ type: "tool_execution_end", toolCallId: id, toolName: "read", result: { content: [{ type: "text", text: "ok" }], details: { duration_ms: 5 } }, isError });
-	const roleOf = (group: TspNode) => (group.c ?? []).filter((n) => n.p?.role);
-	const text = (group: TspNode, role: string) => (group.c ?? []).find((n) => n.p?.role === role)?.p?.text;
 
-	it("shows up to three active rows in call order with the overflow count, and no detail beneath them", () => {
+	it("shows up to three running steps in call order with their own heads, plus the overflow count", () => {
 		const p = new TranscriptProjector();
 		user(p, "big change");
 		for (const id of ["a", "b", "c", "d", "e"]) act(p, id);
+		p.setGroupView("g-t-a", "activity");
 		const [live] = groups(p.nodes(false, { currentTask: CURRENT }));
 		expect(live!.p?.collapsed).toBe(false);
-		expect(rows(live!).map((r) => r.id)).toEqual(["row-t-a", "row-t-b", "row-t-c"]);
+		expect(steps(live!).map((s) => s.id)).toEqual(["t-a", "t-b", "t-c"]);
 		expect(text(live!, "tern.work-overflow")).toBe("+2 more running");
-		expect(live!.c!.some((n) => n.id === "t-a")).toBe(false);
+		expect(steps(live!).every((s) => s.p?.status === "running" && s.p?.targetKind === "path")).toBe(true);
 	});
 
 	it("names the step that finished last by completion order, not by call order", () => {
@@ -228,6 +342,7 @@ describe("live activity panel (default, modes, persistence)", () => {
 		act(p, "b");
 		finish(p, "b");
 		finish(p, "a");
+		p.setGroupView("g-t-a", "activity");
 		const [live] = groups(p.nodes(false));
 		expect(text(live!, "tern.work-latest")).toBe("Last · Read · a.ts · Done · 5 ms");
 	});
@@ -240,26 +355,30 @@ describe("live activity panel (default, modes, persistence)", () => {
 		act(p, "b");
 		finish(p, "b");
 		act(p, "c");
+		p.setGroupView("g-t-a", "activity");
 		const [live] = groups(p.nodes(false));
 		expect(text(live!, "tern.work-failed")).toMatch(/^1 failed · Read · a\.ts · Failed/);
 		expect(text(live!, "tern.work-latest")).toBe("Last · Read · b.ts · Done · 5 ms");
 	});
 
-	it("says it is preparing the next action when nothing runs and no narration is streaming", () => {
+	it("says it is preparing the next action, with a shimmer, when nothing runs and no narration is streaming", () => {
 		const p = new TranscriptProjector();
 		user(p, "go");
 		p.apply({ type: "agent_start" });
 		act(p, "a");
 		finish(p, "a");
+		p.setGroupView("g-t-a", "activity");
 		const [live] = groups(p.nodes(false));
-		expect(text(live!, "tern.work-preparing")).toBe("Preparing next action");
+		expect((live!.c ?? []).find((n) => n.p?.role === "tern.work-preparing")).toMatchObject({ k: "shimmer", p: { text: "Preparing next action" } });
 	});
 
-	it("uses the authoritative task as the heading, else the bounded request, never an invented title", () => {
+	it("names the tracked task in the heading, and never repeats the request the head already carries", () => {
 		const p = new TranscriptProjector();
 		user(p, "fix the login bug");
 		act(p, "a");
-		expect(text(groups(p.nodes(false))[0]!, "tern.work-focus")).toBe("Request · fix the login bug");
+		// The head's target is the request; a second line saying the same thing is noise.
+		expect(groups(p.nodes(false))[0]!.p?.target).toBe("fix the login bug");
+		expect(text(groups(p.nodes(false))[0]!, "tern.work-focus")).toBeUndefined();
 		expect(text(groups(p.nodes(false, { currentTask: CURRENT }))[0]!, "tern.work-focus")).toBe("Current task · #7 Fix login");
 	});
 
@@ -275,21 +394,23 @@ describe("live activity panel (default, modes, persistence)", () => {
 		expect(groups(h.nodes())[0]).toMatchObject({ id: gid, p: { collapsed: true } });
 	});
 
-	it("All steps shows every step as before, and Activity returns to the panel; the bottom Collapse stays last", () => {
+	it("All steps shows every step, and Activity returns to the running panel; Collapse stays last", () => {
 		const h = harnessFor();
 		h.session.emit({ type: "message_start", message: { role: "user", content: [{ type: "text", text: "go" }] } });
 		for (const id of ["a", "b", "c", "d"]) h.session.emit({ type: "tool_execution_start", toolCallId: id, toolName: "read", args: { path: `${id}.ts` } });
 		const gid = groups(h.nodes())[0]!.id;
 		h.bridge.handle({ verb: "e", body: { ev: "action", sf: "pi", act: "work.all", value: gid } } as never);
 		const all = groups(h.nodes())[0]!;
-		expect(rows(all).map((r) => r.id)).toEqual(["row-t-a", "row-t-b", "row-t-c", "row-t-d"]);
-		expect(all.c!.at(-1)).toMatchObject({ p: { role: "tern.work-collapse" } });
-		expect(all.c!.at(-2)).toMatchObject({ p: { actions: { click: `work.activity=${gid}` } } });
+		expect(steps(all).map((s) => s.id)).toEqual(["t-a", "t-b", "t-c", "t-d"]);
+		// Controls first, so an opened card shows how to fold it again without scrolling past its steps.
+		expect(all.c![0]).toMatchObject({ k: "row", p: { role: "tern.work-controls" } });
+		expect(controlChip(all, "tern.work-mode")).toMatchObject({ p: { actions: { click: `work.activity=${gid}` } } });
+		expect(controlChip(all, "tern.work-collapse")).toMatchObject({ p: { actions: { click: `work.collapse=${gid}` } } });
 		h.bridge.handle({ verb: "e", body: { ev: "action", sf: "pi", act: "work.activity", value: gid } } as never);
-		expect(rows(groups(h.nodes())[0]!).map((r) => r.id)).toEqual(["row-t-a", "row-t-b", "row-t-c"]);
+		expect(steps(groups(h.nodes())[0]!).map((s) => s.id)).toEqual(["t-a", "t-b", "t-c"]);
 	});
 
-	it("a settled group is compact by default and opens its full steps when the user expands it", () => {
+	it("a settled group is compact by default and opens its steps when the user expands it", () => {
 		const p = new TranscriptProjector();
 		user(p, "one");
 		act(p, "a");
@@ -297,7 +418,7 @@ describe("live activity panel (default, modes, persistence)", () => {
 		p.apply({ type: "agent_end" });
 		expect(groups(p.nodes(false))[0]!.p?.collapsed).toBe(true);
 		p.setGroupCollapsed(groups(p.nodes(false))[0]!.id, false);
-		expect(rows(groups(p.nodes(false))[0]!).map((r) => r.id)).toEqual(["row-t-a"]);
+		expect(steps(groups(p.nodes(false))[0]!).map((s) => s.id)).toEqual(["t-a"]);
 	});
 });
 
