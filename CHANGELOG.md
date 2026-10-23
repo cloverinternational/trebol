@@ -6,6 +6,20 @@ Release metadata is kept in `package.json`, `update-manifest.json`, and this fil
 
 ### Added
 
+- Hoja read tools that can answer date questions (#352): `hoja_list` and `hoja_get` still send only two fixed GraphQL
+  `query` documents and never a mutation, so both stay read-only. `hoja_list` now returns `createdAt` and `updatedAt`
+  for every issue and takes server-side filters — `state` (`open` by default, `closed` for Done and Canceled, `all`, a
+  workflow state type or an exact state name), `assignee`, `project`, `team`, `updatedSince`/`updatedBefore` and
+  `createdSince`/`createdBefore` (ISO dates, a bare `YYYY-MM-DD` meaning UTC midnight) and `limit` (default 100, max
+  200) — plus the `appliedFilter` it used, so a surprising result is visible instead of guessed. One extra sentinel row
+  is still read to report `truncated` honestly. `hoja_get` no longer scans the 250 most recent issues, which made older
+  issues unreachable once the team passed 250 closed ones: it looks the issue up server-side by `identifier`
+  (`filter: { identifier: { eq } }`, verified by introspection) and returns the description, `createdAt`, `updatedAt`,
+  priority, URL, state name and type, team, assignee, project and the most recent comments with author, date and body
+  (long bodies truncated, count selectable 1–50). Filters travel only as typed `IssueFilter` variables, so no caller
+  text can ever become GraphQL; `hoja-mode.test.ts` proves it for every document, parameter and a mutation-shaped
+  input. Descriptions moved into `.pi/lib/tools/swarm-hoja.contract.ts`, which the extension now imports so the
+  model-facing text cannot drift. See `extensions/hoja-mode/extension.ts`.
 - Claw keep-open and resume (#346): a run can now outlive its own completion, so a human and the agent can keep working
   in the same conversation. `claw_spawn` and the routed `Agent` tool take an explicit per-run `keepOpen` (default off),
   recorded on the run before any side effect, so the supervisor's single close point skips that tab across daemon
