@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { registerDiskHooks } from "../../../extensions/swarm-disk-hooks/extension.ts";
+import { establishedHookContext } from "../support/hook-session.ts";
 
 describe("disk hook Pi adapter", () => {
   it("translates a blocking hook decision into Pi's tool_call contract", async () => {
@@ -24,11 +25,13 @@ describe("disk hook Pi adapter", () => {
     };
 
     const runtime = registerDiskHooks(pi, { cwd, home });
+    // Tool gates stay dormant for the first HOOK_WARMUP_TURNS turns of a session.
+    const ctx = establishedHookContext();
     const decision = await handlers.get("tool_call")![0]({
       toolName: "bash",
       toolCallId: "blocked-call",
       input: { command: "echo no" },
-    }, {});
+    }, ctx);
     // Blocks gain same-step correction guidance (see hook-correction); the
     // original hook reason must remain the leading text.
     expect(decision).toMatchObject({
@@ -39,7 +42,7 @@ describe("disk hook Pi adapter", () => {
       toolName: "read",
       toolCallId: "allowed-call",
       input: { path: "README.md" },
-    }, {})).resolves.toBeUndefined();
+    }, ctx)).resolves.toBeUndefined();
   });
 
   it("dispatches configured lifecycle hooks", async () => {

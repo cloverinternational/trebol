@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { registerSwarmBackgroundBash } from "../../../extensions/swarm-background-bash/extension.ts";
 import { PERMISSIVE_PARAMETERS, overlaySwarmToolSchemas } from "../../lib/runtime/swarm-tool-surface.ts";
 import { TOOL_CONTRACTS } from "../../lib/runtime/tool-contracts.ts";
-import { bgOutputPreview, formatBackgroundDone, SwarmBackgroundProcessManager } from "../../lib/tools/swarm-bgprocess.ts";
+import { bgOutputPreview, formatBackgroundDone, SwarmBackgroundProcessManager, takeLines } from "../../lib/tools/swarm-bgprocess.ts";
 import { boundToolOutput, elideOversizedToolOutput } from "../../lib/runtime/swarm-toolout.ts";
 import { afterTurnFlushListeners } from "../../lib/runtime/swarm-builtin-hooks-runtime.ts";
 
@@ -204,6 +204,15 @@ describe("Swarm interactive background bash", () => {
   }, 6000);
 
   it("formats notifications and previews like app_update.go", () => {
+    // A 50ms poll can read a partial line, so the chunk that follows may begin
+    // with the newline that terminates it. That newline closes the open line
+    // instead of adding an empty one; where the pipe splits is not observable.
+    expect(takeLines({ open: false }, "hi\n")).toEqual(["hi"]);
+    expect(takeLines({ open: false }, "hi")).toEqual(["hi"]);
+    expect(takeLines({ open: true }, "\n")).toEqual([]);
+    // A blank line inside one chunk is still a line, and so is a continuation.
+    expect(takeLines({ open: false }, "a\n\nb\n")).toEqual(["a", "", "b"]);
+    expect(takeLines({ open: true }, "there\n")).toEqual(["there"]);
     expect(formatBackgroundDone({ id: "bg-1-2", command: "echo x", state: "completed", exitCode: 0, outputPreview: "x\n", outputTruncated: false })).toBe("[BACKGROUND] task_id=bg-1-2 command=echo x status=completed\n\noutput:\nx\n\n\nBackground command completed successfully (exit code 0).");
     expect(formatBackgroundDone({ id: "bg-1-2", command: "x".repeat(130), state: "cancelled", exitCode: -1, outputPreview: "", outputTruncated: true })).toBe(`[BACKGROUND] task_id=bg-1-2 command=${"x".repeat(117)}... status=cancelled\n\nBackground command cancelled. Output truncated above — call ReadBackgroundCommand with task_id "bg-1-2" for the full text.`);
     const big = bgOutputPreview("a".repeat(5000));

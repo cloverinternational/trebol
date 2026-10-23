@@ -26,12 +26,18 @@ async function runRead(filePath: string, cwd: string, expectPicture: boolean): P
   const fake = session(cwd);
   const bridge = new PiTernBridge(fake.session, { write: (d) => writes.push(d), surfaceId: "pi", credits: 1000 });
   bridge.start("pi");
+  // The surface's own startup card already writes an SVG logo blob and a frame
+  // that contains an image node, so every assertion below has to look at the
+  // writes that follow the Read row rather than at everything the bridge sent.
+  const baseline = writes.length;
   fake.emit({ type: "tool_execution_start", toolCallId: "c1", toolName: "Read", args: { file_path: filePath } });
   fake.emit({ type: "tool_execution_end", toolCallId: "c1", toolName: "Read", result: { content: [{ type: "text", text: "Image file: x.png (image/png, 0.07 KB)\nCite as: x.png" }] }, isError: false });
-  if (expectPicture) await vi.waitFor(() => expect(writes.some((w) => w.includes(";f;") && w.includes('"image"'))).toBe(true));
+  // The preview runs after the result is known; wait for this file's picture
+  // frame instead of racing it.
+  if (expectPicture) await vi.waitFor(() => expect(writes.slice(baseline).some((w) => w.includes(";f;") && w.includes('"image"'))).toBe(true));
   // Preview work is async; give a text file's (absent) preview time to appear if it were wrong.
   else await new Promise((r) => setTimeout(r, 100));
-  return writes;
+  return writes.slice(baseline);
 }
 
 describe("Tern artifact preview (end to end through PiTernBridge)", () => {

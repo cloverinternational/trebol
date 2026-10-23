@@ -57,20 +57,25 @@ function validateEvent(value: unknown): KnowledgeEvent {
 
 export class KnowledgeStore {
   readonly directory: string; readonly scope: SharedScope; readonly namespace: string;
+  private readonly root: string;
   constructor(private readonly options: StoreOptions) {
     this.scope = options.scope ?? "repository"; this.namespace = options.namespace?.trim() || "default";
     const identity = memoryIdentity(options.cwd), key = this.scope === "global" ? "shared" : digest(identity[this.scope]);
     if (!["repository", "worktree", "global"].includes(this.scope)) throw new Error("Invalid knowledge scope");
     const root = resolve(options.root ?? sharedMemoryRoot()); this.directory = resolve(root, "knowledge", this.scope, key);
     if (!this.directory.startsWith(root + sep)) throw new Error("Invalid knowledge store boundary");
+    this.root = root;
     this.checkDirectory(false);
   }
   /** Reject existing symlink ancestors. Not a defense against hostile concurrent
-   * ancestor replacement; the configured store root must be user-controlled. */
+   * ancestor replacement; the configured store root must be user-controlled.
+   * The walk stops at the configured root: a symlink above it (macOS's /var and
+   * /tmp both are symlinks) belongs to the host, and refusing it rejected every
+   * temporary store. A symlink at or below the root still fails closed. */
   private checkDirectory(create: boolean): void {
     const walk = (path: string): void => {
       const parent = dirname(path);
-      if (parent !== path) walk(parent);
+      if (path !== this.root && parent !== path) walk(parent);
       try {
         const stat = lstatSync(path);
         if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error("Unsafe knowledge directory");

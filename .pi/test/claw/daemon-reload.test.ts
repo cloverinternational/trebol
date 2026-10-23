@@ -515,6 +515,9 @@ describe("the real daemon entry point", () => {
 		const secondStamp = await waitFor(() => lockOf(store)?.pid === second.child.pid ? lockOf(store)?.fingerprint : undefined, 20_000);
 		expect(secondStamp).toMatch(/^1:/);
 		expect(secondStamp).not.toBe(firstStamp);
-		expect(second.log()).toContain("started for");
+		// The lock is claimed before the daemon logs its banner, so wait for the
+		// line instead of reading the log the instant the stamp appears.
+		const secondLog = await waitFor(() => (second.log().includes("started for") ? second.log() : undefined), 20_000);
+		expect(secondLog).toContain("started for");
 	}, 70_000);
 });

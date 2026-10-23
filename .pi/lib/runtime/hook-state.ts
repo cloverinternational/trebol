@@ -111,21 +111,37 @@ export function recordHook(group: HookGroup, event: string, payload?: any, outco
 // Turns are counted from Pi's turn_start lifecycle event, so a turn is one
 // assistant run (not a tool call or user message). Counts live on globalThis
 // so /reload keeps them, and are keyed by session id so a new session restarts.
-const HOOK_WARMUP_TURNS = 5;
+export const HOOK_WARMUP_TURNS = 5;
 const TURN_COUNTS = Symbol.for("pi-swarm-hook-turn-counts");
 const TURN_LISTENER = Symbol.for("pi-swarm-hook-turn-listener");
 const turnCounts: Map<string, number> = ((globalThis as any)[TURN_COUNTS] ??= new Map<string, number>());
 // Without a session id there is no safe key: contexts sharing a fallback key would merge counts across sessions. Such calls stay dormant.
 const turnSessionKey = (ctx: any): string | undefined => { const id = ctx?.sessionManager?.getSessionId?.(); return typeof id === "string" && id ? id : undefined; };
+/** Records one assistant turn for a session; Pi's turn_start listener and tests
+ * that need an established session both go through this counter. */
+export function noteHookTurn(sessionId: string): number {
+  const next = (turnCounts.get(sessionId) ?? 0) + 1;
+  turnCounts.set(sessionId, next);
+  return next;
+}
 // Installed once per process: every registerHook caller passes its own pi
 // object, and a per-object listener would count each turn several times.
 function installTurnCounter(pi: any) {
   if ((globalThis as any)[TURN_LISTENER]) return;
   (globalThis as any)[TURN_LISTENER] = true;
-  pi.on("turn_start", (_event: any, ctx: any) => { const key = turnSessionKey(ctx); if (key === undefined) return; turnCounts.set(key, (turnCounts.get(key) ?? 0) + 1); });
+  pi.on("turn_start", (_event: any, ctx: any) => { const key = turnSessionKey(ctx); if (key !== undefined) noteHookTurn(key); });
   pi.on("session_shutdown", (_event: any, ctx: any) => { const key = turnSessionKey(ctx); if (key !== undefined) turnCounts.delete(key); });
 }
 export function hookTurnGateOpen(ctx: any): boolean { const key = turnSessionKey(ctx); return key !== undefined && (turnCounts.get(key) ?? 0) > HOOK_WARMUP_TURNS; }
+
+// A session boundary happens once per session, and `session_start` in
+// particular happens when the turn count is still 0. A gate keyed on "more than
+// HOOK_WARMUP_TURNS turns elapsed" therefore never opens for it, so gating these
+// events makes them permanently dead rather than dormant: a disk hook's
+// SessionStart command would never run. Warm-up covers per-turn observations
+// (nudges, tool gates, result rewriting) only.
+const SESSION_BOUNDARY_EVENTS = new Set(["session_start", "session_switch", "session_before_compact", "session_shutdown", "shutdown"]);
+export const isSessionBoundaryEvent = (event: string): boolean => SESSION_BOUNDARY_EVENTS.has(event);
 
 /** `warmup: false` is for composition hooks (the base system prompt), not
  * gates: Pi emits before_agent_start once per user prompt, so a dormant prompt
@@ -136,7 +152,7 @@ export function registerHook(pi: any, group: HookGroup, event: string, handler: 
   normalizeState();
   shared.state.counts.registered++;
   const callback = async (payload: any, ctx: any) => {
-    if (options.warmup !== false && !hookTurnGateOpen(ctx)) return;
+    if (options.warmup !== false && !isSessionBoundaryEvent(event) && !hookTurnGateOpen(ctx)) return;
     if (!isHookEnabled(group)) { recordHook(group, event, payload, "skipped", "hook group disabled"); persistHookState(pi); return; }
     try {
       const result = await handler(payload, ctx);

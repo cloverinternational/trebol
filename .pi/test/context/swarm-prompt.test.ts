@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { FIRST_RESPONSE_EXPLANATION_CHECK, FOOTER_EXPLANATION_PROMPT, footerExplanationRequested, MAIN_REPORTING_DIRECTIVE, TESTING_CONTRACT, SWARM_FLOW_GUIDANCE, assembleForgePrompt, comparePromptGolden, currentContextBlocks, fetchWorkspaceExtensions, forgeSwarmSystemPrompt, renderWorkspaceContext, swarmForgeSystemPrompt } from "../../../extensions/swarm-prompt/extension";
@@ -109,7 +109,10 @@ describe("Forge prompt assembly", () => {
     const result = assembleForgePrompt("base", { cwd, contextFiles: ["selected.md"], maxContextFileBytes: 8 });
     expect(result.prompt).toContain('<context name="file:selected.md">');
     expect(result.prompt).toContain("one\ntwo");
-    expect(result.contextFiles).toContain(join(cwd, "selected.md"));
+    // Assembled context paths are canonicalised through realpath, which differs
+    // from the requested spelling wherever the temporary directory is a symlink
+    // (macOS /var -> /private/var).
+    expect(result.contextFiles).toContain(realpathSync(join(cwd, "selected.md")));
   });
 
   it("uses persisted context selection for conversation metadata", () => {

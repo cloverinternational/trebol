@@ -10,6 +10,16 @@ const homes: string[] = [];
 async function temp() { const path = await mkdtemp(join(tmpdir(), "trebol-tern-test-")); homes.push(path); return path; }
 afterEach(async () => { for (const path of homes.splice(0)) await rm(path, { recursive: true, force: true }); });
 
+// The dispatch these tests execute must work in both shells the product
+// supports. A missing shell used to surface as "(undefined and string)" from
+// spawnSync's ENOENT result; name the requirement instead, so an environment
+// that lacks zsh (CI installs it) says so.
+const SHELLS = ["bash", "zsh"] as const;
+function requireShells() {
+	const missing = SHELLS.filter((shell) => spawnSync(shell, ["-c", "true"], { stdio: "ignore" }).status !== 0);
+	expect(missing, `${missing.join(", ")} must be installed: the generated dispatch is executed in ${SHELLS.join(" and ")}`).toEqual([]);
+}
+
 describe("shell setup editor", () => {
 	it("selects zsh and bash startup paths on macOS/Linux", () => {
 		for (const platform of ["darwin", "linux"]) {
@@ -83,6 +93,7 @@ describe("shell setup editor", () => {
 	});
 
 	it("executes generated dispatch in bash and zsh without recursion or lost flags", async () => {
+		requireShells();
 		const home = await temp(), dispatch = join(home, "dispatch.sh");
 		await writeFile(dispatch, "pi() { if [[ $# -eq 0 && ${TERM_PROGRAM:-} == tern && -n ${TERN_PANE:-} ]]; then printf TSP; else command pi \"$@\"; fi; }\n");
 		await mkdir(join(home, "bin"));
@@ -100,6 +111,7 @@ describe("shell setup editor", () => {
 	});
 
 	it("sources the real dispatcher under bash and zsh and preserves flagged fallback", async () => {
+		requireShells();
 		const home = await temp(), repo = join(home, "repo"), dispatch = join(repo, ".pi/config/tern-pi.zsh");
 		await mkdir(join(repo, ".pi/lib/tern"), { recursive: true }); await mkdir(join(repo, ".pi/config"), { recursive: true }); await mkdir(join(home, "bin"));
 		await writeFile(dispatch, await readFile(join(process.cwd(), ".pi/config/tern-pi.zsh")));

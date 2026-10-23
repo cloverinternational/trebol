@@ -45,8 +45,13 @@ function checkedWorkspaceFile(cwd: string, value: string): string | undefined {
   const lexical = pathInsideWorkspace(cwd, value.trim());
   if (!lexical || !existsSync(lexical) || !lstatSync(lexical).isFile()) return undefined;
   try {
+    // Compare the file's real path with the workspace's real path, as
+    // swarm-context does: the two spellings of the same directory differ
+    // wherever an ancestor is a symlink (macOS /var -> /private/var), and a
+    // lexical comparison of one against the other rejects ordinary workspace
+    // files while still catching a link that leaves the workspace.
     const real = realpathSync(lexical);
-    return pathInsideWorkspace(cwd, real) ? lexical : undefined;
+    return pathInsideWorkspace(realpathSync(cwd), real) ? lexical : undefined;
   } catch { return undefined; }
 }
 

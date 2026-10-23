@@ -40,14 +40,24 @@ function gitRoot(cwd: string): string | undefined {
 }
 function pathsFor(cwd: string, home?: string) {
   const root = gitRoot(cwd);
-  return { global: path.resolve(home ?? os.homedir(), ".swarm/config/supervisor.json"), project: root ? path.join(root, "pi-swarm/supervisor.json") : path.join(cwd, ".swarm/supervisor.json") };
+  const homeRoot = path.resolve(home ?? os.homedir()), projectRoot = root ? path.resolve(root) : path.resolve(cwd);
+  return {
+    global: path.join(homeRoot, ".swarm/config/supervisor.json"),
+    project: root ? path.join(projectRoot, "pi-swarm/supervisor.json") : path.join(projectRoot, ".swarm/supervisor.json"),
+    // The directory a project controls. A symlink at or below it could redirect a
+    // write out of the checkout, so it is inspected; anything above it (the
+    // user's home, or macOS's symlinked /var and /tmp) belongs to the host.
+    projectBoundary: projectRoot, globalBoundary: homeRoot,
+  };
 }
-function safeAncestors(target: string): boolean {
+function safeAncestors(target: string, boundary: string): boolean {
   const absolute = path.resolve(target);
+  const stop = path.resolve(boundary);
   let cursor = absolute;
   try {
     while (true) {
-      if (fs.existsSync(cursor) && fs.lstatSync(cursor).isSymbolicLink()) return false;
+      if (cursor !== stop && fs.existsSync(cursor) && fs.lstatSync(cursor).isSymbolicLink()) return false;
+      if (cursor === stop) return true;
       const parent = path.dirname(cursor); if (parent === cursor) return true; cursor = parent;
     }
   } catch { return false; }
@@ -78,15 +88,15 @@ function validate(data: unknown): Data {
   if (out.reviewerModel !== undefined && out.reviewerModel !== "session" && !/^[A-Za-z0-9._-]+\/[A-Za-z0-9._:-]+$/.test(out.reviewerModel)) throw new Error("invalid reviewer model");
   return out;
 }
-function readConfig(file: string, diagnostics: string[]): Data {
+function readConfig(file: string, boundary: string, diagnostics: string[]): Data {
   if (!fs.existsSync(file)) return {};
-  if (!safeAncestors(file)) { diagnostics.push(`unsafe configuration path rejected: ${path.basename(file)}`); return {}; }
+  if (!safeAncestors(file, boundary)) { diagnostics.push(`unsafe configuration path rejected: ${path.basename(file)}`); return {}; }
   try { if(fs.statSync(file).size>16384)throw new Error("oversized configuration"); return validate(JSON.parse(fs.readFileSync(file, "utf8"))); }
   catch (e) { diagnostics.push(`invalid configuration rejected: ${path.basename(file)}`); return {}; }
 }
 function resolve(cwd: string, options: SupervisorSettingsOptions = {}): SupervisorSettingsResult {
   const paths = pathsFor(cwd, options.home), diagnostics: string[] = [];
-  const global = readConfig(paths.global, diagnostics), project = readConfig(paths.project, diagnostics);
+  const global = readConfig(paths.global, paths.globalBoundary, diagnostics), project = readConfig(paths.project, paths.projectBoundary, diagnostics);
   const settings = { ...DEFAULTS, ...global, ...project } as SupervisorSettings;
   // Legacy environment boot flag only when no persisted master setting exists.
   if (!("enabled" in global) && !("enabled" in project) && process.env.PI_SWARM_JEV_AUDIT === "on") settings.enabled=true;
@@ -96,8 +106,8 @@ function resolve(cwd: string, options: SupervisorSettingsOptions = {}): Supervis
 }
 export function loadSupervisorSettings(cwd: string, options?: SupervisorSettingsOptions): SupervisorSettingsResult { return resolve(cwd, options); }
 
-function atomicWrite(file: string, value: Data) {
-  if (!safeAncestors(file)) throw new Error("unsafe configuration path rejected");
+function atomicWrite(file: string, boundary: string, value: Data) {
+  if (!safeAncestors(file, boundary)) throw new Error("unsafe configuration path rejected");
   const dir = path.dirname(file); fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   const tmp = path.join(dir, `.supervisor.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`);
   try { fs.writeFileSync(tmp, JSON.stringify({ version: 1, ...value }, null, 2) + "\n", { mode: 0o600, flag: "wx" }); fs.chmodSync(tmp, 0o600); fs.renameSync(tmp, file); }
@@ -106,14 +116,15 @@ function atomicWrite(file: string, value: Data) {
 export function saveSupervisorSettings(cwd: string, scope: "global" | "project", patch: Partial<SupervisorSettings>, options?: SupervisorSettingsOptions): SupervisorSettingsResult {
   if(!["global","project"].includes(scope))throw new Error("invalid scope");
   const paths = pathsFor(cwd, options?.home), file = paths[scope];
-  const existing = readConfig(file, []);
+  const boundary = scope === "global" ? paths.globalBoundary : paths.projectBoundary;
+  const existing = readConfig(file, boundary, []);
   if (fs.existsSync(file) && Object.keys(existing).length === 0) { try { validate(JSON.parse(fs.readFileSync(file, "utf8"))); } catch { throw new Error("cannot overwrite invalid configuration"); } }
-  const next = validate({ version: 1, ...existing, ...patch }); atomicWrite(file, next);
+  const next = validate({ version: 1, ...existing, ...patch }); atomicWrite(file, boundary, next);
   return resolve(cwd, options);
 }
 export function clearSupervisorOverride(cwd: string, options?: SupervisorSettingsOptions): SupervisorSettingsResult {
-  const file = pathsFor(cwd, options?.home).project;
-  if (!safeAncestors(file)) throw new Error("unsafe configuration path rejected");
+  const { project: file, projectBoundary } = pathsFor(cwd, options?.home);
+  if (!safeAncestors(file, projectBoundary)) throw new Error("unsafe configuration path rejected");
   try { fs.unlinkSync(file); } catch (e) { if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e; }
   return resolve(cwd, options);
 }

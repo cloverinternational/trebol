@@ -3,8 +3,10 @@
 // PI_TERN_EVENT_LOG (see .pi/test/tern/live/extract-corpus.py); *.session.jsonl is Pi's persisted branch
 // for the same session. No event in the corpus is hand-written.
 import { readdirSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PiTernBridge, TranscriptProjector, type PiEventLike, type PiSessionLike } from "../../lib/tern/bridge.ts";
 import { diffChildren, ESC, parseTspMessages, type TspNode } from "../../lib/tern/tsp.ts";
 import { isTurnBoundary, summaryText } from "../../lib/tern/turn-groups.ts";
@@ -111,10 +113,16 @@ function fakeSession() {
 		prompt: () => new Promise<void>(() => {}),
 		abort: async () => {},
 		dispose() {},
-		sessionManager: { getSessionId: () => "replay", getEntries: () => [] },
+		// The bridge reads the repository of the session's cwd on start (git
+		// subprocesses plus a worktree watcher). Pointing it at a throwaway
+		// workspace keeps these projector tests off the host checkout, where a
+		// submodule-heavy tree made every start() cost seconds under CI load.
+		sessionManager: { getSessionId: () => "replay", getEntries: () => [], getCwd: () => WORKSPACE },
 		emit(e: PiEventLike) { for (const l of listeners) l(e); },
 	} as unknown as PiSessionLike & { emit(e: PiEventLike): void };
 }
+const WORKSPACE = mkdtempSync(join(tmpdir(), "turn-work-"));
+afterAll(() => rmSync(WORKSPACE, { recursive: true, force: true }));
 
 describe("replay through the bridge: emitted TSP frames", () => {
 	beforeEach(() => vi.useFakeTimers({ now: 1_000_000 }));
@@ -234,6 +242,13 @@ type ItemView = { id: string; role: string };
 const isBoundaryNode = (n: TspNode) => n.p?.role === "pi.user" || n.p?.role === "tern.notice";
 const toolIds = (items: readonly ItemView[]) => items.filter((i) => i.role === "tool").map((i) => i.id);
 
+// The four properties below replay 300 generated sessions and assert on every
+// intermediate state, so each one builds thousands of node trees: 150-370 ms on
+// a developer machine, and past the 5 s default on a shared 4-vCPU runner (CI
+// run 39993516486 logged 11.4 s for one of them). The budget is CPU time for a
+// fixed scenario count, not slack for a wait; no assertion is relaxed.
+const PROPERTY_BUDGET_MS = 30_000;
+
 describe("turn-work properties", () => {
 	it("every tool call appears in exactly one group (corpus and generated, every intermediate state)", () => {
 		const sources = [...corpus.map((c) => ({ label: c.name, events: c.events })), ...SEEDS.map((s) => ({ label: `seed ${s}`, events: generate(s).events }))];
@@ -247,7 +262,7 @@ describe("turn-work properties", () => {
 				expect(new Set(members).size, `${label} @${index} duplicates`).toBe(members.length);
 			}
 		}
-	});
+	}, PROPERTY_BUDGET_MS);
 
 	it("a running turn renders one live card, opened to its own steps, with no step renderer outside it", () => {
 		for (const seed of SEEDS) {
@@ -277,7 +292,7 @@ describe("turn-work properties", () => {
 				expect(after.filter((n) => n.k === "tool" && n.p?.role !== "tern.work-live"), `seed ${seed} @${index}`).toEqual([]);
 			}
 		}
-	});
+	}, PROPERTY_BUDGET_MS);
 
 	it("a settled turn renders exactly one collapsed summary and no live line", () => {
 		for (const seed of SEEDS) {
@@ -366,7 +381,7 @@ describe("turn-work properties", () => {
 			expect(turnsWithWork).toBeLessThanOrEqual(outcomes.length);
 		}
 		expect({ narrated: narrated > 0, failedTurns: failedTurns > 0, recovered: recovered > 0 }).toEqual({ narrated: true, failedTurns: true, recovered: true });
-	});
+	}, PROPERTY_BUDGET_MS);
 });
 
 describe("turn line and running-work bar announce each piece of work once", () => {
@@ -414,7 +429,7 @@ describe("live card identity", () => {
 				prev = nodes;
 			}
 		}
-	});
+	}, PROPERTY_BUDGET_MS);
 });
 
 describe("expansion", () => {

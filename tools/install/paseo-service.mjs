@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { mkdirSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
+import { mkdirSync, readFileSync, realpathSync, writeFileSync, unlinkSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { homedir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
@@ -92,4 +92,11 @@ async function main() {
 
 // argv[1] is a plain path while import.meta.url is a percent-encoded URL, so a
 // string compare silently skips main() for paths containing spaces or '#'.
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await main();
+// Node also resolves a module's own path through realpath, so a script living
+// under a symlinked directory (macOS /var -> /private/var) has one spelling in
+// argv and another in import.meta.url; compare the canonical paths and fall
+// back to the lexical ones when a path no longer exists.
+function sameScript(a, b) {
+  try { return realpathSync(a) === realpathSync(b); } catch { return resolve(a) === resolve(b); }
+}
+if (process.argv[1] && sameScript(process.argv[1], fileURLToPath(import.meta.url))) await main();

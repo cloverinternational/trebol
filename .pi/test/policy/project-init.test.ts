@@ -9,6 +9,7 @@ import {
 import { applyArtifacts, parseEnvVars, planArtifacts, validateName, validateSummary, type ProjectAnswers } from "../../lib/policy/project-scaffold.ts";
 import { evaluateToolCall } from "../../lib/policy/structure-guard.ts";
 import { buildInitPrompt, executeProjectInit, inspectTarget, registerProjectInit, resolveTarget, validateAnswers } from "../../../extensions/project-init/extension.ts";
+import { establishedHookContext } from "../support/hook-session.ts";
 
 const workspace = () => mkdtempSync(join(tmpdir(), "pi-project-init-"));
 
@@ -159,11 +160,13 @@ describe("structure guard tool_call evaluation", () => {
     registerProjectInit(pi, { cwd });
     expect(commands.has("init")).toBe(true);
     expect(tools.has("project_init")).toBe(true);
-    const blocked = await handlers.get("tool_call")![0]({ toolName: "write", toolCallId: "c1", input: { path: "junk.md" } }, {});
+    // The structure guard is a per-turn hook: it is dormant until the session passes warm-up.
+    const ctx = establishedHookContext();
+    const blocked = await handlers.get("tool_call")![0]({ toolName: "write", toolCallId: "c1", input: { path: "junk.md" } }, ctx);
     expect(blocked).toMatchObject({ block: true });
     expect(Object.keys(blocked as object).sort()).toEqual(["block", "reason"]);
     expect(existsSync(join(cwd, "junk.md"))).toBe(false);
-    await expect(handlers.get("tool_call")![0]({ toolName: "write", toolCallId: "c2", input: { path: "src/ok.ts" } }, {})).resolves.toBeUndefined();
+    await expect(handlers.get("tool_call")![0]({ toolName: "write", toolCallId: "c2", input: { path: "src/ok.ts" } }, ctx)).resolves.toBeUndefined();
   });
 });
 

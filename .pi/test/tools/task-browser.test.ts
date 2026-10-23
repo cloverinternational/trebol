@@ -1,10 +1,16 @@
 import {it,expect} from 'vitest';
 import {TaskBrowserView} from '../../../extensions/task-browser/extension.ts';
 import {taskWidgetRenderer} from '../../../packages/tools/taskmanage/src/task-manage.ts';
+// 8f0ec72 (feat(tern): resume sessions, task board, ...) made TaskBrowserView
+// take the pi-tui module as its layout: isKeyRelease, parseKey,
+// decodeKittyPrintable, wrapTextWithAnsi, truncateToWidth and visibleWidth.
+// The tests used an ad-hoc stub with only the wrap helpers, so every key press
+// threw. Pass the real module, which is the contract the extension imports.
+import * as layout from '@earendil-works/pi-tui';
 it('does not grow with a hundred unfocused tasks',()=>{const tasks=Array.from({length:100},(_,i)=>({id:String(i),subject:'Work',status:'pending',dependsOn:[]}));expect(taskWidgetRenderer(tasks as any,{}).render(80)).toHaveLength(3);});
 it('closes immediately on Escape from every view',()=>{
  let closed=0;
- const view=new TaskBrowserView({requestRender(){},terminal:{rows:20}}, {},()=>({tasks:[{id:'1',subject:'One',status:'pending',dependsOn:[]}] as any}),()=>{closed++;},{wrapTextWithAnsi:(s,w)=>[s],truncateToWidth:(s,w)=>s.slice(0,w)});
+ const view=new TaskBrowserView({requestRender(){},terminal:{rows:20}}, {},()=>({tasks:[{id:'1',subject:'One',status:'pending',dependsOn:[]}] as any}),()=>{closed++;},layout as any);
  view.handleInput('\r');
  view.handleInput('\x1b');
  expect(closed).toBe(1);
@@ -13,13 +19,13 @@ it('closes immediately on Escape from every view',()=>{
 });
 it('closes for the terminal-normalized Escape variants',()=>{
  let closed=0;
- const view=new TaskBrowserView({requestRender(){},terminal:{rows:20}}, {},()=>({tasks:[]}),()=>{closed++;},{wrapTextWithAnsi:(s,w)=>[s],truncateToWidth:(s,w)=>s});
+ const view=new TaskBrowserView({requestRender(){},terminal:{rows:20}}, {},()=>({tasks:[]}),()=>{closed++;},layout as any);
  view.handleInput('\x1b[27;1;9~');
  expect(closed).toBe(1);
 });
 it('keeps selected ID after insertions and scrolls to final evidence without mutations',()=>{
  let tasks:any[]=[{id:'1',subject:'One',status:'pending'},{id:'2',subject:'Two',status:'pending',questions:Array.from({length:12},(_,i)=>({id:`q${i}`,text:'Question '.repeat(30)})),answers:[{question:'q11',answer:'answer',evidence:'LAST-EVIDENCE'}]}];
- const view=new TaskBrowserView({requestRender(){},terminal:{rows:20}}, {},()=>({tasks}),()=>{},{wrapTextWithAnsi:(s,w)=>s.match(new RegExp(`.{1,${w}}`,"g"))??[""],truncateToWidth:(s,w)=>s.slice(0,w)});
+ const view=new TaskBrowserView({requestRender(){},terminal:{rows:20}}, {},()=>({tasks}),()=>{},layout as any);
  view.render(60);view.handleInput('\x1b[B');tasks=[{id:'0',subject:'Inserted',status:'pending'},...tasks];view.handleInput('\r');
  expect(view.render(60).join('\n')).toContain('#2 Two');const before=JSON.stringify(tasks);let found=false;
  for(let i=0;i<150;i++){if(view.render(60).join('\n').includes('LAST-EVIDENCE'))found=true;view.handleInput('\x1b[B');}

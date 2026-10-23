@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdirSync, readdirSync, readFileSync, writeFileSync, renameSync, statSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync, renameSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { homedir } from "node:os";
 
@@ -9,8 +9,15 @@ export interface SharedMemory { id: string; text: string; tags: string[]; namesp
 const hash = (s: string) => createHash("sha256").update(s).digest("hex").slice(0, 32);
 export function memoryIdentity(cwd: string) {
   const git = (args: string[]) => execFileSync("git", ["-C", cwd, "rev-parse", ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
-  try { return { repository: resolve(cwd, git(["--git-common-dir"])), worktree: resolve(git(["--show-toplevel"])) }; }
-  catch { return { repository: resolve(cwd), worktree: resolve(cwd) }; }
+  // A worktree's shared store must be the one its main checkout writes: git
+  // reports the main checkout's common dir as `.git` (lexical) but the
+  // worktree's as an already-canonical path, so the same repository had two
+  // identities wherever an ancestor is a symlink (macOS /var -> /private/var)
+  // and repository notes were invisible across worktrees. Both identities are
+  // canonicalised, which is a no-op on a path with no symlinked ancestor.
+  const canonical = (path: string) => { try { return realpathSync(path); } catch { return resolve(path); } };
+  try { return { repository: canonical(resolve(cwd, git(["--git-common-dir"]))), worktree: canonical(resolve(git(["--show-toplevel"]))) }; }
+  catch { return { repository: canonical(resolve(cwd)), worktree: canonical(resolve(cwd)) }; }
 }
 export function sharedMemoryRoot() { return process.env.PI_SWARM_MEMORY_DIR || join(homedir(), ".swarm", "memory"); }
 function directory(cwd: string, scope: SharedScope) {

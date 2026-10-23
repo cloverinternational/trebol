@@ -9,7 +9,7 @@ import { execFileSync } from "node:child_process";
 import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { tick, type DaemonDeps } from "../../lib/claw/daemon.ts";
 import type { IssueView } from "../../lib/claw/hoja.ts";
 import {
@@ -119,6 +119,11 @@ describe("extension source check", () => {
 	let root: string;
 	beforeEach(() => { root = gitFixture(); });
 	afterEach(() => rmSync(root, { recursive: true, force: true }));
+	// The first checkExtensionSource pays for loading the TypeScript compiler
+	// (~10 MB of JavaScript) inside a 5s test. That one-off cost has nothing to
+	// do with the behaviour under test and a shared runner made it exceed the
+	// default, so load it once here with its own budget.
+	beforeAll(async () => { await import("typescript"); }, 60_000);
 
 	it("finds the pi package and its registered entry points", () => {
 		const found = findPiPackage(root);
