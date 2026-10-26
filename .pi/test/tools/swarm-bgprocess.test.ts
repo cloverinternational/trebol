@@ -332,7 +332,10 @@ describe("Swarm interactive background bash", () => {
     expect(text).toContain("bytes elided from the middle of this read");
     const file = text.match(/full_output=(\S+)/)?.[1];
     expect(file).toBeTruthy();
-    expect((readFileSync(file!, "utf8").trimEnd()).length).toBe(40000);
+    // A 50ms poll can split this run of x's, and a boundary inside a line stores
+    // both fragments as separate lines (see takeLines). Where the pipe splits is
+    // not observable, so assert that every byte survived, not the line count.
+    expect(readFileSync(file!, "utf8").replace(/\n/g, "")).toMatch(/^x{40000}$/);
   }, 6000);
 
   it("matches validation, unknown id, and invalid regex errors", async () => {
