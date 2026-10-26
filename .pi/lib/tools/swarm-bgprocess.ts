@@ -1,15 +1,21 @@
 /**
- * TypeScript port of swarm-tui/internal/bgprocess.  This module deliberately
- * keeps presentation (including JSON field order) next to the process state:
- * ReadBackgroundCommand's output is a wire contract, not merely diagnostics.
+ * TypeScript port of swarm-tui/internal/bgprocess.  Presentation stays next to
+ * the process state because ReadBackgroundCommand's output is a wire contract,
+ * not merely diagnostics.
+ *
+ * That contract now has two renderings of the same state: the default `text`
+ * view (a few header rows plus the line window, ~5x smaller than the JSON for
+ * the same content) and the original `json` shape, kept byte-identical for
+ * swarm-tui parity and for per-line timestamps/streams when a caller needs them.
  */
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { accessSync, constants, existsSync, writeFileSync } from "node:fs";
+import { accessSync, constants, existsSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WAIT_DELAY_MS, decodeSignalExit, signalNote, stripANSI, type BashParams } from "./swarm-bash.ts";
 import { patchRunningWork, setRunningWork } from "../ui/running-work.ts";
+import { boundToolOutput } from "../runtime/swarm-toolout.ts";
 
 export type ProcessState = "running" | "completed" | "failed" | "cancelled";
 export interface BackgroundLine {
@@ -45,6 +51,9 @@ interface ProcessRecord {
   spawned: Promise<Error | undefined>;
   spawnError?: Error;
   backgrounded: boolean;
+  /** Full-output temp file, written once per growth of `lines` (see outputFileFor). */
+  outputFile?: string;
+  outputFileLines?: number;
 }
 
 export interface BackgroundBashParams extends BashParams { background?: boolean }
@@ -56,6 +65,8 @@ export interface ReadBackgroundParams {
   max_lines?: number;
   pattern?: string;
   stream?: string;
+  /** "text" (default) is the compact model-facing view; "json" is the swarm-tui wire shape. */
+  format?: string;
 }
 export interface ToolText { text: string; details?: Record<string, unknown> }
 /** app_init.go completion/error callbacks → app_update.go bgProcessDoneMsg. */
@@ -74,6 +85,12 @@ export function bgOutputPreview(output: Buffer | string): { preview: string; tru
   return { preview: `${bytes.subarray(0, half).toString("utf8")}\n\n... [truncated ${bytes.length - BG_OUTPUT_PREVIEW_MAX_BYTES} bytes] ...\n\n${bytes.subarray(bytes.length - half).toString("utf8")}`, truncated: true };
 }
 
+/** Byte-bounded one-line preview of a command, with the ellipsis inside the budget. */
+export function clipCommand(command: string, maxBytes: number): string {
+  if (Buffer.byteLength(command) <= maxBytes) return command;
+  return `${Buffer.from(command).subarray(0, maxBytes - 3).toString("utf8")}...`;
+}
+
 /** app_update.go bgProcessDoneMsg → the "[BACKGROUND] …" notification text. */
 export function formatBackgroundDone(done: BackgroundDone): string {
   let statusDesc: string;
@@ -82,8 +99,7 @@ export function formatBackgroundDone(done: BackgroundDone): string {
     case "failed": statusDesc = `Background command failed (exit code ${done.exitCode})`; break;
     default: statusDesc = `Background command ${done.state}`;
   }
-  let cmdPreview = done.command;
-  if (Buffer.byteLength(cmdPreview) > 120) cmdPreview = `${Buffer.from(cmdPreview).subarray(0, 117).toString("utf8")}...`;
+  const cmdPreview = clipCommand(done.command, 120);
   const outputSection = done.outputPreview !== "" ? `\n\noutput:\n${done.outputPreview}` : "";
   const followup = done.outputTruncated ? ` Output truncated above — call ReadBackgroundCommand with task_id ${JSON.stringify(done.id)} for the full text.` : "";
   return `[BACKGROUND] task_id=${done.id} command=${cmdPreview} status=${done.state}${outputSection}\n\n${statusDesc}.${followup}`;
@@ -215,6 +231,17 @@ function regexpError(pattern: string, error: unknown): string {
 }
 
 export const SNAPSHOT_TAIL_LINES = 20;
+/** Default and maximum lines one ReadBackgroundCommand read may return. */
+export const DEFAULT_READ_LINES = 100;
+export const MAX_READ_LINES = 1000;
+/**
+ * Model-facing byte budget for one text read (~3k tokens). A log line can be
+ * arbitrarily long (a minified bundle, a one-line JSON document), so the line
+ * window alone does not bound the payload; the middle is elided instead.
+ */
+export const MAX_READ_BYTES = 12_288;
+const OUTPUT_FILE_PREFIX = "bgprocess-output-";
+const OUTPUT_FILE_TTL_MS = 24 * 60 * 60 * 1000;
 /** Read-only status view of one background command. Unknown id → undefined; finished items keep their terminal state. */
 export interface BackgroundSnapshot {
   task_id: string;
@@ -231,6 +258,40 @@ export class SwarmBackgroundProcessManager {
   private readonly processes = new Map<string, ProcessRecord>();
   private doneListeners: Array<(done: BackgroundDone) => void> = [];
   private foreground?: { rec: ProcessRecord; detach: () => void };
+
+  constructor() { this.pruneOutputFiles(); }
+
+  /**
+   * Every truncated read leaves a full-output file behind, and no session reads
+   * them all back. Sweep yesterday's copies once, before the first read, so
+   * tmpdir does not accumulate one file per background command forever.
+   */
+  private pruneOutputFiles(): void {
+    const cutoff = Date.now() - OUTPUT_FILE_TTL_MS;
+    try {
+      for (const name of readdirSync(tmpdir())) {
+        if (!name.startsWith(OUTPUT_FILE_PREFIX) || !name.endsWith(".txt")) continue;
+        const path = join(tmpdir(), name);
+        try { if (statSync(path).mtimeMs < cutoff) unlinkSync(path); } catch { /* raced with another sweep */ }
+      }
+    } catch { /* unreadable tmpdir: nothing to prune */ }
+  }
+
+  /**
+   * Full process output on disk, rewritten only when new lines arrived. The
+   * rewrite on every truncated read made repeated polls of a chatty command
+   * cost a full file write each time, so the written line count is remembered.
+   */
+  private outputFileFor(rec: ProcessRecord): string {
+    if (rec.outputFile && rec.outputFileLines === rec.lines.length) return rec.outputFile;
+    const path = join(tmpdir(), `${OUTPUT_FILE_PREFIX}${rec.id.replace(/[/: ]/g, "-")}.txt`);
+    try {
+      writeFileSync(path, rec.lines.map(x => `${x.content}\n`).join(""), { mode: 0o644 });
+      rec.outputFile = path;
+      rec.outputFileLines = rec.lines.length;
+      return path;
+    } catch { return ""; }
+  }
 
   /** manager.go SetCompletionCallback/SetErrorCallback, already shaped like bgProcessDoneMsg. */
   onDone(listener: (done: BackgroundDone) => void): void { this.doneListeners.push(listener); }
@@ -467,24 +528,38 @@ export class SwarmBackgroundProcessManager {
     return rec;
   }
 
-  private formatted(rec: ProcessRecord, params: ReadBackgroundParams, statusOnly: boolean): Record<string, unknown> {
-    const maxLines = statusOnly ? 0 : (typeof params.max_lines === "number" && Math.trunc(params.max_lines) > 0 ? Math.min(Math.trunc(params.max_lines), 1000) : 100);
+  /**
+   * The one line window both formats render. `earlier` is what the default tail
+   * hid before the window; `omittedAfter` is what an explicit from_line/max_lines
+   * left past its end. Either one means the caller cannot see everything it
+   * matched, which is what "truncated" means for this tool.
+   */
+  private select(rec: ProcessRecord, params: ReadBackgroundParams, statusOnly: boolean) {
+    const maxLines = statusOnly ? 0 : (typeof params.max_lines === "number" && Math.trunc(params.max_lines) > 0
+      ? Math.min(Math.trunc(params.max_lines), MAX_READ_LINES) : DEFAULT_READ_LINES);
     const specifiedFrom = typeof params.from_line === "number" && Math.trunc(params.from_line) >= 1;
-    const from = specifiedFrom ? Math.trunc(params.from_line!) : Math.max(1, rec.lines.length - maxLines + 1);
+    // A filter is a search over the whole log; a plain read is a view of its
+    // tail. Applying the tail window first made `pattern` silently miss every
+    // match that happened before the last `max_lines` lines.
+    const filtering = Boolean(params.pattern || params.stream);
+    const from = specifiedFrom ? Math.trunc(params.from_line!)
+      : filtering ? 1 : Math.max(1, rec.lines.length - maxLines + 1);
     let regex: RegExp | undefined;
     if (params.pattern) {
       try { regex = new RegExp(params.pattern); }
       catch (e) { throw new Error(`output [${rec.id}]: failed to get output lines: invalid pattern: ${regexpError(params.pattern, e)}`); }
     }
-    const selected = statusOnly ? [] : rec.lines.slice(from - 1)
-      .filter(line => (!params.stream || line.stream === params.stream) && (!regex || regex.test(line.content)))
-      .slice(0, maxLines);
-    const truncated = maxLines > 0 && rec.lines.length > maxLines;
-    let outputFile = "";
-    if (truncated && rec.lines.length) {
-      outputFile = join(tmpdir(), `bgprocess-output-${rec.id.replace(/[/: ]/g, "-")}.txt`);
-      try { writeFileSync(outputFile, rec.lines.map(x => `${x.content}\n`).join(""), { mode: 0o644 }); } catch { outputFile = ""; }
-    }
+    const window = statusOnly ? [] : rec.lines.slice(from - 1)
+      .filter(line => (!params.stream || line.stream === params.stream) && (!regex || regex.test(line.content)));
+    const selected = window.slice(0, maxLines);
+    const earlier = statusOnly ? 0 : Math.max(0, from - 1);
+    const omittedAfter = window.length - selected.length;
+    return { maxLines, from, filtering, selected, earlier, omittedAfter, truncated: !statusOnly && (earlier > 0 || omittedAfter > 0) };
+  }
+
+  private formatted(rec: ProcessRecord, params: ReadBackgroundParams, statusOnly: boolean): Record<string, unknown> {
+    const { selected, truncated } = this.select(rec, params, statusOnly);
+    const outputFile = truncated ? this.outputFileFor(rec) : "";
     const last = rec.lines.at(-1);
     const value: Record<string, unknown> = {
       task_id: rec.id,
@@ -512,6 +587,70 @@ export class SwarmBackgroundProcessManager {
     return value;
   }
 
+  /**
+   * Compact model-facing view. One fact row, one heartbeat row, one window row,
+   * then the log text itself: no per-line timestamps, no repeated JSON keys, no
+   * echoed env. The structured form is still one `format: "json"` away.
+   */
+  private textView(rec: ProcessRecord, params: ReadBackgroundParams, statusOnly: boolean): string {
+    const sel = this.select(rec, params, statusOnly);
+    const elapsed = Math.max(0, (rec.endedMs ?? Date.now()) - rec.startedMs) / 1000;
+    const last = rec.lines.at(-1);
+    const facts = [
+      `task_id=${rec.id}`,
+      `status=${rec.state}`,
+      ...(rec.exitCode !== undefined ? [`exit_code=${rec.exitCode}`] : []),
+      `duration=${goDuration(elapsed)}`,
+      ...(rec.pid ? [`pid=${rec.pid}`] : []),
+    ];
+    const heartbeat = [
+      ...(last ? [`last_output_at=${rfc3339(Date.parse(last.timestamp))}`, `seconds_since_last_output=${(Math.max(0, Date.now() - Date.parse(last.timestamp)) / 1000).toFixed(1)}`] : []),
+      `bytes_written=${rec.bytesWritten}`,
+      `total_lines=${rec.lines.length}`,
+    ];
+    if (statusOnly) {
+      return [
+        facts.join(" "),
+        heartbeat.join(" "),
+        `command=${clipCommand(rec.command, 160)}`,
+        ...(rec.cwd ? [`cwd=${rec.cwd}`] : []),
+      ].join("\n");
+    }
+    const joined = sel.selected.map(line => line.content).join("\n");
+    const bounded = boundToolOutput(joined, MAX_READ_BYTES, 0);
+    // The bytes are already on disk whenever the window hid anything, so the
+    // byte-elision note points at the same file instead of inventing a second path.
+    const outputFile = sel.truncated || bounded.truncated ? this.outputFileFor(rec) : "";
+    const { filtering } = sel;
+    const firstLine = sel.selected[0]?.line_number;
+    const lastLine = sel.selected.at(-1)?.line_number;
+    const window = [
+      firstLine !== undefined ? `lines ${firstLine}-${lastLine} of ${rec.lines.length}` : `lines 0 of ${rec.lines.length}`,
+      ...(filtering ? [`matches=${sel.selected.length}/${sel.selected.length + sel.omittedAfter}`] : []),
+      ...(params.stream ? [`stream=${params.stream}`] : []),
+      ...(params.pattern ? [`pattern=${JSON.stringify(params.pattern)}`] : []),
+      ...(sel.earlier ? [`earlier=${sel.earlier}`] : []),
+      ...(sel.omittedAfter ? [`after=${sel.omittedAfter}`] : []),
+      ...(outputFile ? [`full_output=${outputFile}`] : []),
+    ].join(" ");
+    const body = sel.selected.length === 0
+      ? (rec.lines.length ? "(no matching lines)" : "(no output yet)")
+      : bounded.truncated
+        ? `${bounded.head}\n\n... [${bounded.elidedChars} bytes elided from the middle of this read] ...\n\n${bounded.tail}`
+        : joined;
+    return [facts.join(" "), heartbeat.join(" "), window, "---", body].join("\n");
+  }
+
+  private listText(): string {
+    const processes = [...this.processes.values()];
+    if (!processes.length) return "No background commands.";
+    const rows = processes.map(rec => {
+      const exit = rec.exitCode !== undefined ? ` exit=${rec.exitCode}` : "";
+      return `${rec.id} ${rec.state} ${goDuration(Math.round(((rec.endedMs ?? Date.now()) - rec.startedMs) / 1000))}${exit} ${clipCommand(rec.command, 80)}`;
+    });
+    return [`${processes.length} background command${processes.length === 1 ? "" : "s"}`, ...rows].join("\n");
+  }
+
   async read(params: ReadBackgroundParams): Promise<ToolText> {
     const action = typeof params?.action === "string" && params.action ? params.action : "output";
     const id = typeof params?.task_id === "string" ? params.task_id : "";
@@ -522,7 +661,10 @@ export class SwarmBackgroundProcessManager {
     const validation = (message: string) => new Error(`validation failed for ReadBackgroundCommand: ${message}`);
     if (!["status", "output", "cancel", "list"].includes(action)) throw validation(`invalid action: ${action} (must be status, output, cancel, or list)`);
     if (action !== "list" && !id) throw validation(`task_id is required for action "${action}"`);
+    const format = params?.format === undefined || params.format === "" ? "text" : params.format;
+    if (format !== "text" && format !== "json") throw validation(`invalid format: ${format} (must be text or json)`);
     if (action === "list") {
+      if (format === "text") return { text: this.listText() };
       const processes = [...this.processes.values()].map(rec => ({
         task_id: rec.id,
         command: Buffer.byteLength(rec.command) > 50 ? Buffer.from(rec.command).subarray(0, 50).toString("utf8") + "..." : rec.command,
@@ -540,6 +682,7 @@ export class SwarmBackgroundProcessManager {
       return { text: `Process ${id} has been cancelled` };
     }
     const rec = this.get(id);
+    if (format === "text") return { text: this.textView(rec, params, action === "status") };
     return { text: jsonIndent(this.formatted(rec, params, action === "status")) };
   }
 

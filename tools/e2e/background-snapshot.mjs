@@ -65,7 +65,7 @@ export default function snapshotProbe(pi: any) {
   assert.ok(done.output_tail.includes("SNAP_LINE"), "finished item keeps its output tail");
   assert.equal(manager.snapshot("bg-does-not-exist"), undefined, "unknown id returns undefined");
   // ReadBackgroundCommand delegates to manager.read; the tool registration itself is not exercised here.
-  const finishedStatus = JSON.parse((await manager.read({ action: "status", task_id: id })).text);
+  const finishedStatus = JSON.parse((await manager.read({ action: "status", task_id: id, format: "json" })).text);
   assert.equal(finishedStatus.status, "completed", "ReadBackgroundCommand status reports a finished item as completed");
   assert.equal(finishedStatus.exit_code, 0, "ReadBackgroundCommand status keeps exit_code for a finished item");
   await assert.rejects(manager.read({ action: "status", task_id: "bg-does-not-exist" }), /process not found/, "unknown id is rejected with process not found");

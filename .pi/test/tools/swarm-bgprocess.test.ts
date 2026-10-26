@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { registerSwarmBackgroundBash } from "../../../extensions/swarm-background-bash/extension.ts";
 import { PERMISSIVE_PARAMETERS, overlaySwarmToolSchemas } from "../../lib/runtime/swarm-tool-surface.ts";
 import { TOOL_CONTRACTS } from "../../lib/runtime/tool-contracts.ts";
-import { bgOutputPreview, formatBackgroundDone, SwarmBackgroundProcessManager, takeLines } from "../../lib/tools/swarm-bgprocess.ts";
+import { bgOutputPreview, formatBackgroundDone, MAX_READ_BYTES, SwarmBackgroundProcessManager, takeLines } from "../../lib/tools/swarm-bgprocess.ts";
 import { boundToolOutput, elideOversizedToolOutput } from "../../lib/runtime/swarm-toolout.ts";
 import { afterTurnFlushListeners } from "../../lib/runtime/swarm-builtin-hooks-runtime.ts";
 
@@ -45,10 +45,10 @@ describe("Swarm interactive background bash", () => {
     const body = JSON.parse(launched.content[0].text);
     expect(body).toMatchObject({ backgrounded: true, status: "running", timeout_seconds: 60 });
     expect(body.task_id).toMatch(/^bg-/);
-    const status = JSON.parse((await invoke(read, { task_id: body.task_id, action: "status" })).content[0].text);
+    const status = JSON.parse((await invoke(read, { task_id: body.task_id, action: "status", format: "json" })).content[0].text);
     expect(status).toMatchObject({ task_id: body.task_id, command: "sleep 1; printf explicit-bg" });
     await new Promise(resolve => setTimeout(resolve, 1500));
-    expect(JSON.parse((await invoke(read, { task_id: body.task_id, action: "status" })).content[0].text).status).toBe("completed");
+    expect(JSON.parse((await invoke(read, { task_id: body.task_id, action: "status", format: "json" })).content[0].text).status).toBe("completed");
   }, 4000);
 
   it("registers both canonical interactive tools", () => {
@@ -240,18 +240,18 @@ describe("Swarm interactive background bash", () => {
     const masked = launched.content[0].text.replace(/bg-\d+-\d+/, "TASK");
     expect(masked).toBe('{"backgrounded":true,"message":"Command idle for 1s (no output) and was auto-backgrounded. Use ReadBackgroundCommand to check status — look at metadata.seconds_since_last_output to decide if it is still healthy.","status":"running","task_id":"TASK","timeout_seconds":1}');
     const id = JSON.parse(launched.content[0].text).task_id;
-    const running = JSON.parse((await invoke(read, { task_id: id, action: "status" })).content[0].text);
+    const running = JSON.parse((await invoke(read, { task_id: id, action: "status", format: "json" })).content[0].text);
     expect(running).toMatchObject({ task_id: id, status: "running", metadata: { total_lines: 0, bytes_written: 0 } });
     expect(running).not.toHaveProperty("output");
     await new Promise(r => setTimeout(r, 2100));
-    const filtered = JSON.parse((await invoke(read, { task_id: id, pattern: "beta" })).content[0].text);
+    const filtered = JSON.parse((await invoke(read, { task_id: id, pattern: "beta", format: "json" })).content[0].text);
     expect(filtered.output.map((x: any) => x.content)).toEqual(["beta"]);
-    const tail = JSON.parse((await invoke(read, { task_id: id, max_lines: 2 })).content[0].text);
+    const tail = JSON.parse((await invoke(read, { task_id: id, max_lines: 2, format: "json" })).content[0].text);
     expect(tail.output.map((x: any) => x.content)).toEqual(["beta", "gamma"]);
     expect(tail.metadata).toMatchObject({ total_lines: 3, output_truncated: true });
     expect(tail.metadata.output_file).toMatch(new RegExp(`bgprocess-output-${id}\\.txt$`));
     expect(readFileSync(tail.metadata.output_file, "utf8")).toBe("alpha\nbeta\ngamma\n");
-    const listedText = (await invoke(read, { action: "list" })).content[0].text;
+    const listedText = (await invoke(read, { action: "list", format: "json" })).content[0].text;
     const listed = JSON.parse(listedText);
     expect(listed.count).toBe(1);
     expect(Object.keys(listed.processes[0])).toEqual(["task_id", "command", "status", "started_at", "duration", "exit_code"]);
@@ -268,9 +268,72 @@ describe("Swarm interactive background bash", () => {
     const second = await invoke(bash, { command: "sleep 9", timeout_seconds: 1 });
     const secondId = JSON.parse(second.content[0].text).task_id;
     expect((await invoke(read, { task_id: secondId, action: "cancel" })).content[0].text).toBe(`Process ${secondId} has been cancelled`);
-    const cancelled = JSON.parse((await invoke(read, { task_id: secondId, action: "status" })).content[0].text);
+    const cancelled = JSON.parse((await invoke(read, { task_id: secondId, action: "status", format: "json" })).content[0].text);
     expect(cancelled.status).toBe("cancelled");
   }, 9000);
+
+  // The tool used to answer every read with pretty-printed JSON containing one
+  // object per line (line_number/timestamp/stream/content): ~5x the bytes of the
+  // log itself, and the TUI showed the last 5 rows of that JSON rather than the
+  // output. Text is now the default; json stays byte-identical for parity.
+  it("defaults to a compact text view and keeps json behind format", async () => {
+    const { bash, read } = harness();
+    const launched = await invoke(bash, { command: "printf 'alpha\\nbeta\\ngamma\\n'", background: true, timeout_seconds: 60 });
+    const id = JSON.parse(launched.content[0].text).task_id;
+    await new Promise(r => setTimeout(r, 1200));
+
+    const text = (await invoke(read, { task_id: id })).content[0].text;
+    const rows = text.split("\n");
+    expect(rows[0]).toMatch(/^task_id=bg-\d+-\d+ status=completed exit_code=0 duration=\S+ pid=\d+$/);
+    expect(rows[1]).toMatch(/^last_output_at=.+ seconds_since_last_output=[\d.]+ bytes_written=\d+ total_lines=3$/);
+    expect(rows[2]).toBe("lines 1-3 of 3");
+    expect(rows[3]).toBe("---");
+    expect(rows.slice(4)).toEqual(["alpha", "beta", "gamma"]);
+
+    const json = (await invoke(read, { task_id: id, format: "json" })).content[0].text;
+    expect(JSON.parse(json).output.map((x: any) => x.content)).toEqual(["alpha", "beta", "gamma"]);
+    expect(Buffer.byteLength(text)).toBeLessThan(Buffer.byteLength(json) / 2);
+
+    const status = (await invoke(read, { task_id: id, action: "status" })).content[0].text;
+    // Status carries no log body at all: no window row, no separator, no output lines.
+    expect(status.split("\n")[0]).toMatch(/^task_id=bg-\d+-\d+ status=completed /);
+    expect(status.split("\n").at(-1)).toContain("command=printf ");
+    expect(status).not.toContain("---");
+    expect(Buffer.byteLength(status)).toBeLessThan(400);
+
+    expect((await invoke(read, { action: "list" })).content[0].text.split("\n")[0]).toBe("1 background command");
+    await expect(invoke(read, { task_id: id, format: "yaml" }))
+      .rejects.toThrow(/^Error executing ReadBackgroundCommand: validation failed for ReadBackgroundCommand: invalid format: yaml \(must be text or json\) \(error_id=/);
+  }, 5000);
+
+  // A filtered read is a search, not a tail. Applying the last-100-line window
+  // before filtering made a match early in a long log invisible.
+  it("finds pattern matches before the tail window", async () => {
+    const { bash, read } = harness();
+    const launched = await invoke(bash, { command: "printf 'needle-early\\n'; for i in $(seq 1 200); do printf 'filler %03d\\n' \"$i\"; done", background: true, timeout_seconds: 60 });
+    const id = JSON.parse(launched.content[0].text).task_id;
+    await new Promise(r => setTimeout(r, 1800));
+    const text = (await invoke(read, { task_id: id, pattern: "needle" })).content[0].text;
+    expect(text.split("\n").at(-1)).toBe("needle-early");
+    expect(text).toContain("lines 1-1 of 201");
+    expect(text).toContain("matches=1/1");
+    // A plain read is still the tail window, ending on the last line.
+    expect((await invoke(read, { task_id: id })).content[0].text).toContain("lines 102-201 of 201");
+  }, 7000);
+
+  // A line window does not bound the payload: one minified line can be megabytes.
+  it("middle-elides a single oversized line instead of returning it whole", async () => {
+    const { bash, read } = harness();
+    const launched = await invoke(bash, { command: "head -c 40000 /dev/zero | tr '\\0' x", background: true, timeout_seconds: 60 });
+    const id = JSON.parse(launched.content[0].text).task_id;
+    await new Promise(r => setTimeout(r, 1500));
+    const text = (await invoke(read, { task_id: id })).content[0].text;
+    expect(Buffer.byteLength(text)).toBeLessThan(MAX_READ_BYTES + 2000);
+    expect(text).toContain("bytes elided from the middle of this read");
+    const file = text.match(/full_output=(\S+)/)?.[1];
+    expect(file).toBeTruthy();
+    expect((readFileSync(file!, "utf8").trimEnd()).length).toBe(40000);
+  }, 6000);
 
   it("matches validation, unknown id, and invalid regex errors", async () => {
     const { bash, read } = harness();
