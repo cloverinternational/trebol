@@ -21,7 +21,10 @@ export interface GitFacts {
 export interface ComposerFacts {
 	draft: string;
 	cursor?: number;
-	selection?: { start: number; end: number };
+	/** Selection anchor; TSP's `editor` draws `anchor`..`cursor` as the selection. */
+	anchor?: number | null;
+	/** True once the composer can take Tern's atomic `send` event through the normal submit path. */
+	sendable?: boolean;
 	ghost?: string;
 	busy: boolean;
 	/** Wall time of the running turn, drawn as a terminal-clocked timer beside Stop. */
@@ -35,6 +38,8 @@ export interface ComposerFacts {
 	effortKind: boolean;
 	git?: GitFacts;
 	cost?: number;
+	/** Attachment chips (attachments.ts), drawn above the editor line. */
+	chips?: TspNode;
 }
 
 export const PLACEHOLDER = "What are we cooking?";
@@ -163,14 +168,14 @@ export function composerNodes(f: ComposerFacts, above: TspNode[] = []): TspNode[
 		id: "composer-line",
 		k: "row",
 		p: { role: "omp.composer.line", align: "start", gap: "sm" },
-		c: [{ id: "composer", k: "editor", p: { text: f.draft, cursor: f.cursor ?? f.draft.length, ...(f.selection ? { selection: f.selection } : {}), ...(f.ghost ? { ghost: f.ghost } : {}), sendable: false, placeholder: PLACEHOLDER } }],
+		c: [{ id: "composer", k: "editor", p: { text: f.draft, cursor: f.cursor ?? f.draft.length, anchor: f.anchor ?? null, ...(f.ghost ? { ghost: f.ghost } : {}), sendable: f.sendable === true, placeholder: PLACEHOLDER } }],
 	};
 	return [
 		{
 			id: "composer-col",
 			k: "col",
 			p: { role: "omp.editor", ...(f.busy ? { tone: "pending" } : {}) },
-			c: [...above, ...(f.context ? [contextMeter(f.context)] : []), line, bar],
+			c: [...above, ...(f.context ? [contextMeter(f.context)] : []), ...(f.chips ? [f.chips] : []), line, bar],
 		},
 	];
 }

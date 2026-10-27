@@ -31,8 +31,15 @@ follow-up queue. Alt+Enter uses the same path while busy and behaves like an
 ordinary submission while idle. Alt+Up calls `clearQueue()` and restores the
 queued steering/follow-up text to the composer; cancellation aborts the active
 turn but does not implicitly clear Pi's queue. Queue API errors are shown in
-the local transcript and remove the corresponding optimistic queued-count
-entry. The composer shows the number queued while the turn is active.
+the local transcript and remove the corresponding optimistic queued entry.
+Queued messages render in the dock above the composer as OMP's
+`QueuedMessagesBand` (`queue-view.ts`): col `omp.queue` with one
+`omp.queue.item` pill per message (steering first, then "After yield"),
+the typed text on one truncated line, a total `omp.queue.count` badge on the
+first pill when more than one waits, and an `omp.queue.edit` control (⌥↑)
+that acts like Alt+Up. Tern's built-in stylesheet draws these roles. The band
+follows Pi's `queue_update` and disappears when the queue empties; queueing no
+longer adds a transcript line. Verified by `tools/e2e/tern-queue-band.mjs`.
 
 ## Implemented dogfood behavior
 

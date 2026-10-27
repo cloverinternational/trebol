@@ -26,17 +26,14 @@ const server = createServer(async (req, res) => {
 const cleanup = () => { session?.dispose(); server.closeAllConnections(); server.close(); rmSync(root, { recursive: true, force: true }); };
 const deadline = setTimeout(() => { console.error("FAIL tern draft editing timed out"); cleanup(); process.exit(1); }, 60_000);
 
-// Same mapping run.ts applies to each key effect; the editing effects go to the bridge.
+// run.ts's key path: editing effects through the bridge's shared dispatch, then text, backspace, tab and Enter.
 function press(bridge, bytes) {
   const effect = keyEffect(bytes);
   assert.ok(effect, `key ${JSON.stringify(bytes)} maps to an effect`);
+  if (bridge.applyEditKey(effect)) return undefined;
   if (effect.kind === "text") bridge.appendDraft(effect.text);
   else if (effect.kind === "backspace") bridge.backspaceDraft();
   else if (effect.kind === "tabMove") bridge.moveTabOrCursor(effect.delta);
-  else if (effect.kind === "cursor") bridge.moveCursor(effect.direction, effect.word, effect.extend);
-  else if (effect.kind === "selectAll") bridge.selectAllDraft();
-  else if (effect.kind === "undo") bridge.undoDraft();
-  else if (effect.kind === "deleteWord") bridge.deleteWordDraft();
   else if (effect.kind === "submit") return bridge.submitDraft();
   else throw new Error(`unexpected effect ${effect.kind}`);
   return undefined;
@@ -78,6 +75,28 @@ try {
   press(bridge, "\x1b[D");
   press(bridge, "!");
   assert.equal(bridge.draft, "Xhel!lo", "plain left moves the caret for insertion");
+
+  // PC-keyboard chords (Linux, Windows): Home, Ctrl+→, Delete, Ctrl+End, Ctrl+Backspace, Ctrl+Z.
+  press(bridge, "\x1b[1~"); // VT220 Home
+  press(bridge, "\x1b[3~"); // Delete
+  assert.equal(bridge.draft, "hel!lo", "Home then Delete removes the first character");
+  press(bridge, "\x1b[1;5F"); // Ctrl+End
+  press(bridge, "\x1b[127;5u"); // Ctrl+Backspace (kitty)
+  assert.equal(bridge.draft, "hel!", "Ctrl+End then Ctrl+Backspace deletes the last word");
+  press(bridge, "\x1b[122;5u");
+  press(bridge, "\x1b[122;5u");
+  assert.equal(bridge.draft, "Xhel!lo", "Ctrl+Z undoes both deletes");
+
+  // Tern native editing, as Tern sends it: a click places the caret, a dragged selection is replaced, a stale
+  // edit (computed before newer keys) is dropped.
+  const edit = (body) => bridge.handle({ verb: "e", body: { sf: "pi", id: "composer", ev: "edit", ...body } });
+  edit({ from: 1, to: 1, text: "", cursor: 1, len: 7 });
+  press(bridge, "Z");
+  assert.equal(bridge.draft, "XZhel!lo", "a click moves the caret where typing lands");
+  edit({ from: 1, to: 2, text: "", cursor: 1, len: 7 });
+  assert.equal(bridge.draft, "XZhel!lo", "a stale edit is ignored");
+  edit({ from: 1, to: 2, text: "", cursor: 1, len: 8 });
+  assert.equal(bridge.draft, "Xhel!lo", "a selection deleted natively is removed");
   await press(bridge, "\r");
   await new Promise((r) => setTimeout(r, 300));
   assert.equal(requests.length, 1, "Enter sends the edited draft");

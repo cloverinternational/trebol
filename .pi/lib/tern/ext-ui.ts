@@ -7,6 +7,7 @@
 // else is disposed and resolves undefined with a notice.
 import type { TspNode } from "./tsp.ts";
 import { sanitizeUiLines } from "./ui-context.ts";
+import { DraftEditor, type HostEdit } from "./draft-edit.ts";
 
 export const UI_PROMPT_LIST_ID = "ui-prompt-list";
 export const UI_PROMPT_INPUT_ID = "ui-prompt-input";
@@ -26,7 +27,8 @@ interface Prompt {
 	message?: string;
 	options: string[];
 	index: number;
-	text: string;
+	// Text, caret, selection and undo of an input/editor prompt; Tern edits it natively like the composer.
+	field: DraftEditor;
 	placeholder?: string;
 	resolve(value: string | undefined): void;
 }
@@ -100,14 +102,15 @@ export class TernExtensionUI {
 		};
 	}
 
-	#ask(init: Omit<Prompt, "index" | "text" | "resolve"> & { text?: string }, opts?: DialogOptions): Promise<string | undefined> {
+	#ask(init: Omit<Prompt, "index" | "field" | "resolve"> & { text?: string }, opts?: DialogOptions): Promise<string | undefined> {
 		return new Promise((resolve) => {
 			if (opts?.signal?.aborted) return resolve(undefined);
 			let timer: ReturnType<typeof setTimeout> | undefined;
+			const { text, ...rest } = init;
 			const prompt: Prompt = {
-				...init,
+				...rest,
 				index: 0,
-				text: init.text ?? "",
+				field: new DraftEditor({ text: text ?? "", multiline: init.kind === "editor" }),
 				resolve: (value) => {
 					if (!this.#queue.includes(prompt)) return;
 					clearTimeout(timer);
@@ -205,7 +208,7 @@ export class TernExtensionUI {
 			children.push({
 				id: UI_PROMPT_INPUT_ID,
 				k: p.kind === "editor" ? "editor" : "input",
-				p: { text: p.text, cursor: p.text.length, placeholder: p.placeholder ?? "", ...(p.kind === "editor" ? { maxLines: 12 } : {}) },
+				p: { text: p.field.text, cursor: p.field.cursor, anchor: p.field.anchor, placeholder: p.placeholder ?? "", ...(p.kind === "editor" ? { maxLines: 12 } : {}) },
 			});
 		}
 		const hint = p.kind === "select" || p.kind === "confirm" ? "↑/↓ choose · enter select · esc cancel" : p.kind === "editor" ? "enter submit · shift+enter newline · esc cancel" : "enter submit · esc cancel";
@@ -224,7 +227,7 @@ export class TernExtensionUI {
 		const p = this.#queue[0];
 		if (!p) return;
 		if (p.kind === "input" || p.kind === "editor") {
-			p.text += p.kind === "input" ? text.replace(/\r\n?|\n/g, " ") : text;
+			p.field.insert(p.kind === "input" ? text.replace(/\r\n?|\n/g, " ") : text);
 			this.#host.render();
 		} else if (/^[1-9]$/.test(text) && Number(text) <= p.options.length) {
 			p.index = Number(text) - 1;
@@ -235,21 +238,37 @@ export class TernExtensionUI {
 	newline(): void {
 		const p = this.#queue[0];
 		if (p?.kind !== "editor") return;
-		p.text += "\n";
+		p.field.insert("\n");
 		this.#host.render();
 	}
 
 	backspace(): void {
 		const p = this.#queue[0];
 		if (!p || (p.kind !== "input" && p.kind !== "editor")) return;
-		p.text = [...p.text].slice(0, -1).join("");
+		p.field.backspace();
 		this.#host.render();
+	}
+
+	// The open prompt's text field, when it has one: caret, selection, delete and undo keys edit it.
+	editText(op: (field: DraftEditor) => void): boolean {
+		const p = this.#queue[0];
+		if (!p || (p.kind !== "input" && p.kind !== "editor")) return false;
+		op(p.field);
+		this.#host.render();
+		return true;
+	}
+
+	// Tern's native `edit` on the prompt field; a stale or malformed one changes nothing.
+	applyNativeEdit(edit: HostEdit): void {
+		const p = this.#queue[0];
+		if (!p || (p.kind !== "input" && p.kind !== "editor")) return;
+		if (p.field.applyHostEdit(edit)) this.#host.render();
 	}
 
 	submit(): void {
 		const p = this.#queue[0];
 		if (!p) return;
-		p.resolve(p.kind === "select" || p.kind === "confirm" ? p.options[p.index] : p.text);
+		p.resolve(p.kind === "select" || p.kind === "confirm" ? p.options[p.index] : p.field.expandedText);
 	}
 
 	cancel(): void {

@@ -280,7 +280,7 @@ flowchart TD
 | `/hooks` or `/hooks GROUP on|off` | Inspect or change a known hook group; an unknown group reports an error. |
 | `/goal CONDITION`, `/goal status|clear` | Persist a goal condition, inspect it, or clear it. An overlong condition is rejected. |
 | `/loop [10m] TASK`, `/loop status|stop` | Schedule repeats in the current session; default interval is 10 minutes. Loops expire and are cancelled on shutdown/reload; use `scheduler` for delay/cron jobs. |
-| `/trebol-update` or `/trebol-update install` | Check the release manifest or launch `pi update --extensions` and restart Pi afterward. Offline mode, manifest errors and launch failures are reported; this is not an in-place live reload. |
+| `/trebol-update` or `/trebol-update install` | Check the release manifest (and, for a local checkout, whether it is behind its upstream), or install: a Pi-managed git clone runs `pi update --extensions`, and a local checkout is fast-forwarded (plus `npm ci` when dependencies changed), then Pi reloads. It refuses on uncommitted or diverged work. Newer releases auto-install when safe; `PI_SWARM_AUTO_UPDATE=0` keeps notify-only. |
 | `/swarm-autogen status|on|off|manual` | Show or change generated-skill mode; restart/reload to apply. |
 | `/swarm-thinking` | Open Pi thinking-level selector (including off, low, medium, high); `Ctrl+Alt+Shift+T` opens the same picker. |
 | `/swarm-mcp` or `/swarm-mcp discover SERVER` | Inspect configured MCP servers or discover server tools; requires an enabled server/connection. |

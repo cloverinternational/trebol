@@ -389,7 +389,8 @@ export class SwarmBackgroundProcessManager {
     // The drawer inspects running commands live: drain any buffered chunks
     // first so Enter shows output written since the last 50ms poll tick.
     const readOutput = () => { this.poll(rec); return rec.lines.slice(-160).map(line => line.content).join("\n"); };
-    if (this.ownsSession(rec)) setRunningWork({ id, kind: "bash", label: params.description || "Background Bash", status: "running", startedAt: startedMs, detail: command, readOutput, foreground: params.background !== true });
+    const stop = () => { void this.cancelRecord(rec); };
+    if (this.ownsSession(rec)) setRunningWork({ id, kind: "bash", label: params.description || "Background Bash", status: "running", startedAt: startedMs, detail: command, readOutput, stop, foreground: params.background !== true });
     // Under a PTY the child sees one terminal, so stderr is interleaved into
     // stdout and every newline arrives as CRLF. Strip the CR so stored lines,
     // regex filters and byte counts match the non-PTY tiers.

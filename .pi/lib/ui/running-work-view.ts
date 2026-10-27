@@ -75,7 +75,14 @@ export class RunningWorkView {
   private detail = false;
   private closed = false;
   private unsubscribe: () => void;
-  constructor(private tui: any, private theme: any, private done: () => void) {
+  // Explicit fields, not parameter properties: the Tern bridge imports this module under Node's strip-only TypeScript.
+  private tui: any;
+  private theme: any;
+  private done: () => void;
+  constructor(tui: any, theme: any, done: () => void) {
+    this.tui = tui;
+    this.theme = theme;
+    this.done = done;
     this.selectedId = selectedRunningWork()?.id ?? browsableRunningWork()[0]?.id;
     this.unsubscribe = onRunningWorkChange(() => { if (!this.closed) this.tui.requestRender(); });
   }

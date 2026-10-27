@@ -1,9 +1,9 @@
-import { applyPatch, undoFile } from "../../.pi/lib/tools/swarm-apply-patch.ts";
+import { applyPatch } from "../../.pi/lib/tools/swarm-apply-patch.ts";
 import { readArtifact } from "../../.pi/lib/tools/swarm-read-image.ts";
 import { readToolRenderer } from "../../.pi/lib/tools/swarm-read-renderer.ts";
 import { newErrorID } from "../../.pi/lib/tools/swarm-bash.ts";
 import { applySwarmSurface } from "../../.pi/lib/runtime/swarm-tool-surface.ts";
-import { APPLY_PATCH_CONTRACT, READ_CONTRACT, UNDO_CONTRACT } from "../../.pi/lib/tools/swarm-fs-tools.contract.ts";
+import { APPLY_PATCH_CONTRACT, READ_CONTRACT } from "../../.pi/lib/tools/swarm-fs-tools.contract.ts";
 
 type Pi = any;
 const registrations = new WeakSet<object>();
@@ -16,12 +16,6 @@ const error = (name: string, message: string): never => {
 export function registerSwarmFSTools(pi: Pi): void {
   if (registrations.has(pi as object)) return;
   registrations.add(pi as object);
-  // Snapshot provenance published by the transport extension
-  // (conversation id + the user turn as the model saw it).
-  const provenance = () => ({
-    conversationId: (globalThis as any)[Symbol.for("pi-swarm-conversation-id")] as string | undefined,
-    userMessage: (globalThis as any)[Symbol.for("pi-swarm-last-user-message")] as string | undefined,
-  });
   // Validation failures carry the tool's own prose, wrapped once more.
   const validation = (name: string, message: string): never =>
     error(name, `validation failed for ${name}: ${message} (error_id=${newErrorID()})`);
@@ -29,18 +23,9 @@ export function registerSwarmFSTools(pi: Pi): void {
     name: "apply_patch", label: "apply_patch", ...APPLY_PATCH_CONTRACT,
     async execute(_id: string, params: any, signal: AbortSignal | undefined, _update: unknown, ctx: any) {
       try {
-        const text = await applyPatch(params?.input, { workspacePath: ctx?.cwd ?? pi.getCwd?.() ?? process.cwd(), cwd: params?.cwd, signal, ...provenance() });
+        const text = await applyPatch(params?.input, { workspacePath: ctx?.cwd ?? pi.getCwd?.() ?? process.cwd(), cwd: params?.cwd, signal });
         return { content: [{ type: "text", text }], details: {} };
       } catch (e) { return error("apply_patch", (e as Error).message); }
-    },
-  }));
-  pi.registerTool?.(applySwarmSurface({
-    name: "Undo", label: "Undo", ...UNDO_CONTRACT,
-    async execute(_id: string, params: any, _signal: AbortSignal | undefined, _update: unknown, ctx: any) {
-      try {
-        const text = await undoFile(params?.path, ctx?.cwd ?? pi.getCwd?.() ?? process.cwd());
-        return { content: [{ type: "text", text }], details: {} };
-      } catch (e) { return error("Undo", (e as Error).message); }
     },
   }));
   pi.registerTool?.(applySwarmSurface({

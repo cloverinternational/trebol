@@ -4,6 +4,21 @@ Release metadata is kept in `package.json`, `update-manifest.json`, and this fil
 
 ## [Unreleased]
 
+### Added
+
+- Tern composer attachments: paste (Ctrl+V) or drop several images and other files at once; they show as chips above the input with image previews and a remove ×, and go with the next message — images as model image input, other files as paths (`.pi/lib/tern/attachments.ts`). The runner now turns on bracketed paste, so a multi-line paste or a drop no longer arrives as typed keys.
+- Tern composer native editing: click-to-caret, drag/double-click/⌘A selection and ⌘Z through Tern's `edit`/`undo`/`send` events, PC-keyboard chords, Windows OSC 877 input and Linux/WSL clipboard fallbacks.
+- Tern background work card: click a row to open its output in a sheet (live bash output, or a subagent's recent conversation steps, refreshed every 500 ms while running), and click × on a row (or ■ Stop in the sheet) to stop work that is still running. Stop goes through the existing kill paths (background Bash process-group SIGTERM→SIGKILL, subagent `handle.cancel()`), exposed to the bridge as `RunningWorkItem.stop`. Covered by `.pi/test/tern/dock.test.ts` and `tools/e2e/tern-background-work-stop.mjs`, which uses `pgrep` to confirm the process is gone.
+
+### Changed
+
+- Tern Markdown callouts no longer take the theme's accent as a fill: they draw as a hairline rule with a quiet icon, and warnings keep the warning color on the rule and icon only (`.pi/lib/tern/markdown-style.ts`). Measured in headless Tern under three strongly colored themes: callout fill now equals the page background.
+- The Mermaid prompt directive asks for system diagrams on architecture answers (flowchart with labelled boundary subgraphs, role shapes, protocol-labelled and dotted async edges) and steers away from Mermaid kinds Tern shows as source or paints with fixed colors.
+
+### Fixed
+
+- `/trebol-update install` now really updates Trebol. Before, it launched `pi update --extensions` detached with output discarded and always said "update started"; Pi only refreshes npm and git sources, so a Trebol installed as a local path (the usual setup) never moved, even though `pi update` printed "Updated packages". The command now detects the install kind: a Pi-managed git clone goes through an awaited `pi update --extensions`, and a local checkout is fetched and fast-forwarded to its upstream, with `npm ci` when `package.json`/`package-lock.json` changed. It refuses, and names the reason, on uncommitted changes, local commits, or a missing upstream. It reports the real commits (`abc1234 → def5678`) and reloads on success. `/trebol-update` also reports a local checkout that is behind its upstream while still at the release version. When a newer release is found, the hourly check installs it automatically whenever that is safe, and asks you to `/reload`. Set `PI_SWARM_AUTO_UPDATE=0` to keep notify-only. Verified against real git repositories (`.pi/test/runtime/swarm-update.test.ts`) and against the real `pi` binary, which left a local-path fixture at its old commit while the new path fast-forwarded it.
+
 ## [0.8.0] - 2026-10-27
 
 ### Highlights

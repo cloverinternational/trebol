@@ -48,8 +48,9 @@ Known exclusions (not parity; each is a Trebol extension or host policy):
   context and keeps following links, so it does not mirror this policy. Parity
   claims apply to the follow-symlinks default only.
 - Outside-workspace paths are allowed (external path permissions unchanged).
-- Snapshots and manual Undo are retained as a Trebol extension. Snapshot failure
-  stops that operation before its write; earlier writes are not reverted.
+- Snapshots and manual Undo were removed on 2026-10-27 (1 Undo call across 354
+  recorded sessions; `.swarm/snapshots` grew without bound). Earlier writes in a
+  failed patch are not reverted; revert with git or a follow-up patch.
 - JSON `{input, cwd}` adapter and `environment_id` rejection are Trebol
   extensions and are not upstream freeform grammar.
 - Concurrency, crash consistency, Windows, and non-root permission failures are

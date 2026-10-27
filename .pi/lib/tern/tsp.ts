@@ -112,27 +112,64 @@ function splitJson(json: string, limit: number): string[] {
 	return out;
 }
 
-// Separates complete TSP messages from key input in a raw read buffer.
-// An unterminated APC string or a partial ESC prefix is held back as `rest`.
+// Terminal → program framings: APC everywhere, and OSC 877 through a Windows ConPTY, whose input parser drops
+// APC (protocol/transport.md#windows). OSC 877 may end with ST or BEL; both are accepted on every platform.
+const INPUT_STARTS = [`${ESC}_tsp;`, `${ESC}]877;tsp;`] as const;
+const BEL = "\x07";
+
+// The first complete-or-partial message start at or after `from`.
+function nextStart(buffer: string, from: number): { at: number; osc: boolean; prefix: string } | null {
+	let best: { at: number; osc: boolean; prefix: string } | null = null;
+	for (const prefix of INPUT_STARTS) {
+		const at = buffer.indexOf(prefix, from);
+		if (at >= 0 && (!best || at < best.at)) best = { at, osc: prefix !== INPUT_STARTS[0], prefix };
+	}
+	return best;
+}
+
+// End of a message body (index of its terminator) and the terminator's length; -1 when not yet complete.
+function messageEnd(buffer: string, from: number, osc: boolean): { at: number; len: number } {
+	const st = buffer.indexOf(ST, from);
+	const bel = osc ? buffer.indexOf(BEL, from) : -1;
+	if (bel >= 0 && (st < 0 || bel < st)) return { at: bel, len: 1 };
+	return { at: st, len: ST.length };
+}
+
+// `<verb>[;key=value]*;<json>` → message. Parameters (chunking metadata) are skipped; JSON is the rest.
+function parseInner(inner: string): TspMessage | null {
+	const m = /^([A-Za-z]);((?:[A-Za-z0-9_-]+=[^;]*;)*)([\s\S]*)$/.exec(inner);
+	if (!m) return null;
+	try {
+		const body: unknown = JSON.parse(m[3]!);
+		return isRecord(body) ? { verb: m[1]!, body } : null;
+	} catch {
+		// Malformed bodies are ignored, as Tern would report them as error events.
+		return null;
+	}
+}
+
+// Separates complete TSP messages (APC or OSC 877) from key input in a raw read buffer.
+// An unterminated message or a partial message prefix is held back as `rest`.
 export function splitInput(buffer: string): { messages: TspMessage[]; keys: string; rest: string } {
 	const messages: TspMessage[] = [];
 	let keys = "";
 	let i = 0;
-	const APC_START = `${ESC}_tsp;`;
 	while (i < buffer.length) {
-		const start = buffer.indexOf(APC_START, i);
-		const plainEnd = start < 0 ? buffer.length : start;
-		keys += buffer.slice(i, plainEnd);
-		if (start < 0) break;
-		const end = buffer.indexOf(ST, start + APC_START.length);
-		if (end < 0) return { messages, keys, rest: buffer.slice(start) };
-		messages.push(...parseTspMessages(buffer.slice(start, end + ST.length)));
-		i = end + ST.length;
+		const start = nextStart(buffer, i);
+		keys += buffer.slice(i, start ? start.at : buffer.length);
+		if (!start) break;
+		const bodyAt = start.at + start.prefix.length;
+		const end = messageEnd(buffer, bodyAt, start.osc);
+		if (end.at < 0) return { messages, keys, rest: buffer.slice(start.at) };
+		const msg = parseInner(buffer.slice(bodyAt, end.at));
+		if (msg) messages.push(msg);
+		i = end.at + end.len;
 	}
 	let rest = "";
 	const lastEsc = keys.lastIndexOf(ESC);
-	if (lastEsc >= 0 && APC_START.startsWith(keys.slice(lastEsc)) && keys.length - lastEsc < APC_START.length) {
-		rest = keys.slice(lastEsc);
+	const tail = lastEsc >= 0 ? keys.slice(lastEsc) : "";
+	if (tail && INPUT_STARTS.some((p) => p.startsWith(tail) && tail.length < p.length)) {
+		rest = tail;
 		keys = keys.slice(0, lastEsc);
 	}
 	return { messages, keys, rest };
@@ -143,20 +180,17 @@ export function helloQuery(app: string, features: string[] = []): string {
 	return `${encodeTsp("q", { q: "hello", v: [PROTOCOL_VERSION], app, features })}${ESC}[c`;
 }
 
-const APC_RE = /\x1b_tsp;([A-Za-z]);([\s\S]*?)\x1b\\/g;
+// Program features the Pi runner's hello advertises, the same set OMP's does. edit: Tern keeps a native
+// selection in editor/input fields (a click places the caret; drag, double/triple click and ⌘A or Ctrl+A select)
+// and reports changes as `edit` events; undo: ⌘Z/Ctrl+Z arrives as an `undo` event; send: atomic prompts into a
+// `sendable` composer. PiTernBridge.handle applies all three.
+export const PI_TSP_FEATURES = ["edit", "undo", "send"] as const;
+
 const DA1_RE = /\x1b\[\?[\d;]*c/;
 
+// Every complete TSP message in `input`, in either input framing.
 export function parseTspMessages(input: string): TspMessage[] {
-	const out: TspMessage[] = [];
-	for (const match of input.matchAll(APC_RE)) {
-		try {
-			const body: unknown = JSON.parse(match[2]);
-			if (isRecord(body)) out.push({ verb: match[1], body });
-		} catch {
-			// Malformed bodies are ignored, as Tern would report them as error events.
-		}
-	}
-	return out;
+	return splitInput(input).messages;
 }
 
 // Returns capabilities only when a v1 hello reply precedes a DA1 answer.

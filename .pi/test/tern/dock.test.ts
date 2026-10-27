@@ -3,6 +3,7 @@ import { PiTernBridge, type PiEventLike, type PiSessionLike } from "../../lib/te
 import { ESC, parseTspMessages } from "../../lib/tern/tsp.ts";
 import { PI_COMPOSER_CSS } from "../../lib/tern/composer-style.ts";
 import { TERN_WORK_CSS } from "../../lib/tern/work-style.ts";
+import { TERN_MARKDOWN_CSS } from "../../lib/tern/markdown-style.ts";
 import { removeRunningWork, setRunningWork } from "../../lib/ui/running-work-store.ts";
 
 interface FakeOptions {
@@ -331,6 +332,21 @@ describe("Tern regions and dock structure", () => {
 		}
 	});
 
+	it("sends the theme-neutral Markdown sheet, inside the selector subset and free of fills", () => {
+		const { writes } = make(fakeSession());
+		const sheets = writes.filter((w) => w.startsWith(`${ESC}_tsp;s;`)).map((w) => parseTspMessages(w)[0]?.body as { name: string; css: string });
+		expect(sheets.find((s) => s.name === "markdown")?.css).toBe(TERN_MARKDOWN_CSS);
+		const selectors = TERN_MARKDOWN_CSS.split("}").map((block) => block.split("{")[0] ?? "").join("\n").split("\n").map((l) => l.trim().replace(/,$/, "")).filter(Boolean);
+		expect(selectors.length).toBeGreaterThan(0);
+		for (const selector of selectors) {
+			expect(selector).toMatch(/^\.sf-md \.callout\b/);
+			expect(selector).not.toContain(":has(");
+		}
+		// The point of the sheet: no callout paints a theme hue as its background.
+		expect(TERN_MARKDOWN_CSS).not.toMatch(/background:(?!\s*transparent)/);
+		expect(TERN_MARKDOWN_CSS).not.toContain("--accent");
+	});
+
 	it("every composer selector stays inside the subset Tern supports", () => {
 		const selectors = PI_COMPOSER_CSS.replace(/\/\*[\s\S]*?\*\//g, "")
 			.split("}")
@@ -397,6 +413,59 @@ describe("Tern regions and dock structure", () => {
 		}
 	});
 
+	it("opens a background item's live output on click and stops only running work from its x", () => {
+		const writes: Writes = [];
+		const bridge = new PiTernBridge(fakeSession(), { write: (d) => writes.push(d), surfaceId: "pi", credits: 1000 });
+		bridge.start();
+		let output = "line 1";
+		const stopped: string[] = [];
+		try {
+			setRunningWork({ id: "bg-1", kind: "bash", label: "Tail", status: "running", startedAt: Date.now(), detail: "tail -f log", readOutput: () => output, stop: () => stopped.push("bg-1"), foreground: false });
+			setRunningWork({ id: "agent-1", kind: "subagent", label: "Agent agent-1", status: "running", startedAt: Date.now(), detail: "Review", stop: () => stopped.push("agent-1"), foreground: false });
+			let nodes = replay(writes);
+			expect(nodes.get("bg-work-bg-1")?.p?.actions).toEqual({ click: "bg.open=bg-1" });
+			expect(nodes.get("bg-work-agent-1")?.p?.actions).toEqual({ click: "bg.open=agent-1" });
+			// The x is a sibling of the clickable part, not nested in it.
+			expect(nodes.get("bg-work-bg-1-stop")).toMatchObject({ parent: "bg-work-bg-1-line", p: { actions: { click: "bg.stop=bg-1" } } });
+			expect(nodes.get("bg-work-agent-1-stop")?.parent).toBe("bg-work-agent-1-line");
+
+			bridge.handle({ verb: "e", body: { ev: "action", id: "bg-work-bg-1", act: "bg.open", value: "bg-1" } });
+			nodes = replay(writes);
+			expect(nodes.get("bg-output")?.p).toMatchObject({ head: "Tail · running", role: "pi.background.output" });
+			expect(nodes.get("bg-output-text")?.p?.text).toBe("line 1");
+			expect(nodes.get("bg-output-stop")?.p?.actions).toEqual({ click: "bg.stop=bg-1" });
+
+			// Output growth does not touch the store; the open sheet re-reads it on its own clock.
+			output = "line 1\nline 2";
+			vi.useFakeTimers();
+			try { bridge.handle({ verb: "e", body: { ev: "action", id: "bg-work-bg-1", act: "bg.open", value: "bg-1" } }); output = "line 1\nline 2\nline 3"; vi.advanceTimersByTime(600); } finally { vi.useRealTimers(); }
+			expect(replay(writes).get("bg-output-text")?.p?.text).toBe("line 1\nline 2\nline 3");
+
+			bridge.handle({ verb: "e", body: { ev: "action", id: "bg-output-stop", act: "bg.stop", value: "bg-1" } });
+			expect(stopped).toEqual(["bg-1"]);
+
+			// Settled work has no stop, in the bar or the sheet, and a stale stop event does nothing.
+			setRunningWork({ id: "bg-1", kind: "bash", label: "Tail", status: "cancelled", startedAt: Date.now(), endedAt: Date.now(), detail: "tail -f log", output: "line 1\nline 2\nline 3" });
+			nodes = replay(writes);
+			expect(nodes.has("bg-work-bg-1-stop")).toBe(false);
+			expect(nodes.get("bg-output")?.p?.head).toBe("Tail · cancelled");
+			expect(nodes.has("bg-output-stop")).toBe(false);
+			bridge.handle({ verb: "e", body: { ev: "action", id: "x", act: "bg.stop", value: "bg-1" } });
+			expect(stopped).toEqual(["bg-1"]);
+
+			bridge.handle({ verb: "e", body: { ev: "action", id: "bg-output-close", act: "bg.close" } });
+			expect(replay(writes).has("bg-output")).toBe(false);
+			bridge.handle({ verb: "e", body: { ev: "action", id: "bg-work-agent-1", act: "bg.open", value: "agent-1" } });
+			expect(replay(writes).get("bg-output")?.p?.head).toBe("Agent agent-1 · running");
+			expect(bridge.escape()).toBe(false);
+			expect(replay(writes).has("bg-output")).toBe(false);
+		} finally {
+			removeRunningWork("bg-1");
+			removeRunningWork("agent-1");
+			bridge.close();
+		}
+	});
+
 	it("reloads the live named Tern stylesheet without sending a model prompt", async () => {
 		const writes: Writes = [];
 		let called = 0;
@@ -406,7 +475,7 @@ describe("Tern regions and dock structure", () => {
 		bridge.start();
 		await bridge.submit("/reload");
 		expect(called).toBe(1);
-		expect(writes.filter(w => w.startsWith(`${ESC}_tsp;s;`))).toHaveLength(4); // composer, startup, work, reloaded named sheet
+		expect(writes.filter(w => w.startsWith(`${ESC}_tsp;s;`))).toHaveLength(5); // composer, startup, work, markdown, reloaded named sheet
 		expect(textsUnder(writes, "main").join(" ")).toContain("Reloaded Pi resources");
 		bridge.close();
 	});
@@ -425,7 +494,7 @@ describe("Tern regions and dock structure", () => {
 		fake.emit({ type: "agent_end" });
 		await bridge.submit("/reload");
 		expect(called).toBe(1);
-		expect(writes.filter(w => w.startsWith(`${ESC}_tsp;s;`))).toHaveLength(3); // composer, startup, work
+		expect(writes.filter(w => w.startsWith(`${ESC}_tsp;s;`))).toHaveLength(4); // composer, startup, work, markdown
 		expect(textsUnder(writes, "main").join(" ")).toContain("reload failed: invalid resource");
 		bridge.close();
 	});

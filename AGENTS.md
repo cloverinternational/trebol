@@ -241,7 +241,7 @@ belongs in `packages/policy/policy`, and rendering belongs in the extension/rend
 | Tool(s) | Pi registration | Owning implementation / seam |
 | --- | --- | --- |
 | `bash` | `extensions/swarm-bash/extension.ts` | `.pi/lib/tools/swarm-bash.ts`; policy must gate execution separately. |
-| `Read`, `apply_patch`, `Undo` | `extensions/swarm-fs-tools/extension.ts` | `.pi/lib/tools/swarm-apply-patch.ts`, `.pi/lib/tools/swarm-read-image.ts`; filesystem boundary is an explicit decoupling seam. `apply_patch` follows pinned upstream Codex V4A semantics (parse, then validate with no writes, then sequential execution with no rollback; first-match context; per-line endings). Snapshots and `Undo` are a Trebol extension. Known exclusions and the oracle status are in `docs/parity/codex-apply-patch-audit.md`. Do not reintroduce atomicity or ambiguity-rejection claims. |
+| `Read`, `apply_patch` | `extensions/swarm-fs-tools/extension.ts` | `.pi/lib/tools/swarm-apply-patch.ts`, `.pi/lib/tools/swarm-read-image.ts`; filesystem boundary is an explicit decoupling seam. `apply_patch` follows pinned upstream Codex V4A semantics (parse, then validate with no writes, then sequential execution with no rollback; first-match context; per-line endings). There are no file snapshots or `Undo` tool (removed 2026-10-27: 1 call in 354 sessions, unbounded `.swarm/snapshots` growth); revert with git. Known exclusions and the oracle status are in `docs/parity/codex-apply-patch-audit.md`. Do not reintroduce atomicity or ambiguity-rejection claims. |
 | `Agent`, `AgentControl` | `extensions/swarm-agent-tools/extension.ts` | `packages/tools/agents/src/index.ts`, `packages/tools/agents/src/general-agent-adapter.ts`; child runner/session isolation lives in `packages/tools/agents`. |
 | `task_create`, `task_update`, `task_get`, `task_list`, `task_delete`, `task_claim`, `task_note`, `task_plan`, `task_complete`, `task_reopen`, `task_block`, `task_unblock`, `task_focus`, `task_unfocus`, `task_status`, `run_status` | `extensions/taskmanage/extension.ts`, `extensions/control-task-tools/extension.ts` | `packages/tools/taskmanage/src/task-manage.ts`, `packages/tools/taskmanage/src/workflow.ts`, `packages/tools/taskmanage/src/persistence.ts`, `packages/runtime/runtime-contracts/src/control-task.ts`; do not duplicate task state in extensions. |
 | `HistorySearch`, `HistoryGet` | `extensions/swarm-history-vault-tools/extension.ts` and `extensions/history-search/extension.ts` | `.pi/lib/tools/swarm-history-tools.ts` with shared `history-reader.ts`, `history-matching.ts`, and `history-admission.ts`; streaming history is read-only, resource-budgeted, redacted, and reports incomplete scans. See `docs/reference/history-search.md`. |
@@ -547,6 +547,11 @@ hand-drawn table. Tern 0.9.5 draws and *clocks* the parts that change every seco
   `shimmer` "Preparing next action"; the chips (`Activity` / `All steps` / `Collapse work`) live in **one**
   `row` (`tern.work-controls`), styled by `.pi/lib/tern/work-style.ts` — keep every selector inside Tern's
   subset (no `:has()`, no `~`, no leading region element).
+- Markdown callouts are theme-neutral: `.pi/lib/tern/markdown-style.ts` (sheet `markdown`) replaces Tern's
+  `--accent` fill with a `--l3` hairline and quiet icon; only warning/caution keep `--warn` on rule and icon.
+  Mermaid figures are one opaque `svg`, so diagram look is steered through the `mermaid` prompt section
+  (flowchart + labelled subgraphs and role shapes; no `architecture-beta`, `C4*` or `classDef` fills), not CSS.
+  Evidence and mockups: `ideas/tern-markdown/`.
 - Subagents are `agent` nodes in the background card (`stats.age`, `stats.tokens`, `task`), and a TaskManage
   batch is one `checklist` (a blocked operation is a `blocked` item whose `note` is its error). Only fields
   the running-work store and the batch really carry are sent; no invented progress, context or cost.
@@ -590,6 +595,41 @@ Tests: `npx vitest run .pi/test/tern/startup-session.test.ts .pi/test/tern/comma
 .pi/test/tern/dock.test.ts` and `node --experimental-strip-types tools/e2e/tern-durable-resume.mjs` (real
 SDK + real bridge; needs `PI_EXECUTABLE` pointing at an npm-installed Pi when the host Pi is a managed
 standalone build).
+
+### Composer input and native editing
+
+The runner's hello advertises `edit`, `undo` and `send` (`PI_TSP_FEATURES` in `.pi/lib/tern/tsp.ts`, the same
+set OMP sends), so Tern owns clicks, drags, double/triple clicks and ⌘A/Ctrl+A in **every** `editor`/`input`
+node Pi draws: the composer and an extension prompt's field (`ui-prompt-input`). Each such field must handle
+`edit` (drop it when `len` differs from its text: keys were in flight), `undo` and draw a selection with
+`anchor` (there is no `selection` prop). Text state is `DraftEditor` (`.pi/lib/tern/draft-edit.ts`;
+`spliceHostEdit` is the shared edit apply); a new natively edited field must use it too, or a selection
+replaced by typing is lost. `send` goes through `submit` only while the composer reports `sendable`.
+
+Keys: `.pi/lib/tern/keys.ts` maps pi-tui's editor bindings plus the PC chords Tern leaves to the program
+(Ctrl+←/→, Home/End, Ctrl+Home/End, Delete, Ctrl+Delete, Ctrl+Backspace = BS 0x08, Ctrl+U/K); kitty key
+releases are ignored. `PiTernBridge.applyEditKey` is the one dispatch for caret/delete/undo keys, used by
+`run.ts` and the e2e drivers. Windows: Tern writes terminal → program messages as OSC 877 (ST or BEL) through
+ConPTY and `splitInput` accepts both framings; `run.ts` enables VT input on win32. Ctrl+V reads go through
+`.pi/lib/tern/clipboard.ts` (pi-tui native, else wl-paste / xclip / xsel / PowerShell / pbpaste).
+
+Attachments (`.pi/lib/tern/attachments.ts`): copied files, a copied image (saved to a temp file), and files
+dropped on the pane become chips above the editor (`omp.composer.chips`), any mix at once, up to 20. The runner
+enables bracketed paste (`?2004h`, reset on exit) so Tern delivers a drop as one paste of shell-escaped
+absolute paths; `parseDroppedPaths` attaches a paste only when every token is an existing absolute path (also
+quoted, `file://`, `~/`, Windows backslash paths), so ordinary text stays text. Image chips draw a blob (sent
+before the frame, id = SHA-256) at its pixel size within 12ch × 4lines. Remove one with its × or the chip's
+`remove-attachment` menu action; ⌫ on an empty draft takes back the last; Ctrl+C clears all. A submit sends images
+as Pi `images` (`session.prompt(text, { images })`; a model whose `input` lacks `image` gets paths instead) and
+other files as an `Attached files:` path list; attachments alone are a valid submit; queued follow-ups carry them.
+
+Diagnose input with `PI_TERN_INPUT_LOG=<file>` (raw keys and TSP events per read). Tests:
+`npx vitest run .pi/test/tern/native-edit.test.ts .pi/test/tern/platform-input.test.ts
+.pi/test/tern/clipboard.test.ts .pi/test/tern/attachments.test.ts` (the hello test runs the real runner on a pty via
+`.pi/test/tern/fixtures/pty-hello.py`) and `node --experimental-strip-types tools/e2e/tern-draft-editing.mjs`.
+Live: `tern serve --control <sock>` then `tern ctl --control <sock>` `run`, `click`, `dblclick`,
+`down`/`move`/`up`, `key`, `type "…"`, `drop .sf-editor file A file B`, `shot <name>` and `tree .sf-editor`
+(a `selecting` class means a drawn selection).
 
 ## Validation
 

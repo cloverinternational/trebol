@@ -425,7 +425,7 @@ describe("turn line and running-work bar announce each piece of work once", () =
 		// Ctrl+B / auto-background: the call returns, so the turn line no longer counts it, and the bar shows it.
 		patchRunningWork("bash-1", { foreground: false });
 		session.emit({ type: "tool_execution_end", toolCallId: "c1", toolName: "Bash", result: { content: [{ type: "text", text: "moved to background" }] }, isError: false });
-		expect(view()).toEqual({ line: ["working · build"], bar: ["bg-work-bash-1"] });
+		expect(view()).toEqual({ line: ["working · build"], bar: ["bg-work-bash-1-line"] });
 		bridge.close?.();
 	});
 });

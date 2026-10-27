@@ -148,9 +148,10 @@ export class SwarmAgentTools {
     });
     const entry: Entry = { id, task, startedAt: Date.now(), outputFile: file, handle, delegate, foreground, done: undefined! };
     writeFileSync(metadataPath(id), JSON.stringify({ id, task, startedAt: entry.startedAt, delegate, cwd: this.cwd, sessionId: this.activeSessionId }) + "\n");
-    setRunningWork({ id, kind: "subagent", label: delegate ? `Delegate ${id}` : `Agent ${id}`, status: "running", startedAt: entry.startedAt, detail: task, foreground });
+    const stop = () => { handle.cancel(); };
+    setRunningWork({ id, kind: "subagent", label: delegate ? `Delegate ${id}` : `Agent ${id}`, status: "running", startedAt: entry.startedAt, detail: task, stop, foreground });
     const ownsSession = this.captureCompletionOwner?.() ?? (() => true);
-    const transcriptSink = (agentId: string, path: string) => { if (agentId === id) { entry.transcriptPath = path; if (ownsSession()) setRunningWork({ id, kind: "subagent", label: delegate ? `Delegate ${id}` : `Agent ${id}`, status: "running", startedAt: entry.startedAt, detail: task, transcriptPath: path, foreground: entry.foreground }); } };
+    const transcriptSink = (agentId: string, path: string) => { if (agentId === id) { entry.transcriptPath = path; if (ownsSession()) setRunningWork({ id, kind: "subagent", label: delegate ? `Delegate ${id}` : `Agent ${id}`, status: "running", startedAt: entry.startedAt, detail: task, transcriptPath: path, stop, foreground: entry.foreground }); } };
     const removeTranscriptSink = this.manager.addTranscriptSink(transcriptSink);
     entry.done = handle.wait().then(async result => {
       removeTranscriptSink();

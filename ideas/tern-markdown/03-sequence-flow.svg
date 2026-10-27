@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="520" viewBox="0 0 980 520">
+<style>
+  :root{--page:#fbfbfa;--card:#ffffff;--t1:#1b1c20;--t2:#55575f;--t3:#6a6c74;--l1:rgba(27,28,32,.06);--l2:rgba(27,28,32,.12);--l3:rgba(27,28,32,.22);--l4:rgba(27,28,32,.45);--warn:#d98a0b;--dot:rgba(27,28,32,.10)}
+  @media (prefers-color-scheme: dark){:root{--page:#0f0f12;--card:#161619;--t1:#ededed;--t2:#a1a1a1;--t3:#8a8a92;--l1:rgba(255,255,255,.07);--l2:rgba(255,255,255,.12);--l3:rgba(255,255,255,.22);--l4:rgba(255,255,255,.45);--warn:#f5a524;--dot:rgba(255,255,255,.07)}}
+  text{font-family:"Berkeley Mono",ui-monospace,"SF Mono",Menlo,monospace;fill:var(--t1)}
+  .sans{font-family:Geist,-apple-system,"SF Pro Text",system-ui,sans-serif}
+  .h{font-size:15px;font-weight:600}.s{font-size:12px}.xs{font-size:10.5px;fill:var(--t3)}.cap{font-size:10px;letter-spacing:.08em;fill:var(--t3)}
+  .page{fill:var(--page)}.node{fill:var(--card);stroke:var(--l4);stroke-width:1.2}
+  .bound{fill:none;stroke:var(--l3);stroke-width:1;stroke-dasharray:4 3}
+  .edge{fill:none;stroke:var(--t2);stroke-width:1.3}.hot{stroke:var(--t1);stroke-width:2.2}.async{stroke-dasharray:5 4}
+  .rule{stroke:var(--l3);stroke-width:2}.warnrule{stroke:var(--warn);stroke-width:2}
+  .ic{fill:none;stroke:var(--t2);stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round}
+  .step{fill:var(--t1)}.stepn{fill:var(--page);font-size:10px;font-weight:700}
+</style>
+<defs>
+  <pattern id="dots" width="14" height="14" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1" fill="var(--dot)"/></pattern>
+  <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,1 L9,5 L0,9 z" fill="var(--t2)"/></marker>
+  <marker id="arrh" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,1 L9,5 L0,9 z" fill="var(--t1)"/></marker>
+</defs>
+<rect class="page" width="980" height="520"/>
+<text x="32" y="38" class="h sans">Sequence view for "what happens when…" answers</text>
+<text x="32" y="58" class="xs sans">Lifelines grouped by boundary; activation bars show who holds the turn; the async return is dashed. No fills beyond --card.</text>
+<rect x="24" y="76" width="932" height="420" rx="12" fill="url(#dots)" stroke="var(--l2)"/>
+<rect x="44" y="92" width="200" height="390" rx="8" class="bound"/><text x="56" y="108" class="cap">CLIENT</text>
+<rect x="264" y="92" width="440" height="390" rx="8" class="bound"/><text x="276" y="108" class="cap">TREBOL RUNTIME</text>
+<rect x="724" y="92" width="212" height="390" rx="8" class="bound"/><text x="736" y="108" class="cap">EXTERNAL</text>
+<g class="s">
+<rect x="84" y="120" width="120" height="34" rx="17" class="node"/><text x="122" y="142">Tern</text>
+<rect x="294" y="120" width="160" height="34" rx="6" class="node"/><text x="316" y="142">PiTernBridge</text>
+<rect x="514" y="120" width="160" height="34" rx="6" class="node"/><text x="530" y="142">AgentSession</text>
+<rect x="754" y="120" width="160" height="34" rx="6" class="node" stroke-dasharray="5 3"/><text x="778" y="142">Provider</text>
+</g>
+<g stroke="var(--l3)" stroke-dasharray="2 4"><line x1="144" y1="154" x2="144" y2="470"/><line x1="374" y1="154" x2="374" y2="470"/><line x1="594" y1="154" x2="594" y2="470"/><line x1="834" y1="154" x2="834" y2="470"/></g>
+<g fill="var(--card)" stroke="var(--l4)"><rect x="368" y="184" width="12" height="250" rx="2"/><rect x="588" y="224" width="12" height="190" rx="2"/><rect x="828" y="264" width="12" height="90" rx="2"/></g>
+<g class="xs">
+<path d="M144,190 H366" class="edge hot" marker-end="url(#arrh)"/><text x="160" y="184">1 · submit draft (TSP e)</text>
+<path d="M380,230 H586" class="edge hot" marker-end="url(#arrh)"/><text x="392" y="224">2 · session.prompt(text)</text>
+<path d="M600,270 H826" class="edge hot" marker-end="url(#arrh)"/><text x="612" y="264">3 · POST /messages (stream)</text>
+<path d="M828,320 H602" class="edge async" marker-end="url(#arr)"/><text x="640" y="314">4 · token deltas</text>
+<path d="M586,370 H382" class="edge async" marker-end="url(#arr)"/><text x="400" y="364">5 · message_update events</text>
+<path d="M366,420 H146" class="edge async" marker-end="url(#arr)"/><text x="160" y="414">6 · md node, stream:true → false</text>
+</g>
+<text x="32" y="512" class="xs sans">Mermaid equivalent: sequenceDiagram with box "Client" … end groups, activate/deactivate, and -->> for async returns.</text>
+</svg>

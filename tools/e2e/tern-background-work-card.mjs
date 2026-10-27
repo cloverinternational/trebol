@@ -66,7 +66,7 @@ export default function bgCardProbe(pi: any) {
   const many = writes.slice(manyFrames).join("");
   assert.ok(many.includes("Background work · 6 running"), "card head counts all six live items");
   assert.ok(many.includes("+1 more · /work"), "card reports the one row over the five-row cap");
-  assert.equal((many.match(/"id":"bg-work-[^"]+","k":"row"/g) ?? []).length, 5, "card renders exactly five rows");
+  assert.equal(new Set(many.match(/"id":"bg-work-[^"]+","k":"row","p":\{"role":"pi\.background\.row"/g) ?? []).size, 5, "card renders exactly five rows");
   // Subagent rows come from the same store the agent runtime writes (swarm-agent-tools.ts setRunningWork); this checks the card, not a model run.
   setRunningWork({ id: "agent-probe", kind: "subagent", label: "Agent agent-probe", status: "running", startedAt: Date.now() - 4000, detail: "Review the parser" });
   await new Promise((r) => setTimeout(r, 300));

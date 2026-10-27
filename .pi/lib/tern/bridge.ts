@@ -5,6 +5,7 @@
 // (select, confirm, input, editor, notify, text widgets) are answered by native Tern dialogs (ext-ui.ts),
 // so every extension command works without per-command code. They resolve only from user action.
 import { onRunningWorkChange, runningWorkSnapshot, type RunningWorkItem } from "../ui/running-work-store.ts";
+import { readSubagentConversationCached } from "../ui/running-work-view.ts";
 import {
 	autocompleteCommands,
 	EMPTY_COMMAND_SOURCE,
@@ -24,21 +25,26 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { readGitFacts } from "./git-facts.ts";
 import { PI_COMPOSER_CSS } from "./composer-style.ts";
 import { TERN_WORK_CSS } from "./work-style.ts";
+import { TERN_MARKDOWN_CSS } from "./markdown-style.ts";
 import { projectTaskView, type TaskView, type TaskViewRow, type TaskViewSessionManager } from "./task-view.ts";
 import { buildBoard } from "./task-board.ts";
 import { ASK_OPTIONS_ID, TernAskDialog, type AskEventBus } from "./ask-dialog.ts";
 import { TernBtwCard } from "./btw-card.ts";
-import { TernExtensionUI, UI_PROMPT_LIST_ID } from "./ext-ui.ts";
+import { TernExtensionUI, UI_PROMPT_INPUT_ID, UI_PROMPT_LIST_ID } from "./ext-ui.ts";
+import { createClipboard, imageExtension } from "./clipboard.ts";
+import type { KeyEffect } from "./keys.ts";
 import { AUTOCOMPLETE_ID, SlashAutocomplete, type Edit } from "./autocomplete.ts";
 import { expandMentions } from "./mentions.ts";
 import { activityView, currentTaskLine, MAX_ACTIVE_STEPS, rowLine, stepHead, type CurrentTask } from "./work-summary.ts";
 import { goalLine, isAbortedAssistant, isCancellationError, isFailedAssistant, isTurnBoundary, liveLineText, SETTLED_LABEL, segmentTranscript, summarizeToolGroup } from "./turn-groups.ts";
-import { DraftEditor, isLargePaste } from "./draft-edit.ts";
+import { DraftEditor, isLargePaste, type HostEdit } from "./draft-edit.ts";
+import { ATTACHMENT_LIMITS, ATTACHMENT_REMOVE, attachmentChips, attachmentFromNodeId, attachmentPayload, attachmentSummary, loadAttachment, parseDroppedPaths, type Attachment, type ImageContentLike } from "./attachments.ts";
 import { getNativeClipboard } from "@earendil-works/pi-tui";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { extractBashDisplayText } from "../tools/swarm-bash.ts";
+import { queueGroups, queueNodes } from "./queue-view.ts";
 
 export interface PiEventLike {
 	type: string;
@@ -47,7 +53,7 @@ export interface PiEventLike {
 
 export interface PiSessionLike {
 	subscribe(listener: (event: PiEventLike) => void): () => void;
-	prompt(text: string, options?: { streamingBehavior?: "steer" | "followUp" }): Promise<void>;
+	prompt(text: string, options?: { streamingBehavior?: "steer" | "followUp"; images?: ImageContentLike[] }): Promise<void>;
 	clearQueue?(): { steering: string[]; followUp: string[] };
 	abort(): Promise<void>;
 	dispose(): void;
@@ -1010,6 +1016,44 @@ function backgroundWorkTitle(item: RunningWorkItem): string {
 	try { latest = (item.readOutput?.() ?? item.output ?? "").split("\n").filter((line) => line.trim()).at(-1) ?? ""; } catch { latest = ""; }
 	return [item.label, item.detail, latest ? `last output: ${boundedChars(latest, 120)}` : ""].filter(Boolean).join("\n");
 }
+const BACKGROUND_OUTPUT_LINES = 200;
+const BACKGROUND_OUTPUT_STEPS = 8;
+// While the output view is open its body is re-read on this cadence: output growth does not touch the store.
+const BACKGROUND_OUTPUT_REFRESH_MS = 500;
+const backgroundWorkLive = (item: RunningWorkItem) => item.status === "queued" || item.status === "running";
+/** The output sheet for one background item: live bash output, or a subagent's recent conversation steps. */
+export function backgroundWorkOutputNodes(item: RunningWorkItem | undefined): TspNode[] {
+	const dismiss: TspNode = { id: "bg-output-dismiss", k: "text", p: { role: "pi.background.dismiss", text: "", grow: 1, min: { w: "100%", h: "100%" }, actions: { click: "bg.close" } } };
+	if (!item) return [dismiss, { id: "bg-output", k: "overlay", p: { head: "Background work", size: "lg", role: "pi.background.output" }, c: [
+		{ id: "bg-output-gone", k: "text", p: { text: "This work is no longer tracked.", tone: "muted" } },
+	] }];
+	const live = backgroundWorkLive(item);
+	const controls: TspNode[] = [];
+	if (live && item.stop) controls.push({ id: "bg-output-stop", k: "text", p: { role: "pi.background.stop", spans: [{ t: "■ Stop", s: "error" }], aria: `Stop ${item.label}`, actions: { click: `bg.stop=${item.id}` } } });
+	controls.push({ id: "bg-output-close", k: "text", p: { role: "pi.background.close", spans: [{ t: "Close", s: "muted" }], actions: { click: "bg.close" } } });
+	const body: TspNode[] = [
+		{ id: "bg-output-controls", k: "row", p: { gap: "md", align: "center" }, c: controls },
+		{ id: "bg-output-detail", k: "text", p: { text: item.detail, tone: "muted" } },
+	];
+	if (item.kind === "subagent") {
+		const steps = item.transcriptPath ? readSubagentConversationCached(item.transcriptPath) : undefined;
+		if (steps?.length) {
+			const shown = steps.slice(-BACKGROUND_OUTPUT_STEPS);
+			if (steps.length > shown.length) body.push({ id: "bg-output-earlier", k: "text", p: { text: `… ${steps.length - shown.length} earlier steps`, tone: "muted" } });
+			shown.forEach((step, i) => {
+				body.push({ id: `bg-output-step-${i}-title`, k: "text", p: { spans: [{ t: step.title, s: "accent" }] } });
+				if (step.body) body.push({ id: `bg-output-step-${i}-body`, k: "code", p: { text: step.body, wrap: true } });
+			});
+		} else body.push({ id: "bg-output-text", k: "code", p: { text: item.output || (live ? "No conversation yet." : "No output."), wrap: true } });
+	} else {
+		let output = "";
+		try { output = (live ? item.readOutput?.() : undefined) ?? item.output ?? ""; } catch { output = item.output ?? ""; }
+		body.push({ id: "bg-output-text", k: "code", p: { text: output ? tailWindow(output, BACKGROUND_OUTPUT_LINES) : live ? "(no output yet)" : "(no output)", wrap: true } });
+	}
+	return [dismiss, { id: "bg-output", k: "overlay", p: { head: `${boundedChars(item.label, BACKGROUND_WORK_LABEL_CHARS)} · ${item.status}`, size: "lg", role: "pi.background.output" }, c: [
+		{ id: "bg-output-body", k: "col", p: { gap: "sm" }, c: body },
+	] }];
+}
 
 export class PiTernBridge {
 	#session: PiSessionLike;
@@ -1028,6 +1072,9 @@ export class PiTernBridge {
 	// Bumped on every Git view navigation, session change and close; a diff read lands only if it is still the latest.
 	#gitRequest = 0;
 	#gitRefs: GitFileRef[] = [];
+	// Background item whose output sheet is open, and the timer that keeps its output fresh.
+	#workViewId: string | undefined;
+	#workViewTimer: ReturnType<typeof setInterval> | undefined;
 	readonly #onClose?: () => void;
 	readonly #onEventTap?: (event: PiEventLike) => void;
 	readonly #onRenderTap?: (nodes: readonly TspNode[], trigger: string, busy: boolean) => void;
@@ -1050,6 +1097,8 @@ export class PiTernBridge {
 	readonly #editor = new DraftEditor();
 	#queuedSteering: string[] = [];
 	#queuedFollowUp: string[] = [];
+	// Pi's queue holds the mention-expanded text it was sent; the band and Edit show what was typed.
+	#queuedTyped = new Map<string, string>();
 	#model: string | undefined;
 	#modelPickerOpen = false;
 	#treePickerOpen = false;
@@ -1074,16 +1123,17 @@ export class PiTernBridge {
 	#columns = 100;
 	readonly #ui: TernExtensionUI;
 	readonly #clipboard: NonNullable<BridgeOptions["clipboard"]>;
+	// Images and files waiting above the composer for the next submit (attachments.ts).
+	#attachments: Attachment[] = [];
+	#attachmentSeq = 0;
 
 	constructor(session: PiSessionLike, options: BridgeOptions) {
 		this.#session = session;
 		this.#write = options.write;
 		this.#clipboard = options.clipboard ?? {
-			filePaths: async () => getNativeClipboard()?.getFilePaths?.(),
-			image: async () => getNativeClipboard()?.getImage(),
-			text: async () => getNativeClipboard()?.getText(),
+			...createClipboard({ platform: process.platform, env: process.env, native: getNativeClipboard }),
 			saveImage: (bytes) => {
-				const path = join(tmpdir(), `pi-clipboard-${randomUUID()}.png`);
+				const path = join(tmpdir(), `pi-clipboard-${randomUUID()}.${imageExtension(bytes)}`);
 				writeFileSync(path, bytes);
 				return path;
 			},
@@ -1174,6 +1224,7 @@ export class PiTernBridge {
 		this.#surface.stylesheet("composer", PI_COMPOSER_CSS);
 		this.#surface.stylesheet("startup", STARTUP_CSS);
 		this.#surface.stylesheet("work", TERN_WORK_CSS);
+		this.#surface.stylesheet("markdown", TERN_MARKDOWN_CSS);
 		// The blob precedes any frame that references it, as with artifact previews.
 		for (const chunk of encodeTspBlob(this.#logo.id, this.#logo.mime, this.#logo.base64)) this.#write(chunk);
 		this.#loadRepo();
@@ -1242,6 +1293,7 @@ export class PiTernBridge {
 		if (event.type === "queue_update") {
 			this.#queuedSteering = Array.isArray(event.steering) ? event.steering.filter((text): text is string => typeof text === "string") : [];
 			this.#queuedFollowUp = Array.isArray(event.followUp) ? event.followUp.filter((text): text is string => typeof text === "string") : [];
+			if (!this.#queuedSteering.length && !this.#queuedFollowUp.length) this.#queuedTyped.clear();
 		}
 		if (event.type === "agent_start") {
 			this.#busy = true;
@@ -1274,10 +1326,13 @@ export class PiTernBridge {
 		const window = typeof usage?.contextWindow === "number" && usage.contextWindow > 0 ? usage.contextWindow : undefined;
 		const tokens = typeof usage?.tokens === "number" && Number.isFinite(usage.tokens) ? usage.tokens : null;
 		const compactAt = window !== undefined ? compactionPercent(this.#session, window) : undefined;
-		return [...work, ...this.#ui.widgetNodes("aboveEditor"), ...composerNodes({
+		const typed = (text: string) => this.#queuedTyped.get(text) ?? text;
+		const queue = queueNodes(queueGroups(this.#queuedSteering.map(typed), this.#queuedFollowUp.map(typed)));
+		return [...work, ...queue, ...this.#ui.widgetNodes("aboveEditor"), ...composerNodes({
 			draft: this.#draft,
 			cursor: this.#editor.cursor,
-			selection: this.#editor.selection,
+			anchor: this.#editor.anchor,
+			sendable: this.#composerSendable(),
 			ghost: this.#complete.ghost,
 			busy: this.#busy,
 			// Tern counts this on from the value it receives, so the turn clock needs no frame per second.
@@ -1290,6 +1345,7 @@ export class PiTernBridge {
 			effortKind: this.#kinds.includes("effort"),
 			git: this.#git,
 			cost: costOf(this.#session),
+			...(this.#attachments.length ? { chips: attachmentChips(this.#attachments) } : {}),
 		}, this.#taskTop()), ...this.#ui.widgetNodes("belowEditor")];
 	}
 
@@ -1344,6 +1400,35 @@ export class PiTernBridge {
 	}
 
 	// The status overlay: a list of changed files, then one file's diff. Clicks carry indexes into the list last rendered.
+	#openWorkView(id: string): void {
+		if (!runningWorkSnapshot().some((item) => item.id === id)) return;
+		this.#workViewId = id;
+		clearInterval(this.#workViewTimer);
+		this.#workViewTimer = setInterval(() => {
+			const item = runningWorkSnapshot().find((entry) => entry.id === this.#workViewId);
+			if (item && backgroundWorkLive(item)) this.#render();
+		}, BACKGROUND_OUTPUT_REFRESH_MS);
+		this.#workViewTimer.unref?.();
+		this.#render();
+	}
+
+	#closeWorkView(): void {
+		clearInterval(this.#workViewTimer);
+		this.#workViewTimer = undefined;
+		this.#workViewId = undefined;
+		this.#render();
+	}
+
+	// Stops only work that is still running and still offers a stop; the writer then settles the item in the store.
+	#stopWork(id: string): void {
+		const item = runningWorkSnapshot().find((entry) => entry.id === id);
+		if (!item || !backgroundWorkLive(item) || !item.stop) return;
+		try { item.stop(); } catch (error) {
+			this.#projector.add("system", `Could not stop ${item.label}: ${error instanceof Error ? error.message : String(error)}`);
+		}
+		this.#render();
+	}
+
 	#openGitView(): void {
 		if (!this.#repo?.git) return;
 		this.#gitRequest++;
@@ -1394,6 +1479,7 @@ export class PiTernBridge {
 	// The slash autocomplete is OMP's caret-anchored list; keys stay
 	// in the editor and the bridge routes ↑/↓, Tab, Enter and Esc to it.
 	#layer(): TspNode[] {
+		if (this.#workViewId !== undefined) return backgroundWorkOutputNodes(runningWorkSnapshot().find((item) => item.id === this.#workViewId));
 		if (this.#gitView && this.#repo?.git) {
 			// The dismiss layer sits under the card, so a click outside the card closes the view.
 			const dismiss = gitDismissNode();
@@ -1567,7 +1653,12 @@ export class PiTernBridge {
 	#backgroundWork(now = Date.now()): TspNode[] {
 		const live = runningWorkSnapshot().filter((item) => (item.status === "queued" || item.status === "running") && item.foreground !== true);
 		if (!live.length) return [];
-		const rows: TspNode[] = live.slice(0, BACKGROUND_WORK_MAX_ROWS).map((item) => item.kind === "subagent"
+		// Clicking a row opens its output sheet. The x stops work that still runs; it is a sibling of the
+		// clickable part, never nested in it, so one click runs exactly one action.
+		const stopNode = (item: RunningWorkItem): TspNode[] => item.stop
+			? [{ id: `bg-work-${item.id}-stop`, k: "text", p: { role: "pi.background.stop", spans: [{ t: "×", s: "error" }], aria: `Stop ${item.label}`, title: "Stop", wrap: "none", actions: { click: `bg.stop=${item.id}` } } }]
+			: [];
+		const rows: TspNode[] = live.slice(0, BACKGROUND_WORK_MAX_ROWS).map((item): TspNode => ({ id: `bg-work-${item.id}-line`, k: "row", p: { role: "pi.background.line", gap: "sm", align: "center" }, c: [item.kind === "subagent"
 			// A subagent is a worker, so Tern draws it as one: a live pulse, its assignment, its own clock and its
 			// token count. Only fields the running-work store really carries are sent.
 			? {
@@ -1578,15 +1669,17 @@ export class PiTernBridge {
 					task: item.detail,
 					status: "running",
 					stats: { age: Math.max(0, now - item.startedAt), ...(item.tokens ? { tokens: item.tokens } : {}) },
+					grow: 1,
+					actions: { click: `bg.open=${item.id}` },
 				},
 			}
 			: {
-				id: `bg-work-${item.id}`, k: "row", p: { role: "pi.background.row", gap: "sm", align: "center", title: backgroundWorkTitle(item) }, c: [
+				id: `bg-work-${item.id}`, k: "row", p: { role: "pi.background.row", gap: "sm", align: "center", grow: 1, title: backgroundWorkTitle(item), actions: { click: `bg.open=${item.id}` } }, c: [
 					{ id: `bg-work-${item.id}-mark`, k: "text", p: { role: "pi.background.mark", text: "$", tone: "accent", wrap: "none" } },
 					{ id: `bg-work-${item.id}-label`, k: "text", p: { text: backgroundWorkLabel(item), wrap: "none" } },
 					{ id: `bg-work-${item.id}-time`, k: "elapsed", p: { age: Math.max(0, now - item.startedAt) } },
 				],
-			});
+			}, ...stopNode(item)] }));
 		if (live.length > BACKGROUND_WORK_MAX_ROWS) rows.push({ id: "bg-work-more", k: "text", p: { role: "pi.background.more", text: `+${live.length - BACKGROUND_WORK_MAX_ROWS} more · /work`, wrap: "none", tone: "muted" } });
 		return [{ id: "background-work", k: "card", p: { head: `Background work · ${live.length} running`, status: "running", tone: "accent", role: "pi.background" }, c: rows }];
 	}
@@ -1750,41 +1843,90 @@ export class PiTernBridge {
 		this.moveCursor(delta < 0 ? -1 : 1, false, false);
 	}
 
-	moveCursor(direction: -1 | 1, word: boolean, extend: boolean): void {
+	moveCursor(direction: -1 | 1, word: boolean, extend: boolean, line = false): void {
+		this.#editField((field) => field.move(direction, { word, extend, line }), { kind: "set" });
+	}
+
+	// One caret/delete/undo operation on the field that owns the caret: an open extension text prompt, else
+	// the composer. Nothing while an ask dialog or a picker owns the keys.
+	#editField(op: (field: DraftEditor) => void, edit: Edit): void {
 		if (this.#closed) return;
-		if (this.#ui.active || this.#dialog?.active || this.#modelPickerOpen || this.#treePickerOpen) return;
-		this.#editDraft(() => this.#editor.move(direction, { word, extend }), { kind: "set" });
+		if (this.#ui.active) {
+			this.#ui.editText(op);
+			return;
+		}
+		if (this.#dialog?.active || this.#modelPickerOpen || this.#treePickerOpen) return;
+		this.#editDraft(() => op(this.#editor), edit);
+	}
+
+	// The caret, selection, delete and undo effects of keys.ts, shared by run.ts and the e2e drivers so the key
+	// path has one dispatch. Returns false for effects that are not plain text editing.
+	applyEditKey(effect: KeyEffect): boolean {
+		switch (effect.kind) {
+			case "cursor": this.moveCursor(effect.direction, effect.word, effect.extend, effect.line); return true;
+			case "selectAll": this.selectAllDraft(); return true;
+			case "undo": this.undoDraft(); return true;
+			case "deleteWord": this.deleteWordDraft(); return true;
+			case "deleteForward": this.#editField((field) => field.deleteForward({ word: effect.word }), { kind: "backspace" }); return true;
+			case "deleteToEdge": this.#editField((field) => field.deleteToEdge(effect.direction), { kind: "backspace" }); return true;
+			default: return false;
+		}
 	}
 
 	selectAllDraft(): void {
-		if (this.#ui.active || this.#dialog?.active || this.#modelPickerOpen || this.#treePickerOpen) return;
-		this.#editDraft(() => this.#editor.selectAll(), { kind: "set" });
+		this.#editField((field) => field.selectAll(), { kind: "set" });
+	}
+
+	// The composer takes Tern's `send` only when nothing else owns Enter; otherwise Tern holds the prompt.
+	#composerSendable(): boolean {
+		return !this.#closed && !this.#ui.active && !this.#dialog?.active && !this.#btw?.active && !this.#modelPickerOpen && !this.#treePickerOpen;
+	}
+
+	// Tern's atomic `send` goes through the normal submit path but is not the user's draft: a half-typed
+	// draft survives it.
+	#sendFromTern(text: string): Promise<void> {
+		const draft = this.#editor.text;
+		const result = this.submit(text);
+		if (draft && this.#editor.text !== draft) this.#writeDraft(draft, null);
+		return result;
+	}
+
+	// Tern's native editing on the composer: a click placing the caret, a drag/double-click/⌘A selection
+	// replaced by typing, ⌫, ⌘X or a paste, or a drawn-line ↑/↓/Home/End move. A stale event (keys in
+	// flight) is dropped, as the protocol asks.
+	applyNativeEdit(edit: HostEdit): void {
+		if (this.#closed || this.#ui.active || this.#dialog?.active || this.#btw?.active || this.#modelPickerOpen || this.#treePickerOpen) return;
+		const inserted = typeof edit.text === "string" ? edit.text : "";
+		const removed = edit.from !== edit.to;
+		const kind: Edit = inserted && !removed ? { kind: "type", text: inserted } : !inserted && removed ? { kind: "backspace" } : { kind: "set" };
+		if (!this.#editor.applyHostEdit(edit)) return;
+		this.#render();
+		void this.#complete.edited(kind);
 	}
 
 	// Ctrl/Cmd+Z on the composer. Undo can restore text a submit cleared.
 	undoDraft(): void {
-		if (this.#ui.active || this.#dialog?.active || this.#modelPickerOpen || this.#treePickerOpen) return;
-		this.#editDraft(() => this.#editor.undo(), { kind: "set" });
+		this.#editField((field) => field.undo(), { kind: "set" });
 	}
 
 	deleteWordDraft(): void {
-		if (this.#ui.active || this.#dialog?.active || this.#modelPickerOpen || this.#treePickerOpen) return;
-		this.#editDraft(() => this.#editor.deleteWordBackward(), { kind: "backspace" });
+		this.#editField((field) => field.deleteWordBackward(), { kind: "backspace" });
 	}
 
-	// Read clipboard text through Pi's cross-platform clipboard helper.
+	// Ctrl+V through Pi's cross-platform clipboard helper: copied files and a copied image become attachment
+	// chips (any mix, several at once); otherwise the text is pasted.
 	async pasteClipboard(): Promise<void> {
 		if (this.#closed || this.#ui.active || this.#dialog?.active || this.#modelPickerOpen || this.#treePickerOpen) return;
 		const paths = await this.#clipboard.filePaths().catch(() => null);
 		if (paths?.length) {
-			this.appendDraft(paths.join(" "));
+			this.attachPaths(paths);
 			return;
 		}
 		const image = await this.#clipboard.image().catch(() => null);
 		if (image?.length) {
 			const path = this.#clipboard.saveImage?.(image);
 			if (!path) return;
-			this.appendDraft(path);
+			this.attachPaths([path]);
 			return;
 		}
 		const text = await this.#clipboard.text().catch(() => null);
@@ -1793,15 +1935,50 @@ export class PiTernBridge {
 		}
 	}
 
-	// Bracketed or clipboard paste. Large text becomes a marker that expands on submit; small text is flattened to
-	// one line, so embedded newlines never submit.
+	// Bracketed or clipboard paste. A paste that is only existing absolute paths (what Tern and other terminals
+	// write for files dropped on the pane) attaches them. Large text becomes a marker that expands on submit;
+	// small text is flattened to one line, so embedded newlines never submit.
 	pasteText(text: string): void {
 		const normalized = text.replace(/\r\n?/g, "\n");
+		const composer = !this.#ui.active && !this.#dialog?.active && !this.#btw?.active && !this.#modelPickerOpen && !this.#treePickerOpen;
+		const dropped = composer ? parseDroppedPaths(normalized) : null;
+		if (dropped) {
+			this.attachPaths(dropped);
+			return;
+		}
 		if (!isLargePaste(normalized) || this.#ui.active || this.#dialog?.active || this.#modelPickerOpen || this.#treePickerOpen) {
 			this.appendDraft(normalized.replace(/\n/g, " "));
 			return;
 		}
 		this.#editDraft(() => this.#editor.insertPaste(normalized), { kind: "set" });
+	}
+
+	// Adds files as composer attachments: images carry a blob, sent to Tern before the frame that draws it.
+	// A path already attached is not added twice; past the limit the rest are reported, not dropped silently.
+	attachPaths(paths: readonly string[]): void {
+		if (this.#closed) return;
+		const skipped: string[] = [];
+		for (const path of paths) {
+			if (this.#attachments.some((a) => a.path === path)) continue;
+			if (this.#attachments.length >= ATTACHMENT_LIMITS.maxAttachments) { skipped.push(`${path} (limit of ${ATTACHMENT_LIMITS.maxAttachments} attachments)`); continue; }
+			const attachment = loadAttachment(path, this.#attachmentSeq + 1);
+			if (!attachment) { skipped.push(`${path} (not found)`); continue; }
+			this.#attachmentSeq++;
+			if (attachment.blob) for (const chunk of encodeTspBlob(attachment.blob.id, attachment.blob.mime, attachment.blob.base64)) this.#write(chunk);
+			this.#attachments.push(attachment);
+		}
+		if (skipped.length) this.#projector.add("system", `not attached: ${skipped.join(", ")}`);
+		this.#render();
+	}
+
+	get attachments(): readonly Attachment[] {
+		return this.#attachments;
+	}
+
+	removeAttachment(n: number): void {
+		const before = this.#attachments.length;
+		this.#attachments = this.#attachments.filter((a) => a.n !== n);
+		if (this.#attachments.length !== before) this.#render();
 	}
 
 	// Shift+Enter: a newline in an open multi-line prompt; the composer is single-line.
@@ -1819,17 +1996,25 @@ export class PiTernBridge {
 		if (this.#ui.active) return this.#ui.backspace();
 		if (this.#btw?.active) return this.#btw.backspace();
 		if (this.#dialog?.active) return this.#dialog.backspace();
+		// ⌫ in an empty composer takes back the last attachment, as in OMP's composer.
+		if (!this.#editor.text && this.#attachments.length) return this.removeAttachment(this.#attachments.at(-1)!.n);
 		this.#editDraft(() => this.#editor.backspace(), { kind: "backspace" });
 	}
 
-	// Pi's app.clear (Ctrl+C) clears only the editor; it does not cancel a turn.
+	// Pi's app.clear (Ctrl+C) clears only the editor (its text and attachments); it does not cancel a turn.
 	clearDraft(): void {
+		if (this.#attachments.length) { this.#attachments = []; if (!this.#draft) this.#render(); }
 		if (this.#draft) this.setDraft("");
 	}
 
 	// Escape: dismiss transient UI, cancel a running turn, or clear non-empty input before idle double-Escape.
 	// Returns true only when the configured `none` action closes the Tern surface.
 	escape(): boolean {
+		if (this.#workViewId !== undefined) {
+			this.#closeWorkView();
+			this.#lastEligibleEscapeAt = 0;
+			return false;
+		}
 		if (this.#gitView) {
 			this.#gitRequest++;
 			this.#gitView = this.#gitView.mode === "diff" ? { mode: "list" } : undefined;
@@ -1904,6 +2089,34 @@ export class PiTernBridge {
 	// Routes one parsed TSP message. Returns the promise of any submitted prompt, for tests.
 	handle(msg: TspMessage): Promise<void> | undefined {
 		if (this.#closed) return undefined;
+		// Native editing (hello features edit/undo/send) on the composer and an extension prompt's text field,
+		// the two editor/input fields Pi draws. Each event goes to the field it names.
+		if (msg.verb === "e" && msg.body.id === UI_PROMPT_INPUT_ID) {
+			if (msg.body.ev === "edit") this.#ui.applyNativeEdit(msg.body as unknown as HostEdit);
+			else if (msg.body.ev === "undo") this.#ui.editText((field) => field.undo());
+			return undefined;
+		}
+		if (msg.verb === "e" && msg.body.id === "composer") {
+			if (msg.body.ev === "edit") return this.applyNativeEdit(msg.body as unknown as HostEdit), undefined;
+			if (msg.body.ev === "undo") {
+				if (this.#composerSendable()) this.#editDraft(() => this.#editor.undo(), { kind: "set" });
+				return undefined;
+			}
+			// A click in the composer while a picker holds the keys: the picker closes (no choice applied) and the
+			// composer takes the focus back. A modal prompt, ask dialog or /btw card keeps the keys.
+			if (msg.body.ev === "focus") {
+				if (this.#ui.active || this.#dialog?.active || this.#btw?.active || this.#closed) return undefined;
+				if (this.#modelPickerOpen || this.#treePickerOpen) {
+					this.#modelPickerOpen = false;
+					this.#treePickerOpen = false;
+					this.#treePickerSelected = undefined;
+				}
+				this.#render();
+				return undefined;
+			}
+			// An atomic prompt (Tern's initial prompt, Carly): the normal submit path, leaving the draft alone.
+			if (msg.body.ev === "send") return typeof msg.body.text === "string" && this.#composerSendable() ? this.#sendFromTern(msg.body.text) : undefined;
+		}
 		if (msg.verb === "e" && msg.body.ev === "toggle" && typeof msg.body.id === "string" && msg.body.id.startsWith("g-")) {
 			this.#projector.setGroupCollapsed(msg.body.id, msg.body.collapsed === true);
 			this.#render();
@@ -1926,7 +2139,7 @@ export class PiTernBridge {
 			this.#render();
 			return undefined;
 		}
-		if (msg.verb === "e" && msg.body.ev === "key" && this.#gitView && msg.body.key === "escape") {
+		if (msg.verb === "e" && msg.body.ev === "key" && (this.#gitView || this.#workViewId !== undefined) && msg.body.key === "escape") {
 			this.escape();
 			return undefined;
 		}
@@ -1984,7 +2197,16 @@ export class PiTernBridge {
 		if (msg.verb !== "e" || msg.body.ev !== "action") return undefined;
 		const act = msg.body.act;
 		if (act === "submit") return this.submit(submittedText(msg.body));
+		if (act === ATTACHMENT_REMOVE) {
+			const n = attachmentFromNodeId(msg.body.id);
+			if (n !== undefined) this.removeAttachment(n);
+			return undefined;
+		}
 		if (act === "submit.followUp") return this.submitFollowUp(submittedText(msg.body));
+		if (act === "queue.edit") {
+			this.restoreQueuedMessages();
+			return undefined;
+		}
 		if (act === "cancel") {
 			void this.cancel();
 			return undefined;
@@ -2007,6 +2229,9 @@ export class PiTernBridge {
 			this.#render();
 		}
 		if (act === "git.open") { this.#openGitView(); return undefined; }
+		if (act === "bg.open" && typeof msg.body.value === "string") { this.#openWorkView(msg.body.value); return undefined; }
+		if (act === "bg.close") { this.#closeWorkView(); return undefined; }
+		if (act === "bg.stop" && typeof msg.body.value === "string") { this.#stopWork(msg.body.value); return undefined; }
 		if (act === "git.file" && typeof msg.body.value === "string") {
 			const ref = this.#gitRefs[Number(msg.body.value)];
 			return ref ? this.#showGitDiff(ref.section, ref.entry.path) : undefined;
@@ -2162,7 +2387,8 @@ export class PiTernBridge {
 			return Promise.resolve();
 		}
 		const prompt = text.trim();
-		if (!prompt) return Promise.resolve();
+		// Attachments alone are a message: they skip command routing and go as a plain prompt.
+		if (!prompt) return this.#attachments.length ? this.#sendPrompt(prompt) : Promise.resolve();
 		if (prompt === "/reload") {
 			if (this.#busy || this.#dialog?.active || this.#reloading) {
 				this.#projector.add("system", "reload unavailable during a turn, question, or another reload");
@@ -2216,32 +2442,51 @@ export class PiTernBridge {
 				this.#render();
 			});
 		}
-		if (this.#busy) {
-			// Plain Enter submissions during an active turn follow Pi's native queued-message path.
-			return this.submitFollowUp(prompt);
-		}
+		return this.#sendPrompt(prompt);
+	}
+
+	// A plain prompt with the composer's attachments: queued as a follow-up during a turn (Pi's native
+	// queued-message path for plain Enter), otherwise sent now.
+	#sendPrompt(prompt: string): Promise<void> {
+		if (this.#busy) return this.submitFollowUp(prompt);
+		const { text: sent, images } = this.#takeAttachments(this.#withMentions(prompt), prompt);
 		this.#draft = "";
-		this.#projector.add("user", prompt);
+		this.#projector.add("user", sent.typed);
 		this.#busy = true;
 		this.#render();
-		return this.#session.prompt(this.#withMentions(prompt)).catch((error: unknown) => {
+		return (images.length ? this.#session.prompt(sent.model, { images }) : this.#session.prompt(sent.model)).catch((error: unknown) => {
 			this.#busy = false;
 			this.#projector.add("system", `error: ${error instanceof Error ? error.message : String(error)}`);
 			this.#render();
 		});
 	}
 
+	// Empties the attachment row into a submission: Pi image content for a model that takes images, a path list
+	// in the text for everything else. `typed` is the transcript's line: the prompt as typed plus what went with it.
+	#takeAttachments(expanded: string, typed: string): { text: { model: string; typed: string }; images: ImageContentLike[] } {
+		const list = this.#attachments;
+		if (list.length === 0) return { text: { model: expanded, typed }, images: [] };
+		this.#attachments = [];
+		const input = (this.#session.model as { input?: unknown } | undefined)?.input;
+		const vision = !Array.isArray(input) || input.includes("image");
+		const { text, images } = attachmentPayload(expanded, list, vision);
+		const summary = attachmentSummary(list);
+		return { text: { model: text, typed: typed ? `${typed}\n\n${summary}` : summary }, images };
+	}
+
 	// Pi's Alt+Enter queues a follow-up while streaming and submits normally while idle.
 	submitFollowUp(text: string): Promise<void> {
 		const prompt = text.trim();
-		if (!prompt) return Promise.resolve();
+		if (!prompt && !this.#attachments.length) return Promise.resolve();
 		if (!this.#busy) return this.submit(prompt);
 		this.#draft = "";
-		this.#queuedFollowUp = [...this.#queuedFollowUp, prompt];
-		this.#projector.add("system", `Follow-up queued (${this.#queuedFollowUp.length})`);
+		const { text: { model: sent, typed }, images } = this.#takeAttachments(this.#withMentions(prompt), prompt);
+		this.#queuedTyped.set(sent, typed);
+		// Optimistic until Pi's queue_update replaces it; the dock's queue band shows it, not the transcript.
+		this.#queuedFollowUp = [...this.#queuedFollowUp, sent];
 		this.#render();
-		return this.#session.prompt(this.#withMentions(prompt), { streamingBehavior: "followUp" }).catch((error: unknown) => {
-			const queuedIndex = this.#queuedFollowUp.lastIndexOf(prompt);
+		return this.#session.prompt(sent, { streamingBehavior: "followUp", ...(images.length ? { images } : {}) }).catch((error: unknown) => {
+			const queuedIndex = this.#queuedFollowUp.lastIndexOf(sent);
 			if (queuedIndex >= 0) this.#queuedFollowUp.splice(queuedIndex, 1);
 			this.#projector.add("system", `error queueing follow-up: ${error instanceof Error ? error.message : String(error)}`);
 			this.#render();
@@ -2251,9 +2496,10 @@ export class PiTernBridge {
 	restoreQueuedMessages(): void {
 		if (this.#closed) return;
 		const restored = this.#session.clearQueue?.();
-		const queued = restored ? [...restored.steering, ...restored.followUp] : [...this.#queuedSteering, ...this.#queuedFollowUp];
+		const queued = (restored ? [...restored.steering, ...restored.followUp] : [...this.#queuedSteering, ...this.#queuedFollowUp]).map((text) => this.#queuedTyped.get(text) ?? text);
 		this.#queuedSteering = [];
 		this.#queuedFollowUp = [];
+		this.#queuedTyped.clear();
 		if (queued.length) this.setDraft([queued.join("\n\n"), this.#draft].filter(Boolean).join("\n\n"));
 		else { this.#projector.add("system", "No queued messages to restore"); this.#render(); }
 	}
@@ -2367,6 +2613,8 @@ export class PiTernBridge {
 	close(): void {
 		this.#workUnsubscribe?.();
 		this.#workUnsubscribe = null;
+		clearInterval(this.#workViewTimer);
+		this.#workViewTimer = undefined;
 		if (this.#closed) return;
 		this.#closed = true;
 		this.#gitRequest++;

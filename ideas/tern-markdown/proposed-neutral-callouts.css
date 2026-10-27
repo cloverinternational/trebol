@@ -1,0 +1,7 @@
+.sf-md .callout { background: transparent; border: 0; border-left: 2px solid var(--l3); border-radius: 0; }
+.sf-md .callout .co-ic { color: var(--t3); }
+.sf-md .callout.warning, .sf-md .callout.caution { border-left-color: var(--warn); }
+.sf-md .callout.warning .co-ic, .sf-md .callout.caution .co-ic { color: var(--warn); }
+.sf-md .mfig { background: transparent; border-color: var(--l2); }
+.sf-md .mfig-head { background: transparent; border-bottom-color: var(--l1); }
+.sf-md .mfig-body { background-color: transparent; background-image: radial-gradient(var(--grid-dot) 1px, transparent 1px); background-size: 14px 14px; }

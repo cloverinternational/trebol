@@ -98,7 +98,7 @@ registration behavior is not fully represented by factory-time inventory.
 | `swarm-agent-tools` | Agent, AgentControl, BackgroundTask, Delegate, DelegateOutput, multi_agent_wait, Subagent, SubagentOutput, TaskOutput, wait_for_agent | — | session_shutdown, session_start |
 | `swarm-background-bash` | Bash, ReadBackgroundCommand | — | agent_end, agent_settled, agent_start, session_before_compact, session_start |
 | `swarm-bash` | bash | — | — |
-| `swarm-fs-tools` | apply_patch, Read, Undo | — | session_start |
+| `swarm-fs-tools` | apply_patch, Read | — | session_start |
 | `swarm-history-vault-tools` | HistoryGet, HistorySearch | — | session_start |
 | `taskmanage` | TaskManage | /tasks | agent_settled, before_agent_start, input, message_end, message_update, session_before_compact, session_shutdown, session_start, shutdown, tool_call, tool_execution_end, tool_execution_update, tool_result, turn_end, turn_start |
 | `vault` | vault | /vault | — |

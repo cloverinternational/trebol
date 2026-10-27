@@ -16,6 +16,8 @@ export interface RunningWorkItem {
   /** Live snapshot of the process output; used while the work is still running. */
   readOutput?: () => string;
   transcriptPath?: string;
+  /** Stops the work while it runs; writers drop it once the work settles. */
+  stop?: () => void;
   /** True while a tool call is still waiting on this work in the foreground; cleared when it is backgrounded. */
   foreground?: boolean;
 }

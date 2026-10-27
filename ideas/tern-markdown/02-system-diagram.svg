@@ -1,0 +1,99 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="640" viewBox="0 0 1120 640">
+<style>
+  :root{--page:#fbfbfa;--card:#ffffff;--t1:#1b1c20;--t2:#55575f;--t3:#6a6c74;--l1:rgba(27,28,32,.06);--l2:rgba(27,28,32,.12);--l3:rgba(27,28,32,.22);--l4:rgba(27,28,32,.45);--warn:#d98a0b;--dot:rgba(27,28,32,.10)}
+  @media (prefers-color-scheme: dark){:root{--page:#0f0f12;--card:#161619;--t1:#ededed;--t2:#a1a1a1;--t3:#8a8a92;--l1:rgba(255,255,255,.07);--l2:rgba(255,255,255,.12);--l3:rgba(255,255,255,.22);--l4:rgba(255,255,255,.45);--warn:#f5a524;--dot:rgba(255,255,255,.07)}}
+  text{font-family:"Berkeley Mono",ui-monospace,"SF Mono",Menlo,monospace;fill:var(--t1)}
+  .sans{font-family:Geist,-apple-system,"SF Pro Text",system-ui,sans-serif}
+  .h{font-size:15px;font-weight:600}.s{font-size:12px}.xs{font-size:10.5px;fill:var(--t3)}.cap{font-size:10px;letter-spacing:.08em;fill:var(--t3)}
+  .page{fill:var(--page)}.node{fill:var(--card);stroke:var(--l4);stroke-width:1.2}
+  .bound{fill:none;stroke:var(--l3);stroke-width:1;stroke-dasharray:4 3}
+  .edge{fill:none;stroke:var(--t2);stroke-width:1.3}.hot{stroke:var(--t1);stroke-width:2.2}.async{stroke-dasharray:5 4}
+  .rule{stroke:var(--l3);stroke-width:2}.warnrule{stroke:var(--warn);stroke-width:2}
+  .ic{fill:none;stroke:var(--t2);stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round}
+  .step{fill:var(--t1)}.stepn{fill:var(--page);font-size:10px;font-weight:700}
+</style>
+<defs>
+  <pattern id="dots" width="14" height="14" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1" fill="var(--dot)"/></pattern>
+  <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,1 L9,5 L0,9 z" fill="var(--t2)"/></marker>
+  <marker id="arrh" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,1 L9,5 L0,9 z" fill="var(--t1)"/></marker>
+</defs>
+<rect class="page" width="1120" height="640"/>
+<text x="32" y="38" class="h sans">System diagram for "how does the app work" answers: boundaries, shapes, labelled protocols, numbered hot path</text>
+<text x="32" y="58" class="xs sans">Monochrome: meaning is carried by shape, line weight and dash, never hue. Same drawing reads under every Tern theme.</text>
+<rect x="24" y="76" width="1072" height="470" rx="12" fill="url(#dots)" stroke="var(--l2)"/>
+
+<!-- boundaries -->
+<rect x="48" y="104" width="230" height="300" rx="10" class="bound"/><text x="62" y="122" class="cap">CLIENT · Tern</text>
+<rect x="306" y="104" width="470" height="420" rx="10" class="bound"/><text x="320" y="122" class="cap">TREBOL RUNTIME · one Pi process</text>
+<rect x="804" y="104" width="270" height="420" rx="10" class="bound"/><text x="818" y="122" class="cap">EXTERNAL</text>
+
+<!-- client -->
+<rect x="78" y="150" width="170" height="44" rx="22" class="node"/>
+<circle cx="102" cy="168" r="5" class="ic"/><path d="M93,184 q9,-10 18,0" class="ic"/><text x="122" y="177" class="s">User</text>
+<rect x="78" y="250" width="170" height="56" rx="8" class="node"/>
+<rect x="92" y="262" width="22" height="16" rx="2" class="ic"/><path d="M96,268 l3,3 l-3,3 M101,274 h5" class="ic"/>
+<text x="124" y="274" class="s">Tern pane</text><text x="124" y="292" class="xs">md · chart · work</text>
+
+<!-- runtime -->
+<rect x="336" y="250" width="180" height="56" rx="8" class="node"/>
+<text x="352" y="274" class="s">PiTernBridge</text><text x="352" y="292" class="xs">.pi/lib/tern/bridge.ts</text>
+<rect x="566" y="250" width="180" height="56" rx="8" class="node"/>
+<line x1="576" y1="250" x2="576" y2="306" stroke="var(--l4)"/><line x1="736" y1="250" x2="736" y2="306" stroke="var(--l4)"/>
+<text x="588" y="274" class="s">Pi AgentSession</text><text x="588" y="292" class="xs">agent loop · tools</text>
+<!-- extension stack -->
+<g transform="translate(336,350)">
+  <rect width="410" height="110" rx="8" class="node"/>
+  <text x="14" y="22" class="s">Extensions</text><text x="104" y="22" class="xs">Pi ExtensionAPI</text>
+  <g class="xs">
+  <rect x="14" y="36" width="122" height="26" rx="4" fill="none" stroke="var(--l3)"/><text x="24" y="53">00 runtime</text>
+  <rect x="144" y="36" width="122" height="26" rx="4" fill="none" stroke="var(--l3)"/><text x="154" y="53">10 context</text>
+  <rect x="274" y="36" width="122" height="26" rx="4" fill="none" stroke="var(--l3)"/><text x="284" y="53">20 policy</text>
+  <rect x="14" y="70" width="122" height="26" rx="4" fill="none" stroke="var(--l3)"/><text x="24" y="87">30 tools</text>
+  <rect x="144" y="70" width="122" height="26" rx="4" fill="none" stroke="var(--l3)"/><text x="154" y="87">40 state</text>
+  <rect x="274" y="70" width="122" height="26" rx="4" fill="none" stroke="var(--l3)"/><text x="284" y="87">50 ui</text>
+  </g>
+</g>
+<!-- store: cylinder -->
+<g transform="translate(566,150)">
+  <path d="M0,10 v34 a90,10 0 0 0 180,0 v-34" class="node"/><ellipse cx="90" cy="10" rx="90" ry="10" class="node"/>
+  <text x="18" y="38" class="s">Session JSONL</text><text x="128" y="38" class="xs">.swarm</text>
+</g>
+
+<!-- external -->
+<rect x="834" y="250" width="210" height="56" rx="8" class="node" stroke-dasharray="5 3"/>
+<circle cx="856" cy="278" r="9" class="ic"/><path d="M847,278 h18 M856,269 q-6,9 0,18 q6,-9 0,-18" class="ic"/>
+<text x="876" y="274" class="s">Provider API</text><text x="876" y="292" class="xs">HTTPS · streaming</text>
+<rect x="834" y="376" width="210" height="56" rx="8" class="node" stroke-dasharray="5 3"/>
+<rect x="848" y="394" width="16" height="20" rx="2" class="ic"/><path d="M852,400 h8 M852,405 h8" class="ic"/>
+<text x="876" y="400" class="s">MCP servers</text><text x="876" y="418" class="xs">stdio · http</text>
+
+<!-- edges: hot path -->
+<path d="M163,194 V250" class="edge hot" marker-end="url(#arrh)"/>
+<path d="M248,278 H336" class="edge hot" marker-end="url(#arrh)"/><text x="262" y="270" class="xs">TSP frames</text>
+<path d="M516,278 H566" class="edge hot" marker-end="url(#arrh)"/><text x="522" y="270" class="xs">prompt</text>
+<path d="M746,278 H834" class="edge hot" marker-end="url(#arrh)"/><text x="764" y="270" class="xs">HTTPS</text>
+<!-- secondary -->
+<path d="M656,250 V204" class="edge async" marker-end="url(#arr)"/><text x="662" y="232" class="xs">append</text>
+<path d="M656,306 V350" class="edge" marker-end="url(#arr)"/><text x="662" y="332" class="xs">events</text>
+<path d="M746,410 Q790,404 834,404" class="edge" marker-end="url(#arr)"/><text x="760" y="398" class="xs">tool call</text>
+<path d="M426,350 V306" class="edge async" marker-end="url(#arr)"/><text x="432" y="332" class="xs">render</text>
+
+<!-- step markers -->
+<g><circle cx="163" cy="222" r="9" class="step"/><text x="160" y="226" class="stepn">1</text></g>
+<g><circle cx="292" cy="294" r="9" class="step"/><text x="289" y="298" class="stepn">2</text></g>
+<g><circle cx="541" cy="294" r="9" class="step"/><text x="538" y="298" class="stepn">3</text></g>
+<g><circle cx="790" cy="294" r="9" class="step"/><text x="787" y="298" class="stepn">4</text></g>
+
+<!-- legend -->
+<g transform="translate(32,568)" class="xs">
+  <line x1="0" y1="0" x2="34" y2="0" class="edge hot"/><text x="42" y="4">request hot path (numbered)</text>
+  <line x1="230" y1="0" x2="264" y2="0" class="edge"/><text x="272" y="4">sync call</text>
+  <line x1="360" y1="0" x2="394" y2="0" class="edge async"/><text x="402" y="4">async / write-behind</text>
+  <rect x="540" y="-9" width="34" height="18" rx="9" class="node"/><text x="582" y="4">actor</text>
+  <rect x="630" y="-9" width="34" height="18" rx="3" class="node"/><text x="672" y="4">service</text>
+  <rect x="736" y="-9" width="34" height="18" rx="3" class="node" stroke-dasharray="4 2"/><text x="778" y="4">external</text>
+  <path d="M846,-6 v12 a17,4 0 0 0 34,0 v-12" class="node"/><ellipse cx="863" cy="-6" rx="17" ry="4" class="node"/><text x="888" y="4">store</text>
+  <rect x="940" y="-9" width="40" height="18" rx="3" class="bound"/><text x="988" y="4">boundary</text>
+  <text x="0" y="34">1 user types · 2 bridge projects composer into session · 3 Pi runs the agent loop · 4 provider streams tokens back up the same path</text>
+</g>
+</svg>

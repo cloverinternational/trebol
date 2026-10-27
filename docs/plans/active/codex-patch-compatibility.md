@@ -108,4 +108,8 @@ depends on the failure-result shape from step 6. No parity claim precedes step 8
   (179 apply_patch tests passing across three files). Audit updated.
 - Remaining exclusions (not parity): conditional upstream `follow_symlinks=false` policy
   (probed via `TREBOL_ORACLE_NO_FOLLOW=1`, not mirrored), outside-workspace permissions,
-  snapshots/Undo, JSON adapter, `environment_id`, concurrency/crash, Windows, benchmarks.
+  JSON adapter, `environment_id`, concurrency/crash, Windows, benchmarks.
+
+> 2026-10-27: snapshots and the `Undo` tool were removed entirely (1 Undo call in
+> 354 recorded sessions; `.swarm/snapshots` grew without bound). References above
+> to retaining them are superseded.

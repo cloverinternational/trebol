@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { ApplyPatchExecutionError, applyPatch, applyPatchStandalone, parsePatch, undoFile } from "../../lib/tools/swarm-apply-patch.ts";
+import { ApplyPatchExecutionError, applyPatch, applyPatchStandalone, parsePatch } from "../../lib/tools/swarm-apply-patch.ts";
 import { readArtifact } from "../../lib/tools/swarm-read-image.ts";
 import extension from "../../../extensions/swarm-fs-tools/extension.ts";
 import { PERMISSIVE_PARAMETERS, loadSwarmToolSurface, overlaySwarmToolSchemas } from "../../lib/runtime/swarm-tool-surface.ts";
@@ -99,15 +99,6 @@ describe("Swarm apply_patch (upstream codex 430a16799d90e296fb27b1e94f206023902b
     expect(readFileSync(join(ws, "first.txt"), "utf8")).toBe("one\n");
   });
 
-  it("writes nothing for an operation whose snapshot cannot be recorded", async () => {
-    const ws = root();
-    writeFileSync(join(ws, ".swarm"), "not a directory, so snapshots cannot be created");
-    const error = await applyPatch(patchOf("*** Add File: new.txt", "+x"), { workspacePath: ws }).catch(e => e);
-    expect(error).toBeInstanceOf(ApplyPatchExecutionError);
-    expect(error.message).toContain("No files were written before this failure");
-    expect(existsSync(join(ws, "new.txt"))).toBe(false);
-  });
-
   it("preserves each line's own ending and uses the first-seen ending for inserted lines", async () => {
     const ws = root(), file = join(ws, "a.txt");
     writeFileSync(file, "a\r\nb\nc\r\n");
@@ -141,15 +132,6 @@ describe("Swarm apply_patch (upstream codex 430a16799d90e296fb27b1e94f206023902b
       .toThrow("environment_id is not supported");
   });
 
-  it("Undo finds its own snapshots when a sibling name shares the prefix", async () => {
-    const ws = root(), file = join(ws, "foo"), sibling = join(ws, "foo-2");
-    writeFileSync(file, "old\n"); writeFileSync(sibling, "s\n");
-    await applyPatch(patchOf("*** Update File: foo-2", "-s", "+t"), { workspacePath: ws });
-    await applyPatch(patchOf("*** Update File: foo", "-old", "+new"), { workspacePath: ws });
-    await expect(undoFile(file, ws)).resolves.toContain(`Successfully reverted ${file}`);
-    expect(readFileSync(file, "utf8")).toBe("old\n");
-  });
-
   it("does not verify move destinations: a later Add to the moved path overwrites it (upstream)", async () => {
     const ws = root();
     writeFileSync(join(ws, "a.txt"), "ONE\n");
@@ -157,14 +139,6 @@ describe("Swarm apply_patch (upstream codex 430a16799d90e296fb27b1e94f206023902b
     expect(out).toBe("Success. Updated the following files:\nA b.txt\nM b.txt\n");
     expect(existsSync(join(ws, "a.txt"))).toBe(false);
     expect(readFileSync(join(ws, "b.txt"), "utf8")).toBe("added\n");
-  });
-
-  it("Undo restores prior content and consumes the snapshot", async () => {
-    const ws = root(), file = join(ws, "a.txt"); writeFileSync(file, "old\n");
-    await applyPatch(patchOf("*** Update File: a.txt", "-old", "+new"), { workspacePath: ws });
-    await expect(undoFile(file, ws)).resolves.toContain(`Successfully reverted ${file}`);
-    expect(readFileSync(file, "utf8")).toBe("old\n");
-    await expect(undoFile(file, ws)).rejects.toThrow(`no snapshot found for ${file}`);
   });
 
   it("standalone writer keeps earlier writes that the agent path would have rejected", async () => {
@@ -188,7 +162,7 @@ describe("Swarm apply_patch (upstream codex 430a16799d90e296fb27b1e94f206023902b
 
   it("registers the contract it owns, enforcing every schema except Read's", () => {
     const tools: any[] = []; extension({ registerTool: (tool: any) => tools.push(tool), getCwd: () => process.cwd() });
-    for (const name of ["apply_patch", "Undo", "Read"]) {
+    for (const name of ["apply_patch", "Read"]) {
       const actual = tools.find(t => t.name === name), expected = loadSwarmToolSurface().get(name)!;
       expect(actual.description).toBe(expected.description);
       if (name === "Read") expect(actual.parameters).toEqual(PERMISSIVE_PARAMETERS);

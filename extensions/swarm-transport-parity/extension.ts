@@ -15,22 +15,6 @@ type Pi = any;
 const registrations = new WeakSet<object>();
 
 /**
- * Provenance Swarm threads through tool contexts (tools.OwnerConversationID /
- * UserMessageFromContext) and that apply_patch snapshots record for Undo.
- * The conversation id follows conversation/manager.go generateID:
- * "YYYYMMDD-HHMMSS-<6 lowercase alphanumerics>" (local time).
- */
-export const CONVERSATION_ID = Symbol.for("pi-swarm-conversation-id");
-export const LAST_USER_MESSAGE = Symbol.for("pi-swarm-last-user-message");
-export function swarmConversationId(now = new Date()): string {
-  const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
-  const pad = (n: number) => String(n).padStart(2, "0");
-  let suffix = "";
-  for (let i = 0; i < 6; i++) suffix += alphabet[Math.floor(Math.random() * alphabet.length)];
-  return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}-${suffix}`;
-}
-
-/**
  * Make Pi's OpenAI-compatible request JSON match `swarm -p` at the transport
  * layer: bytewise tool ordering, no `strict`, `max_tokens`, no `store`,
  * no `temperature` (rejected by some Claude models), `reasoning_effort: "high"`,
@@ -86,7 +70,7 @@ export function registerSwarmTransportParity(pi: Pi): void {
   };
   const currentMode = () => "act";
 
-  pi.on?.("session_start", (_event: unknown, ctx: any) => { interactive = ctx?.hasUI === true; remoteAsk = ctx?.mode === "tui" && !interactive; (globalThis as any)[CONVERSATION_ID] = swarmConversationId(); alignTools(); alignModel(ctx); });
+  pi.on?.("session_start", (_event: unknown, ctx: any) => { interactive = ctx?.hasUI === true; remoteAsk = ctx?.mode === "tui" && !interactive; alignTools(); alignModel(ctx); });
   pi.on?.("model_select", (_event: unknown, ctx: any) => { alignModel(ctx); });
   // Tool sets and model can change mid-session (extensions, /model, /tools).
   // Re-check right before every request; both operations are idempotent.
@@ -103,17 +87,6 @@ export function registerSwarmTransportParity(pi: Pi): void {
     // TUI) is unknown to the model and must error like one.
     const withManifest = manifest.apply(messages, currentMode(), activeToolSummaries());
     if (withManifest) { messages = withManifest; changed = true; }
-    // The user turn as the model sees it (manifest included) is what Swarm
-    // records as the snapshot "because:" provenance; hook reminders are not
-    // user turns.
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const m = messages[i];
-      if (m?.role !== "user") continue;
-      const text = typeof m.content === "string" ? m.content : Array.isArray(m.content) ? m.content.filter((b: any) => b?.type === "text").map((b: any) => b.text).join("") : "";
-      if (text.startsWith("<system-reminder")) continue;
-      (globalThis as any)[LAST_USER_MESSAGE] = text;
-      break;
-    }
     return changed ? { messages } : undefined;
   });
   // Last hop before serialisation: top-level keys in Go struct order and tool

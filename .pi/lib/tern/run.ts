@@ -18,12 +18,12 @@ import {
 	initTheme,
 	SessionManager,
 } from "@earendil-works/pi-coding-agent";
-import { StdinBuffer } from "@earendil-works/pi-tui";
+import { getNativeClipboard, StdinBuffer } from "@earendil-works/pi-tui";
 import { sessionCommandSource, type CommandSessionLike } from "./commands.ts";
 import { PiTernBridge, type PiSessionLike } from "./bridge.ts";
 import { createUiTrace } from "./ui-trace.ts";
 import { keyEffect } from "./keys.ts";
-import { detectTern, helloQuery, shouldProbe, splitInput } from "./tsp.ts";
+import { detectTern, helloQuery, PI_TSP_FEATURES, shouldProbe, splitInput } from "./tsp.ts";
 import { bootGeneration, clearPaneRecord, openStartupSession, paneKey, pidAlive, readPaneBook, recordPaneSession } from "./startup-session.ts";
 
 const PROBE_MS = 1000;
@@ -79,6 +79,8 @@ function startTsp(): void {
 		if (restored) return;
 		restored = true;
 		bridge?.close();
+		// Bracketed paste off again for whatever runs in the pane next.
+		stdout.write("\x1b[?2004l");
 		stdin.setRawMode(false);
 		stdin.pause();
 	};
@@ -96,6 +98,7 @@ function startTsp(): void {
 	keyBuffer.on("data", (sequence: string) => {
 		const effect = keyEffect(sequence);
 		if (!bridge || !effect) return;
+		if (bridge.applyEditKey(effect)) return;
 		if (effect.kind === "interrupt") {
 			const now = Date.now();
 			if (now - lastCtrlC < 500) {
@@ -125,23 +128,23 @@ function startTsp(): void {
 			void bridge.tab();
 		} else if (effect.kind === "tabMove") {
 			bridge.moveTabOrCursor(effect.delta);
-		} else if (effect.kind === "cursor") {
-			bridge.moveCursor(effect.direction, effect.word, effect.extend);
-		} else if (effect.kind === "selectAll") {
-			bridge.selectAllDraft();
-		} else if (effect.kind === "undo") {
-			bridge.undoDraft();
-		} else if (effect.kind === "deleteWord") {
-			bridge.deleteWordDraft();
 		} else if (effect.kind === "toggleOutput") {
 			bridge.toggleToolOutput();
-		} else bridge.appendDraft(effect.text);
+		} else if (effect.kind === "text") bridge.appendDraft(effect.text);
 	});
 	// Pasted text stays in the draft; embedded newlines do not submit.
 	keyBuffer.on("paste", (text: string) => bridge?.pasteText(text));
 
 	const onData = (chunk: Buffer): void => {
 		const text = chunk.toString("utf8");
+		// Opt-in raw input log (keys and TSP events as they arrive), for diagnosing platform input differences.
+		if (process.env.PI_TERN_INPUT_LOG) {
+			try {
+				appendFileSync(process.env.PI_TERN_INPUT_LOG, `${JSON.stringify({ at: Date.now(), data: text })}\n`);
+			} catch {
+				// Diagnostics only.
+			}
+		}
 		if (!bridge) {
 			if (connecting || restored) return;
 			raw += text;
@@ -280,11 +283,23 @@ function startTsp(): void {
 		stdout.write("\r\n[tern: enter sends; esc cancels or clears; double esc on an empty draft opens the configured session action; ctrl-c closes]\r\n");
 	};
 
+	// Windows: a ConPTY console delivers keys as VT sequences (modified keys, kitty input, and Tern's OSC 877
+	// messages) only with ENABLE_VIRTUAL_TERMINAL_INPUT, which Pi's own ProcessTerminal sets the same way. On
+	// win32 pi-tui's native clipboard object is that platform helper.
+	if (process.platform === "win32") {
+		try {
+			(getNativeClipboard() as { enableVirtualTerminalInput?: () => boolean } | undefined)?.enableVirtualTerminalInput?.();
+		} catch {
+			// No native helper: Shift+Tab and other modified keys may arrive unmodified.
+		}
+	}
 	stdin.setRawMode(true);
 	stdin.resume();
 	stdin.on("data", onData);
-	// Advertises no edit/undo/send features: this bridge does not apply those events.
-	stdout.write(helloQuery("pi"));
+	// Bracketed paste: a paste or a file drop arrives whole (StdinBuffer's `paste`), so its newlines never submit
+	// and dropped paths can become attachments. Without it Tern types the text in character by character.
+	stdout.write("\x1b[?2004h");
+	stdout.write(helloQuery("pi", [...PI_TSP_FEATURES]));
 	probeTimer = setTimeout(() => {
 		if (!bridge && !connecting) {
 			restore();

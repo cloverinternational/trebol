@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { PiTernBridge, TranscriptProjector, type PiEventLike, type PiSessionLike } from "../../lib/tern/bridge.ts";
 import { ESC, ST, parseTspMessages, type TspMessage, type TspNode } from "../../lib/tern/tsp.ts";
 
@@ -158,37 +161,44 @@ describe("TranscriptProjector", () => {
 });
 
 describe("PiTernBridge", () => {
-	it("pastes clipboard file paths, image references, and text in Pi's priority order", async () => {
+	it("attaches clipboard files before an image or text, in Pi's priority order", async () => {
 		const fake = fakeSession();
 		const out = capture();
+		const dir = mkdtempSync(join(tmpdir(), "pi-tern-clip-"));
+		const file = join(dir, "a file.txt");
+		writeFileSync(file, "x");
 		const bridge = new PiTernBridge(fake.session, {
 			write: out.write, surfaceId: "pi", credits: CREDITS,
 			clipboard: {
-				filePaths: async () => ["/tmp/a file.png"],
+				filePaths: async () => [file],
 				image: async () => new Uint8Array([1]),
 				text: async () => "unused",
 			},
 		});
 		bridge.start();
 		await bridge.pasteClipboard();
-		expect(bridge.draft).toBe("/tmp/a file.png");
+		expect(bridge.draft).toBe("");
+		expect(bridge.attachments.map((a) => [a.kind, a.path])).toEqual([["file", file]]);
 		bridge.close();
 	});
 
-	it("pastes image file reference when no file paths are copied", async () => {
+	it("attaches the copied image (saved to a file) when no file paths are copied", async () => {
 		const fake = fakeSession();
+		const dir = mkdtempSync(join(tmpdir(), "pi-tern-clip-"));
+		const saved = join(dir, "pi-clipboard-test.png");
 		const bridge = new PiTernBridge(fake.session, {
 			write: capture().write, surfaceId: "pi",
 			clipboard: {
 				filePaths: async () => null,
 				image: async () => new Uint8Array([1]),
 				text: async () => "fallback",
-				saveImage: () => "/tmp/pi-clipboard-test.png",
+				saveImage: (bytes) => { writeFileSync(saved, bytes); return saved; },
 			},
 		});
 		bridge.start();
 		await bridge.pasteClipboard();
-		expect(bridge.draft).toBe("/tmp/pi-clipboard-test.png");
+		expect(bridge.draft).toBe("");
+		expect(bridge.attachments.map((a) => a.path)).toEqual([saved]);
 		bridge.close();
 	});
 
@@ -224,9 +234,33 @@ describe("PiTernBridge", () => {
 		expect(bridge.busy).toBe(true);
 		const followUp = bridge.submit("second");
 		expect(fake.calls).toEqual(["prompt:what is 2+2?", "prompt:second"]);
-		expect(JSON.stringify(lastFrame(out.writes))).toContain("Follow-up queued");
+		const frame = JSON.stringify(lastFrame(out.writes));
+		expect(frame).not.toContain("Follow-up queued");
+		expect(frame).toContain('"role":"omp.queue.item"');
+		expect(frame).toContain('"text":"second"');
 		fake.finish();
 		await Promise.all([first, followUp]);
+	});
+
+	it("draws Pi's queue from queue_update, drops it when empty, and Edit restores it", () => {
+		const out = capture();
+		const fake = fakeSession();
+		const bridge = new PiTernBridge(fake.session, { write: out.write, surfaceId: "pi", credits: CREDITS });
+		bridge.start();
+		fake.session.emit({ type: "agent_start" });
+		fake.session.emit({ type: "queue_update", steering: ["steer now"], followUp: ["later"] } as PiEventLike);
+		let frame = JSON.stringify(lastFrame(out.writes));
+		expect(frame).toContain('"text":"steer now"');
+		expect(frame).toContain('"title":"Steering"');
+		expect(frame).toContain('"title":"After yield"');
+		expect(frame).toContain('"role":"omp.queue.count"');
+		void bridge.handle(action({ act: "queue.edit" }));
+		expect(bridge.draft).toBe("steer now\n\nlater");
+		frame = JSON.stringify(lastFrame(out.writes));
+		expect(frame).not.toContain("omp.queue.item");
+		fake.session.emit({ type: "queue_update", steering: [], followUp: [] } as PiEventLike);
+		expect(JSON.stringify(lastFrame(out.writes))).not.toContain("omp.queue");
+		bridge.close();
 	});
 
 	it("ignores blank submissions", async () => {
