@@ -105,7 +105,7 @@ describe("bash result envelope", () => {
 });
 
 describe("real shell end to end", () => {
-  it("runs an over-threshold command, then recovers the full output with sed and rg", async () => {
+  it("runs an over-threshold command, then recovers the full output with sed and a line search", async () => {
     const root = tempRoot();
     const command = "seq 1 20000";
     const outcome = await runSwarmBash({ command, timeout_seconds: 60 }, { defaultCwd: root });
@@ -119,7 +119,11 @@ describe("real shell end to end", () => {
     expect(recovered).toBe(outcome.stdout);
     expect(recovered.split("\n").filter(Boolean)).toHaveLength(20_000);
     expect(execFileSync("sed", ["-n", "1,3p", path!], { encoding: "utf8" })).toBe("1\n2\n3\n");
-    expect(execFileSync("rg", ["-c", "^19999$", path!], { encoding: "utf8" }).trim()).toBe("1");
+    // The notice suggests `rg`, but a bare CI runner ships neither rg nor an
+    // equivalent, so the retrieval assertion uses POSIX grep (present on every
+    // supported host) and a direct read proves the same line is in the file.
+    expect(execFileSync("grep", ["-c", "^19999$", path!], { encoding: "utf8" }).trim()).toBe("1");
+    expect(recovered.split("\n").filter((line) => line === "19999")).toHaveLength(1);
     expect(xml).toContain("exit_code=\"0\"");
   });
 
