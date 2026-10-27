@@ -159,4 +159,3 @@ partial-data ambiguity, network failure and timeout, each without retries.
 `npm run check:install -- --extension extensions/hoja-mode/index.ts` loaded the
 extension with zero errors using the npm-local Pi 1.0.4 SDK; the separate payload
 test used global Pi 1.3.0. No full repository test/build is claimed.
-
