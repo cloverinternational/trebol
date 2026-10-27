@@ -19,7 +19,7 @@ const source: CommandSource = {
 
 const catalog = buildCatalog(source);
 
-function fakeSession(commands = source) {
+function fakeSession(commands = source, options: { newSession?: () => Promise<{ cancelled?: boolean } | void> } = {}) {
 	const listeners = new Set<(e: PiEventLike) => void>();
 	const calls: string[] = [];
 	const session: PiSessionLike & { emit(e: PiEventLike): void } = {
@@ -48,7 +48,7 @@ function fakeSession(commands = source) {
 		},
 	};
 	const writes: string[] = [];
-	const bridge = new PiTernBridge(session, { write: (d) => writes.push(d), surfaceId: "pi", credits: 1000, commands });
+	const bridge = new PiTernBridge(session, { write: (d) => writes.push(d), surfaceId: "pi", credits: 1000, commands, ...options });
 	bridge.start();
 	return { session, calls, bridge, writes };
 }
@@ -116,6 +116,7 @@ describe("routeSubmission", () => {
 
 	it("routes Tern-run builtins with their argument and refuses terminal-only ones", () => {
 		expect(routeSubmission("/model", catalog, false)).toMatchObject({ kind: "builtin", name: "model", args: "" });
+		expect(routeSubmission("/new", catalog, false)).toEqual({ kind: "builtin", name: "new", args: "" });
 		expect(routeSubmission("/thinking  high ", catalog, false)).toEqual({ kind: "builtin", name: "thinking", args: "high" });
 		expect(routeSubmission("/settings", catalog, false)).toMatchObject({ kind: "refuse", reason: expect.stringContaining("pi -nt") });
 	});
@@ -262,6 +263,30 @@ describe("PiTernBridge command routing", () => {
 		await bridge.submit("/model p3/missing");
 		await bridge.submit("/model p1/m1/extra");
 		expect(calls).toEqual([]);
+	});
+
+	it("/new starts a new session through the runtime and never reaches the model", async () => {
+		let started = 0;
+		const { calls, bridge, writes } = fakeSession(source, { newSession: async () => { started++; } });
+		bridge.setDraft("half-typed draft");
+		await bridge.submit("/new");
+		expect(started).toBe(1);
+		expect(surfaceJson(writes)).toContain("Started a new session");
+		expect(calls.filter((c) => c.startsWith("prompt:"))).toEqual([]);
+		expect(bridge.draft).toBe("");
+	});
+
+	it("/new reports a cancelled switch instead of claiming a new session", async () => {
+		const { bridge, writes } = fakeSession(source, { newSession: async () => ({ cancelled: true }) });
+		await bridge.submit("/new");
+		expect(surfaceJson(writes)).toContain("New session cancelled");
+		expect(surfaceJson(writes)).not.toContain("Started a new session");
+	});
+
+	it("/new is refused, not silently ignored, when the pane has no runtime to replace the session", async () => {
+		const { bridge, writes } = fakeSession();
+		await bridge.submit("/new");
+		expect(surfaceJson(writes)).toContain("new session unavailable in this Tern pane");
 	});
 
 	it("never sends an unknown or builtin slash command to the model", async () => {

@@ -15,10 +15,11 @@
 import { randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
-import { existsSync, lstatSync, mkdirSync, openSync, closeSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { constants as osConstants, homedir, tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve, isAbsolute } from "node:path";
 import { framedCard } from "../ui/framed-card.ts";
+import { MAX_BASH_OUTPUT_LINES, bashOutputBudgetTokens, boundToolTextWithRecovery, estimateOutputTokens } from "../runtime/swarm-toolout.ts";
 import { checkAllowedPath, defaultAllowedPaths, resolvePathForCheck, pathWithinRoot } from "./path-guard.ts";
 
 export const SWARM_BASH_DESCRIPTION =
@@ -278,7 +279,6 @@ export const stripANSI = (s: string) => (s.includes("\x1b") ? s.replace(ANSI, ""
 
 // tokens.go: charsPerToken = 4, Estimate = len/4 (1 when non-empty but < 4)
 export const estimateTokens = (s: string) => (s === "" ? 0 : Math.max(1, Math.floor(Buffer.byteLength(s) / 4)));
-const truncateTokens = (s: string, maxTokens: number) => Buffer.from(s).subarray(0, maxTokens * 4).toString("utf8");
 
 /** Go %q for attribute values (ASCII-safe subset; Swarm attrs are ints/bools/short labels). */
 export function goQuote(value: string): string {
@@ -328,33 +328,34 @@ export function decodeSignalExit(code: number | null, signal: NodeJS.Signals | n
   return { exitCode: code ?? 0, signal: null };
 }
 
-export interface Truncation { output: string; outputPath: string; truncated: boolean }
-/** os.CreateTemp(dir, "bash-full-*.txt"): the "*" becomes a random uint32 in decimal. */
-function createTempLikeGo(dir: string, prefix: string, suffix: string): string {
-  for (let attempt = 0; attempt < 10_000; attempt++) {
-    const name = join(dir, `${prefix}${randomBytes(4).readUInt32LE(0)}${suffix}`);
-    try { closeSync(openSync(name, "wx", 0o600)); return name; } catch (e: any) { if (e?.code !== "EEXIST") throw e; }
-  }
-  throw new Error("createTemp: too many attempts");
+export interface Truncation {
+  /** Bounded model-facing preview; names the spill file when one was published. */
+  output: string;
+  /** Published spill path, or "" when nothing was spilled or the write failed. */
+  outputPath: string;
+  truncated: boolean;
+  /** Why the spill file could not be written, when it could not. */
+  failure?: string;
 }
-/** bash.go bashTruncateOutput: 2000-line and 12,500-token caps, full output spilled to disk. */
-export function bashTruncateOutput(output: string, tempRoot = tmpdir()): Truncation {
-  const maxLines = 2000, maxTokens = 12_500;
-  const lineCount = (output.match(/\n/g) ?? []).length;
-  if (lineCount <= maxLines && estimateTokens(output) <= maxTokens) return { output, outputPath: "", truncated: false };
-  const dir = join(tempRoot, "swarm-tool-output");
-  let outputPath = "";
-  try { mkdirSync(dir, { recursive: true, mode: 0o755 }); outputPath = createTempLikeGo(dir, "bash-full-", ".txt"); writeFileSync(outputPath, output); } catch { outputPath = ""; }
-  const hint = `Full output saved to: ${outputPath}\nUse \`sed -n 'START,ENDp' FILE\` to view sections, or \`rg PATTERN FILE\` to search within it.`;
-  if (lineCount > maxLines) {
-    const lines = output.split("\n");
-    output = lines.slice(0, maxLines).join("\n") + `\n\n...${lineCount - maxLines} lines truncated...\n\n${hint}`;
-  }
-  if (estimateTokens(output) > maxTokens) {
-    const dropped = estimateTokens(output) - maxTokens;
-    output = truncateTokens(output, maxTokens) + `\n\n...~${dropped} tokens truncated...\n\n${hint}`;
-  }
-  return { output, outputPath, truncated: true };
+/**
+ * bash.go bashTruncateOutput: 2000-line and 12,500-estimated-token caps.
+ *
+ * The full text is persisted (shared spill path in swarm-toolout.ts) BEFORE the
+ * preview is clipped, so the formatter can still discard its copy without
+ * losing anything the shell produced. The preview and its recovery notice share
+ * the same budget, and a failed write never yields an empty "saved to:" link.
+ */
+export function bashTruncateOutput(output: string, tempRoot = tmpdir(), env: NodeJS.ProcessEnv = process.env): Truncation {
+  const maxLines = MAX_BASH_OUTPUT_LINES, maxTokens = bashOutputBudgetTokens(env);
+  const newlines = (output.match(/\n/g) ?? []).length;
+  if (newlines <= maxLines && estimateOutputTokens(output) <= maxTokens) return { output, outputPath: "", truncated: false };
+  const bounded = boundToolTextWithRecovery(output, { maxTokens, maxLines, keep: "head", prefix: "bash-full-", root: tempRoot });
+  return {
+    output: bounded.text,
+    outputPath: bounded.outputPath,
+    truncated: true,
+    ...(bounded.failure ? { failure: bounded.failure } : {}),
+  };
 }
 
 export interface BashOutcome { exitCode: number; durationMs: number; stdout: string; stderr: string; timedOut: boolean; requestedSecs: number; effectiveSecs: number; description?: string; signal?: NodeJS.Signals | null }
@@ -371,8 +372,18 @@ export function buildResultXML(o: BashOutcome): string {
   if (o.requestedSecs > 0 && o.requestedSecs < 60) body += `  <timeout_clamped requested_seconds="${o.requestedSecs}" effective_seconds="${o.effectiveSecs}"/>\n`;
   const field = (tag: string, value: string) => `  <${tag}><![CDATA[${value}]]></${tag}>\n`;
   if (t.truncated) {
-    const msg = `(output truncated — full content saved to output_path)\nFull output saved to: ${t.outputPath}\nUse \`sed -n 'START,ENDp' FILE\` to view sections, or \`rg PATTERN FILE\` to search within it.`;
-    body += field("stdout", msg) + field("stderr", msg) + `  <output_file path=${goQuote(t.outputPath)}/>\n`;
+    // Swarm's envelope points at output_path; when the write failed there is no
+    // path to point at, so the bounded preview states the failure instead of
+    // naming a file that does not exist.
+    if (t.outputPath) {
+      const msg = `(output truncated — full content saved to output_path)\nFull output saved to: ${t.outputPath}\nUse \`sed -n 'START,ENDp' FILE\` to view sections, or \`rg PATTERN FILE\` to search within it.`;
+      body += field("stdout", msg) + field("stderr", msg);
+    } else {
+      // No file to point at: the bounded preview (which already states the
+      // failure) appears once, not twice, so the envelope stays small.
+      body += field("stdout", t.output) + field("stderr", "(output truncated — full output could not be saved)");
+    }
+    if (t.outputPath) body += `  <output_file path=${goQuote(t.outputPath)}/>\n`;
   } else {
     body += field("stdout", stdout) + field("stderr", stderr);
   }

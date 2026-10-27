@@ -1,0 +1,10 @@
+# Real recorded Pi sessions replayed through the real bridge. The third one contains the Subagent
+# launch behind the reported "collapsing work breaks when an agent starts" state.
+# `<name>#N` keeps the first N frames, so intermediate (streaming, mid-launch) states are measured too.
+2026-10-18T19-18-23-235Z#8
+2026-10-18T19-29-42-211Z
+2026-10-18T20-18-16-017Z
+2026-10-18T20-18-16-017Z#3
+2026-10-18T20-18-16-017Z#12
+2026-10-18T20-18-16-017Z#30
+2026-10-18T20-18-16-017Z#60

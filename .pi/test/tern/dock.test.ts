@@ -8,6 +8,7 @@ import { removeRunningWork, setRunningWork } from "../../lib/ui/running-work-sto
 interface FakeOptions {
 	sessionId?: unknown;
 	entries?: unknown;
+	branch?: unknown;
 	usage?: unknown;
 	model?: unknown;
 	throwUsage?: boolean;
@@ -18,6 +19,7 @@ function fakeSession(opts: FakeOptions = {}) {
 	const state = {
 		sessionId: opts.sessionId ?? "s1",
 		entries: opts.entries ?? [],
+		branch: opts.branch ?? [],
 		usage: opts.usage,
 		model: opts.model,
 	};
@@ -39,6 +41,9 @@ function fakeSession(opts: FakeOptions = {}) {
 		sessionManager: {
 			getSessionId: () => state.sessionId,
 			getEntries: () => state.entries,
+			// Only a session that reports a persisted branch gets one: Pi's task view prefers
+			// getBranch over getEntries, so an unconditional empty branch would hide journal entries.
+			...(opts.branch !== undefined ? { getBranch: () => state.branch } : {}),
 		},
 		getContextUsage: () => {
 			if (opts.throwUsage) throw new Error("stale ctx");
@@ -122,6 +127,36 @@ function make(session: ReturnType<typeof fakeSession>, extra: { workspace?: stri
 	bridge.start("pi");
 	return { bridge, writes };
 }
+
+describe("resumed session", () => {
+	it("renders the persisted branch on the first frame instead of coming back empty", () => {
+		const branch = [
+			{
+				id: "e1",
+				type: "message",
+				parentId: null,
+				timestamp: new Date(0).toISOString(),
+				message: { role: "user", content: "RESTORED_QUESTION", timestamp: 0 },
+			},
+			{
+				id: "e2",
+				type: "message",
+				parentId: "e1",
+				timestamp: new Date(1).toISOString(),
+				message: { role: "assistant", content: [{ type: "text", text: "RESTORED_ANSWER" }], timestamp: 1, stopReason: "stop" },
+			},
+		];
+		const { writes } = make(fakeSession({ branch }));
+		const text = textsUnder(writes, "main").join(" ");
+		expect(text).toContain("RESTORED_QUESTION");
+		expect(text).toContain("RESTORED_ANSWER");
+	});
+
+	it("starts a fresh session on an empty transcript", () => {
+		const { writes } = make(fakeSession());
+		expect(textsUnder(writes, "main").join(" ")).not.toMatch(/RESTORED_/);
+	});
+});
 
 describe("dock header", () => {
 	beforeEach(() => vi.useFakeTimers({ now: 1_000_000 }));

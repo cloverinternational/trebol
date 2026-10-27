@@ -81,6 +81,11 @@ export const PI_COMPOSER_CSS = `
 .sf-overlay[data-role='pi.ask'] [data-role='pi.ask.actions'] { gap: 12px; align-items: center; }
 .sf-overlay[data-role='pi.ask'] [data-role='pi.ask.action'] { padding: 6px 12px; border-radius: var(--r-ctl); background: var(--l1); cursor: pointer; }
 [data-role='pi.board'] { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 4px; }
+/* /btw card, inline in the composer slot: the newest exchange reads as body text, the input row is the boundary. */
+[data-role='pi.btw.question'] { color: var(--t2); }
+[data-role='pi.btw.answer'] { color: var(--t1); overflow-wrap: anywhere; }
+[data-role='pi.btw.input'] { padding: 6px 0 2px; margin-top: 6px; border-top: 1px solid var(--l2); }
+[data-role='pi.btw.hint'] { gap: 12px; align-items: center; margin-top: 2px; color: var(--t3); }
 [data-role='pi.board.column'] { display: flex; flex-direction: column; gap: 4px; min-width: 0; padding: 6px; border-radius: 8px; border: 1px solid var(--l2); background: color-mix(in srgb, var(--l1) 55%, transparent); }
 [data-role='pi.board.head'] { color: var(--t2); font-size: 10px; font-weight: 600; letter-spacing: 0.02em; padding: 0 2px 4px; border-bottom: 1px solid var(--l2); }
 [data-role='pi.board.card'] { padding: 5px 7px; border-radius: 6px; border: 1px solid var(--l2); background: var(--card); color: var(--t1); cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

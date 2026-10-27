@@ -184,6 +184,55 @@ passes `cursor` and `selection` to the editor node. Whether Tern draws the
 selection highlight has not been observed, and no visible Tern window was
 captured.
 
+### Session durability: resume only after the machine went down (2026-10-27)
+
+Four "Tern went away" cases, four mechanisms — and only the last is a resume:
+
+| Event | Process | What Tern does | Next `pi` here |
+| --- | --- | --- | --- |
+| Window closed | keeps running | daemon keeps the pty; reattach redraws (`protocol/operations.md#Persistence`) | n/a (same process) |
+| Pane closed, `pi` quit, ctrl-c | dies (SIGHUP → `restore()` → `exit(128)`) | live surfaces close with `keep:true` | **new conversation** |
+| `/new` | survives | runtime replaces the session | **new conversation** |
+| Machine crash / reboot | dies | restored panes start a **new login shell** (`concepts/lifecycle.md#Daemon restart and upgrade`); pane ids persist in `daemon.state` (`{"id":…,"cwd":…,"command":null}`), so `TERN_PANE` still matches | **reopens that pane's session** |
+
+`.pi/lib/tern/startup-session.ts` records `{sessionFile, pid, cwd, boot}` per `TERN_PANE` in
+`~/.pi/agent/tern-panes.json`; `bootGeneration(now, os.uptime())` identifies the boot to the
+minute. `chooseStartupSession` opens the recorded session only when the record's boot is an earlier
+one, the file exists and no live runner owns it; `same-boot`, `owner-alive`, `missing`,
+`no-candidate` and `PI_TERN_FRESH`/`PI_TERN_RESUME=0` all start new. Records without a boot
+generation are discarded, and the "most recent session for this directory" fallback was removed —
+it was what made a closed pane come back to a conversation the user had finished with.
+
+`/new` runs through Pi's runtime (new `newSession` bridge option, wired to `runtime.newSession()`),
+is listed as a Tern builtin, and the rebound session is recorded, so the pane leaves the old
+conversation behind immediately. `bridge.start()` seeds the transcript from `getBranch()`, so a
+reopened pane draws its history on the first frame.
+
+omp's comparable logic, read out of the installed bundle
+(`~/Library/Application Support/Tern/omp/bin/omp`): a settings entry `autoResume` (boolean,
+**default false**, "Automatically resume the most recent session in the current directory"),
+`-c/--continue`, `-r/--resume`, and `--restore`, which resumes *and* continues the interrupted turn
+and its subagents. Pi now matches the first three and is stricter about *when*: omp's `autoResume`
+is cwd-scoped, this is boot-scoped. Re-driving an interrupted turn is deliberately not implemented;
+`rebind()` marks interrupted tool calls as cancelled.
+
+Verification: `npx vitest run .pi/test/tern` passes (385 tests at the time of writing, 13 new in
+`startup-session.test.ts`, 3 `/new` cases in `commands.test.ts`, 2 resumed-session cases in
+`dock.test.ts`) and `node --experimental-strip-types tools/e2e/tern-durable-resume.mjs` prints
+`PASS tern durable resume: post-boot resume renders, same-boot and forgotten records start over, a
+live owner is never doubled`. Live in Tern pane `588706872295426` (`/tmp/tern-fresh-live/proj`):
+first start wrote `pid 38668`; killing it and restarting `pi` in the same boot opened a **different**
+session file (`17-24-10` → `17-24-19`); `/new` moved the record to `17-24-25` and the trace shows
+`Started a new session`; a record rewritten as pre-boot (`boot − 1`, session `17-27-21`) was
+reopened by `pid 74306`, and that runner's first frame was
+`["msg-0523ffda","pi.user","","LIVE_PREBOOT_MARKER"]`.
+
+Not established: pixels. The restored row is read from the dogfooding UI trace
+(`~/.pi/agent/tern-trace/`), not from a Tern screenshot; `tern read` returns grid text, which shows
+the pane's shells but not the native `main` region. A Tern daemon restart **without** a reboot (app
+crash, upgrade) is not a resume either: panes come back as shells and `pi` starts fresh; use
+`/resume` there.
+
 ## Code Puppy
 
 `tern-plugins/code-puppy/` has a Luau Tern launcher/status plugin (local
@@ -213,3 +262,25 @@ backup while it is the only saved copy of the former direct implementation.
 - Not verified: a live Tern window selecting a session and showing the transcript change; the cancel path in a real Tern dialog. Both need a human-driven Tern window.
 - Known gap: the runtime's `beforeSessionInvalidate` hook is not used, so a Tern dialog open during a switch is not explicitly torn down.
 - Responsiveness: `/resume` prints "Loading sessions…" as soon as it is submitted (`bridge.ts` #runBuiltin). The picker opens from the 10 newest sessions for this cwd (`extensions/tern-resume/extension.ts` firstPage, about 130 ms on the 44-session workspace history). The full `SessionManager.list` (about 950 ms here) runs only when the user picks "Show all sessions".
+
+### Style and geometry lint (`tools/tern/style-lint.mjs`)
+
+The oracle is Tern, not a reading of our CSS. `npm run lint:tern` starts a headless `tern serve --control`,
+loads the three sheets the bridge registers (composer, work, startup) and replays real recorded Pi sessions
+(`.pi/test/tern/fixtures/turn-work/*.events.jsonl`) through the real `PiTernBridge`. Each state is played at
+480/800/1100/1400 px; `tree` and `dump` then report every painted box, its computed type and its parent path.
+
+- Rules: `spill-region` (a box leaves its surface), `spill-parent` (a box exceeds its parent), `clipped-line`
+  (text in a box shorter than a line), `invisible`, `type-scale` (our roles outside 9.5/10/10.5/11/13 px),
+  `space-scale`, `selector-subset`, `length-unit`, `sheet-parse` (Tern's own parser verdict), `fold-reset`
+  (a stateful node deleted and re-added, which drops the host's fold/focus), `dock-edges`.
+- `tools/tern/style-lint.baseline` records measurements we accept, with the tolerance and the reason. Today
+  that is only Tern's own sheet bleed (`.sf-tool-head` 6px per side, `.sf-ck-ph` 2px, the spinner 0.7px). Any
+  other excess fails the run, and the summary reports how many measurements the baseline absorbed.
+- `npm run lint:tern:self-test` seeds each defect (an invalid `:has()` rule, an 8px font, a 13px margin, a
+  3000px box) and fails if a rule stays silent, so a green run means something.
+- Found and fixed: the work card's Activity chip was derived from "a step is running right now", so every step
+  boundary deleted and re-added it (`fold-reset`, 18 errors before the change in `bridge.ts`, 0 after).
+- Limits: it measures painted geometry, so native host folds, hover popovers and focus rings are invisible to
+  it; states come from recorded sessions, not from live keystrokes; and `tree` omits elements scrolled out of
+  view. None of those are claimed as covered.

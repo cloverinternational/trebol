@@ -27,6 +27,7 @@ import { TERN_WORK_CSS } from "./work-style.ts";
 import { projectTaskView, type TaskView, type TaskViewRow, type TaskViewSessionManager } from "./task-view.ts";
 import { buildBoard } from "./task-board.ts";
 import { ASK_OPTIONS_ID, TernAskDialog, type AskEventBus } from "./ask-dialog.ts";
+import { TernBtwCard } from "./btw-card.ts";
 import { TernExtensionUI, UI_PROMPT_LIST_ID } from "./ext-ui.ts";
 import { AUTOCOMPLETE_ID, SlashAutocomplete, type Edit } from "./autocomplete.ts";
 import { expandMentions } from "./mentions.ts";
@@ -114,6 +115,8 @@ interface Item {
 	turnFailed?: boolean;
 	// A visible custom message (goal, monitor, schedule wakeup) that started its own agent turn.
 	turnStart?: boolean;
+	// A native chart validated out of a custom message's `details.tsp` (auto-graph). Draws instead of its text.
+	chart?: TspNode;
 	// An assistant message that calls tools: its text is narration of the work, folded with the steps.
 	callsTools?: boolean;
 	// Live only: an assistant message between message_start and message_end.
@@ -178,6 +181,44 @@ function transcriptEntry(message: unknown): { role: Exclude<Role, "tool">; turnS
 function sessionIdOf(session: PiSessionLike): string | undefined {
 	const id = session.sessionManager?.getSessionId?.();
 	return typeof id === "string" && id ? id : undefined;
+}
+
+const CHART_LABEL_LIMIT = 120;
+// Auto-graph's planner caps a table at 24 rows; larger series are not a shape we draw.
+const CHART_SERIES_LIMIT = 24;
+
+function boundedLabel(value: unknown): string | undefined {
+	return typeof value === "string" && value !== "" && value.length <= CHART_LABEL_LIMIT ? value : undefined;
+}
+
+// A custom message's `details` is arbitrary extension data, not a node tree to execute. Auto-graph puts its
+// plan in `details.tsp`; accept only the documented `chart` element with a bars/spark series and no children,
+// re-copying every prop, so nothing else in that payload can reach the surface. Anything else keeps the
+// message's one-line notice.
+function chartNodeOf(message: unknown, id: string): TspNode | null {
+	const details = (message as { details?: unknown } | null)?.details;
+	const payload = (details as { tsp?: unknown } | null)?.tsp;
+	if (typeof payload !== "object" || payload === null) return null;
+	const node = payload as { k?: unknown; p?: unknown; c?: unknown };
+	if (node.k !== "chart" || (node.c !== undefined && (!Array.isArray(node.c) || node.c.length > 0))) return null;
+	if (typeof node.p !== "object" || node.p === null) return null;
+	const props = node.p as { kind?: unknown; size?: unknown; summary?: unknown; series?: unknown };
+	if (props.kind !== "bars" && props.kind !== "spark") return null;
+	if (!Array.isArray(props.series) || props.series.length === 0 || props.series.length > CHART_SERIES_LIMIT) return null;
+	const series: Array<{ value: number; label?: string; title?: string }> = [];
+	for (const entry of props.series) {
+		if (typeof entry !== "object" || entry === null) return null;
+		const point = entry as { value?: unknown; label?: unknown; title?: unknown };
+		if (typeof point.value !== "number" || !Number.isFinite(point.value) || point.value < 0) return null;
+		if (point.label !== undefined && boundedLabel(point.label) === undefined) return null;
+		if (point.title !== undefined && boundedLabel(point.title) === undefined) return null;
+		const label = boundedLabel(point.label);
+		const title = boundedLabel(point.title);
+		series.push({ value: point.value, ...(label !== undefined ? { label } : {}), ...(title !== undefined ? { title } : {}) });
+	}
+	const summary = boundedLabel(props.summary);
+	const size = props.size === "sm" || props.size === "md" || props.size === "lg" ? props.size : undefined;
+	return { id, k: "chart", p: { kind: props.kind, ...(size !== undefined ? { size } : {}), ...(summary !== undefined ? { summary } : {}), series } };
 }
 
 function modelIdentity(model: unknown): string | undefined {
@@ -270,7 +311,8 @@ export class TranscriptProjector {
 			}
 			const shown = transcriptEntry(message);
 			if (!shown) continue;
-			this.#items.push({ id: entry.id, role: shown.role, text: messageText(message), ...(shown.turnStart ? { turnStart: true } : {}), ...(toolCallsOf(message).length > 0 ? { callsTools: true } : {}) });
+			const chart = shown.turnStart ? chartNodeOf(message, `chart-${entry.id}`) : null;
+			this.#items.push({ id: entry.id, role: shown.role, text: messageText(message), ...(shown.turnStart ? { turnStart: true } : {}), ...(chart ? { chart } : {}), ...(toolCallsOf(message).length > 0 ? { callsTools: true } : {}) });
 			if (isAbortedAssistant(message)) this.#markTurnAborted();
 			if (isFailedAssistant(message)) this.#markTurn("turnFailed");
 			// Persisted tool calls live in the assistant message; their results arrive later as toolResult entries.
@@ -342,7 +384,9 @@ export class TranscriptProjector {
 					this.#localUserPending = false;
 					return false;
 				}
-				const item: Item = { id: `m${++this.#seq}`, role, text: messageText(event.message), ...(shown.turnStart ? { turnStart: true } : {}), ...(toolCallsOf(event.message).length > 0 ? { callsTools: true } : {}), ...(role === "assistant" ? { streaming: true } : {}) };
+				const id = `m${++this.#seq}`;
+				const chart = shown.turnStart ? chartNodeOf(event.message, `chart-${id}`) : null;
+				const item: Item = { id, role, text: messageText(event.message), ...(shown.turnStart ? { turnStart: true } : {}), ...(chart ? { chart } : {}), ...(toolCallsOf(event.message).length > 0 ? { callsTools: true } : {}), ...(role === "assistant" ? { streaming: true } : {}) };
 				this.#items.push(item);
 				this.#current = item;
 				return true;
@@ -481,6 +525,11 @@ export class TranscriptProjector {
 			if (item.role === "assistant" && item.text.trim() === "") return;
 			// A visible custom notice (agent completed, goal, monitor, schedule) is one muted line, never a block.
 			if (item.turnStart) {
+				// Auto-graph's planned chart draws natively; its ASCII text is the fallback for renderers without Tern.
+				if (item.chart) {
+					out.push(item.chart);
+					return;
+				}
 				out.push({ id: `msg-${item.id}`, k: "text", p: { role: "tern.notice", tone: "muted", wrap: "none", truncate: "end", text: goalLine(item.text) } });
 				return;
 			}
@@ -589,7 +638,7 @@ function toolGroupNode(items: Item[], ctx: GroupContext): TspNode[] {
 				...(badges.length > 0 ? { badges } : {}),
 				frame: "card", collapsible: true, collapsed: minimized, meta: [steps],
 			},
-			c: minimized ? workBody(id, items, ctx.currentTask, ctx.outputExpanded, "all", ctx.goal) : workBody(id, items, ctx.currentTask, ctx.outputExpanded, mode, ctx.goal),
+			c: minimized ? workBody(id, items, ctx.currentTask, ctx.outputExpanded, "all", ctx.goal, true) : workBody(id, items, ctx.currentTask, ctx.outputExpanded, mode, ctx.goal, true),
 		};
 		// Only a minimized live group needs the one-line tail; the activity panel already carries narration.
 		const tail: TspNode[] = minimized && ctx.tail ? [{ id: `${id}-tail`, k: "text", p: { role: "tern.work-tail", tone: "muted", wrap: "none", truncate: "end", text: ctx.tail } }] : [];
@@ -617,14 +666,14 @@ const textNode = (id: string, role: string, text: string, tone: string, extra: R
 // Every step is its own `tool` head, in call order, with narration written between them left in place. A nested
 // `tool` draws unframed inside the group card, so a turn reads as one card of steps rather than one card of rows.
 // The group's controls come first, so an opened card shows how to fold it again without scrolling past the steps.
-function workBody(groupId: string, items: readonly Item[], currentTask: CurrentTask | undefined, outputExpanded: boolean, mode: DetailView | "all", goal = ""): TspNode[] {
-	return mode === "activity" ? activityBody(groupId, items, currentTask, outputExpanded, goal) : allStepsBody(groupId, items, currentTask, outputExpanded, mode === "all" && hasLiveControls(items), goal);
+function workBody(groupId: string, items: readonly Item[], currentTask: CurrentTask | undefined, outputExpanded: boolean, mode: DetailView | "all", goal = "", live = false): TspNode[] {
+	return mode === "activity" ? activityBody(groupId, items, currentTask, outputExpanded, goal) : allStepsBody(groupId, items, currentTask, outputExpanded, mode === "all" && live, goal);
 }
 
-// Settled groups have no activity panel, so they offer only Collapse work.
-function hasLiveControls(items: readonly Item[]): boolean {
-	return items.some((item) => item.role === "tool" && item.status === "running");
-}
+// A settled group has no activity panel, so it offers only Collapse work. Live groups always offer the mode
+// chip, for the whole turn: deriving it from "a step is running right now" deleted and re-added the chip at
+// every step boundary, which is a new element each time and drops whatever the host had on it (measured by
+// tools/tern/style-lint.mjs, rule fold-reset).
 
 function activityBody(groupId: string, items: readonly Item[], currentTask: CurrentTask | undefined, outputExpanded: boolean, goal: string): TspNode[] {
 	const out: TspNode[] = [...controls(groupId, "activity")];
@@ -926,6 +975,8 @@ export interface BridgeOptions {
 	// Reload the active Pi session and return the current on-disk surface CSS.
 	// JavaScript modules already loaded by Node cannot be replaced in place.
 	reload?: () => Promise<{ css: string; pluginStatus: string }>;
+	// Starts a new Pi session through the runtime, the same path /new takes natively. Omitted: /new is refused.
+	newSession?: () => Promise<{ cancelled?: boolean } | void>;
 	// Node kinds from Tern's hello reply; OMP folds the effort glyph into the model chip when `effort` exists.
 	kinds?: readonly string[];
 	// Pi's theme object, handed to extension component factories.
@@ -982,11 +1033,13 @@ export class PiTernBridge {
 	readonly #onRenderTap?: (nodes: readonly TspNode[], trigger: string, busy: boolean) => void;
 	#trigger = "ui";
 	readonly #commands: CommandSource;
+	readonly #newSession?: () => Promise<{ cancelled?: boolean } | void>;
 	readonly #complete: SlashAutocomplete;
 	#sessionId: string | undefined;
 	readonly #events?: AskEventBus;
 	readonly #reload?: () => Promise<{ css: string; pluginStatus: string }>;
 	#dialog: TernAskDialog | null = null;
+	#btw: TernBtwCard | null = null;
 	#reloading = false;
 	#unsubscribe: (() => void) | null = null;
 	#workUnsubscribe: (() => void) | null = null;
@@ -1040,6 +1093,7 @@ export class PiTernBridge {
 		this.#onEventTap = options.onEvent;
 		this.#onRenderTap = options.onRender;
 		this.#commands = options.commands ?? EMPTY_COMMAND_SOURCE;
+		this.#newSession = options.newSession;
 		this.#events = options.events;
 		this.#reload = options.reload;
 		this.#model = modelDisplayName(session.model);
@@ -1053,7 +1107,8 @@ export class PiTernBridge {
 			},
 			getDraft: () => this.#editor.expandedText,
 			setDraft: (text) => this.setDraft(text),
-			remoteFlowActive: () => this.#dialog?.active ?? false,
+			// Both native flows own the screen: /btw keeps its custom() alive the same way ask-user does.
+			remoteFlowActive: () => Boolean(this.#dialog?.active || this.#btw?.active),
 			columns: () => this.#columns,
 		}, options.theme);
 		this.#complete = new SlashAutocomplete({
@@ -1122,6 +1177,11 @@ export class PiTernBridge {
 		// The blob precedes any frame that references it, as with artifact previews.
 		for (const chunk of encodeTspBlob(this.#logo.id, this.#logo.mime, this.#logo.base64)) this.#write(chunk);
 		this.#loadRepo();
+		// A runner that reopened an existing session starts on a persisted branch: seed the transcript
+		// before the first frame, or a resumed pane would come back with an empty main region. A fresh
+		// session has an empty branch, so this costs nothing there.
+		const branch = this.#session.sessionManager?.getBranch?.();
+		this.#projector.replaceFromSessionBranch(Array.isArray(branch) ? branch : []);
 		this.#unsubscribe = this.#session.subscribe((event) => this.#onEvent(event));
 		this.#workUnsubscribe?.();
 		this.#workUnsubscribe = onRunningWorkChange(() => this.#render());
@@ -1130,6 +1190,8 @@ export class PiTernBridge {
 		if (this.#events) {
 			this.#dialog = new TernAskDialog(this.#events, () => this.#render());
 			this.#dialog.start();
+			// /btw publishes snapshots on the same bus; the card takes the composer slot while it is open.
+			this.#btw = new TernBtwCard(this.#events, () => this.#render());
 		}
 		this.#syncSession();
 		this.#refreshGit();
@@ -1204,8 +1266,9 @@ export class PiTernBridge {
 	// OMP's composer (composer-view.ts) fed by Pi: context window and compaction point, model, thinking
 	// level, git status of Pi's cwd, session cost. OMP's tok/s, focus crumbs and shell mode have no Pi source.
 	#dock(): TspNode[] {
-		// An open ask flow takes over the input slot: its inline card replaces the composer.
+		// An open ask or /btw flow takes over the input slot: its inline card replaces the composer.
 		if (this.#dialog?.active) return [...this.#taskTop(), ...this.#dialog.nodes(this.#columns)];
+		if (this.#btw?.active) return [...this.#taskTop(), ...this.#btw.nodes()];
 		const work = this.#backgroundWork();
 		const usage = contextUsageOf(this.#session) as { tokens?: unknown; contextWindow?: unknown } | undefined;
 		const window = typeof usage?.contextWindow === "number" && usage.contextWindow > 0 ? usage.contextWindow : undefined;
@@ -1670,6 +1733,10 @@ export class PiTernBridge {
 			return;
 		}
 		if (this.#ui.active) return this.#ui.type(text);
+		if (this.#btw?.active) {
+			this.#btw.input(text);
+			return;
+		}
 		if (this.#dialog?.active) {
 			this.#dialog.input(text);
 			return;
@@ -1750,6 +1817,7 @@ export class PiTernBridge {
 			return;
 		}
 		if (this.#ui.active) return this.#ui.backspace();
+		if (this.#btw?.active) return this.#btw.backspace();
 		if (this.#dialog?.active) return this.#dialog.backspace();
 		this.#editDraft(() => this.#editor.backspace(), { kind: "backspace" });
 	}
@@ -1786,6 +1854,12 @@ export class PiTernBridge {
 		if (this.#ui.active) {
 			this.#lastEligibleEscapeAt = 0;
 			this.#ui.cancel();
+			return false;
+		}
+		// /btw: Escape aborts a running side question, otherwise it closes the box and restores the composer.
+		if (this.#btw?.active) {
+			this.#lastEligibleEscapeAt = 0;
+			this.#btw.escape();
 			return false;
 		}
 		if (this.#dialog?.active) {
@@ -1871,6 +1945,8 @@ export class PiTernBridge {
 		if (msg.verb === "e" && msg.body.ev === "action") {
 			if (typeof msg.body.act === "string" && this.#dialog?.handleAction(msg.body.act)) return undefined;
 			if (typeof msg.body.id === "string" && this.#dialog?.handleAction(msg.body.id)) return undefined;
+			if (typeof msg.body.act === "string" && this.#btw?.handleAction(msg.body.act)) return undefined;
+			if (typeof msg.body.id === "string" && this.#btw?.handleAction(msg.body.id)) return undefined;
 		}
 		if (msg.verb === "e" && (msg.body.ev === "select" || msg.body.ev === "activate") && msg.body.id === ASK_OPTIONS_ID && typeof msg.body.item === "string" && this.#dialog?.handleSelect(msg.body.item, msg.body.ev === "activate")) return undefined;
 		if (msg.verb === "e" && (msg.body.ev === "select" || msg.body.ev === "activate") && typeof msg.body.id === "string" && msg.body.id.startsWith(`${AUTOCOMPLETE_ID}.`)) {
@@ -2072,9 +2148,13 @@ export class PiTernBridge {
 	submit(text: string): Promise<void> {
 		if (this.#closed) return Promise.resolve();
 		if (this.#modelPickerOpen) return this.#applyModelSelection();
-		// An open prompt or ask dialog owns Enter; the composer must not send a prompt underneath it.
+		// An open prompt, ask dialog or /btw card owns Enter; the composer must not send a prompt underneath it.
 		if (this.#ui.active) {
 			this.#ui.submit();
+			return Promise.resolve();
+		}
+		if (this.#btw?.active) {
+			this.#btw.request();
 			return Promise.resolve();
 		}
 		if (this.#dialog?.active) {
@@ -2201,7 +2281,7 @@ export class PiTernBridge {
 	submitDraft(): Promise<void> {
 		if (this.#closed) return Promise.resolve();
 		if (this.#treePickerOpen) return this.#navigateSessionTree();
-		const owned = this.#ui.active || this.#dialog?.active || this.#modelPickerOpen;
+		const owned = this.#ui.active || this.#dialog?.active || this.#btw?.active || this.#modelPickerOpen;
 		if (!owned && this.#complete.active && !this.#complete.enter()) return Promise.resolve();
 		this.#complete.close();
 		return this.submit(this.#editor.expandedText);
@@ -2220,6 +2300,14 @@ export class PiTernBridge {
 			if (name === "model") return await this.#modelCommand(args);
 			if (name === "quit") return void this.close();
 			if (this.#busy && name !== "name") return say(`busy: /${name} runs when the current turn finishes or is cancelled`);
+			// Pi replaces the session through its runtime, which rebinds this bridge: the transcript is
+			// reseeded from the new (empty) session, so the pane starts over here exactly as /new does.
+			if (name === "new") {
+				if (!this.#newSession) return say("new session unavailable in this Tern pane");
+				const outcome = await this.#newSession();
+				if (outcome?.cancelled) return say("New session cancelled");
+				return say("Started a new session");
+			}
 			// /resume is Pi's picker name; Tern runs the extension command that owns the picker (extensions/tern-resume).
 			if (name === "resume") {
 				say("Loading sessions…");

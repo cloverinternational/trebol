@@ -4,7 +4,55 @@ Release metadata is kept in `package.json`, `update-manifest.json`, and this fil
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-27
+
+### Highlights
+
+- Recoverable tool-output spillover: no bound silently destroys output. The general `tool_result` boundary and the Bash formatter write the complete text to a private temporary file before clipping and name it in what the model reads, the boundary is a plain Pi event handler so it survives `--no-hooks`, and the budgets are configurable estimated tokens.
+- Tern pane durability on the terms a user would ask for: a pane reopens its own conversation only when the machine went down, `/new` works in the pane through Pi's runtime, and a reopened pane draws its history on the first frame.
+- `/btw` takes over the input slot instead of floating, in both the TUI and Tern, where it previously died with "This panel needs Pi's terminal UI".
+- Tern's turn card is a data projection: one tool head per call in call order, `diff` nodes for `apply_patch`, subagent rows, a TaskManage checklist, and Tern drawing and clocking only what changes every second.
+- Claw runs can outlive their own completion (`keepOpen`) and be resumed into their recorded session, and every worker run carries an always-on completion goal the supervisor reconciles.
+- Hoja read tools answer date questions: `createdAt`/`updatedAt`, server-side state/assignee/project/date filters on `hoja_list`, and `hoja_get` looked up by identifier instead of scanning the 250 most recent issues.
+- `Build and test` is green on `main` again after being red since 2026-10-16, with the warm-up-gated session hooks, the poll-boundary line split, the symlink guards on macOS, the quadratic `diffNode`, and the host-dependent tests all fixed rather than retried.
+- New measured Tern check: `npm run lint:tern` replays recorded fixtures through the real bridge into a headless Tern at four widths; it is how the fold-reset chip defect was found.
+
+### Fixed
+
+- Oversized tool text now spills to recoverable temporary files rather than
+  silently losing its middle. Configurable estimated-token budgets cover all
+  text blocks, including results with images, independently of task-hook gates.
+  Bash reports spill-write failures honestly instead of publishing empty paths.
+
+- `/btw` now takes over the input slot instead of floating: the command calls Pi's `custom()` with no overlay
+  options, so the host clears the editor container, mounts `BtwView` in the input slot and restores the editor plus
+  the saved draft on close — the same surface ask-user already uses. `BtwView` delegates `focused` to its inner
+  `Input` so the caret, hardware cursor and IME behave like the editor it replaced. In Tern, `/btw` previously died
+  at `TernExtensionUI.custom()` with "This panel needs Pi's terminal UI"; the extension now publishes `BtwState`
+  snapshots on `@pi-swarm/btw:state` and `TernBtwCard` (`.pi/lib/tern/btw-card.ts`) draws the same flow inline in
+  the dock, replacing the composer exactly as the ask dialog does (`#dock`, `remoteFlowActive`). Typing, Enter
+  (submit), Escape (abort while running, close when idle) and pointer actions are routed to the card, and abort or
+  close come back on `@pi-swarm/btw:abort`/`@pi-swarm/btw:close`, the same ask/close split BtwView uses. Snapshots
+  are whole-state, so a missed event cannot desync the card; malformed ones are ignored rather than drawn.
+  Covered by `.pi/test/ui/swarm-btw.test.ts` (mount has no overlay options) and `.pi/test/tern/btw-card.test.ts`
+  (dock replacement, input ownership, abort/close, malformed snapshots).
+
 ### Added
+
+- Pi in a Tern pane reopens its conversation **only after the machine went down**. `.pi/lib/tern/startup-session.ts`
+  records which session each `TERN_PANE` owns in `~/.pi/agent/tern-panes.json`, together with the owner pid and
+  the boot generation; a start reopens it only when the record came from an earlier boot, the file still exists
+  and no live runner owns it. A pane that outlived its program in the same boot (ctrl-c, pane closed, `/new`, a
+  Tern-only restart) starts a new conversation, so the old "most recent session" fallback is gone. `/new` now
+  works in the pane: it goes through Pi's runtime via a new `newSession` bridge option, and the rebound session is
+  recorded, leaving the old conversation behind at once. `PI_TERN_FRESH=1` (or `PI_TERN_RESUME=0`) still forces a
+  new conversation. `bridge.start()` seeds the transcript from the session's branch, so a reopened pane renders
+  its history on the first frame instead of opening empty. omp's equivalent is its `autoResume` setting (default
+  off) plus `--restore` for the interrupted turn, which this does not re-drive. Covered by
+  `.pi/test/tern/startup-session.test.ts`, the `/new` cases in `.pi/test/tern/commands.test.ts`, the
+  resumed-session cases in `.pi/test/tern/dock.test.ts`, and `tools/e2e/tern-durable-resume.mjs`; verified live
+  in a Tern pane: a same-boot restart opened a new session file, `/new` moved the record to a fresh session, and
+  a record marked as pre-boot reopened its session with `LIVE_PREBOOT_MARKER` in the first rendered frame.
 
 - Hoja read tools that can answer date questions (#352): `hoja_list` and `hoja_get` still send only two fixed GraphQL
   `query` documents and never a mutation, so both stay read-only. `hoja_list` now returns `createdAt` and `updatedAt`
@@ -89,6 +137,9 @@ Release metadata is kept in `package.json`, `update-manifest.json`, and this fil
     its own blob instead of the startup card's image, the Mermaid follow-up names its sources only for questions about
     that hook, memory search asserts the any-term BM25 ranking, and the Tern command tests read the accumulated surface
     instead of the last frame, which the asynchronous startup refresh could overwrite.
+  - The new spill test no longer shells out to `rg`, which a bare runner does not install: the retrieval assertion
+    uses POSIX `grep` plus a direct read of the spilled file, so the suite keeps passing on a host with no
+    developer tools beyond the shell.
 - Crash and portability fixes around the edges of a session: an MCP server that dies or closes its pipes now surfaces
   as a transport failure instead of an uncaught `EPIPE` (its last stderr line, control codes stripped and credentials
   redacted, becomes the error), a skill watcher that hits inotify's `ENOSPC` is dropped instead of aborting the

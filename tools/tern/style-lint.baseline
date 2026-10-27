@@ -1,0 +1,7 @@
+# Accepted geometry, measured. Each line: <rule> <element label substring> <=<max excess px>  # why
+# Tern's own .sf-tool-head sheet bleeds 6px on each side of its card so a hover background can bleed.
+# Tern's own sheets bleed a little: the tool head by 6px each side so a hover background can bleed,
+# the spinner icon by a rounding step. Measured, not argued.
+spill-parent div.sf-tool-head <=12.5
+spill-parent i.sf-tool-spin <=1
+spill-parent div.sf-ck-ph <=4.5

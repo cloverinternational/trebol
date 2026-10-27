@@ -6,7 +6,8 @@
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { readFile } from "node:fs/promises";
-import { appendFileSync } from "node:fs";
+import { appendFileSync, existsSync } from "node:fs";
+import { uptime } from "node:os";
 import { join } from "node:path";
 import {
 	createAgentSessionFromServices,
@@ -23,10 +24,33 @@ import { PiTernBridge, type PiSessionLike } from "./bridge.ts";
 import { createUiTrace } from "./ui-trace.ts";
 import { keyEffect } from "./keys.ts";
 import { detectTern, helloQuery, shouldProbe, splitInput } from "./tsp.ts";
+import { bootGeneration, clearPaneRecord, openStartupSession, paneKey, pidAlive, readPaneBook, recordPaneSession } from "./startup-session.ts";
 
 const PROBE_MS = 1000;
 const stdin = process.stdin;
 const stdout = process.stdout;
+// Which pane owns which session, so a pane that lost its runner reopens its conversation instead of
+// starting over. See .pi/lib/tern/startup-session.ts.
+const PANE_BOOK = join(getAgentDir(), "tern-panes.json");
+// A reboot is the only restart that reopens a conversation; see .pi/lib/tern/startup-session.ts.
+const BOOT = bootGeneration(Date.now(), uptime());
+
+// A machine that went down takes the pane's program with it, and Tern restores the pane (same id) as a
+// plain login shell. Reopening that pane's own session is the whole durability story; a pane the user
+// closed on purpose starts over, and a live owner is never reopened.
+function startupSession(cwd: string): SessionManager {
+	return openStartupSession({
+		sessionManager: SessionManager,
+		cwd,
+		fresh: process.env.PI_TERN_FRESH === "1" || process.env.PI_TERN_RESUME === "0",
+		key: paneKey(process.env),
+		book: readPaneBook(PANE_BOOK),
+		selfPid: process.pid,
+		exists: (sessionFile) => existsSync(sessionFile),
+		alive: pidAlive,
+		boot: BOOT,
+	});
+}
 
 function runNativePi(reason: string): void {
 	process.stderr.write(`[tern: ${reason}; starting native pi]\n`);
@@ -158,8 +182,27 @@ function startTsp(): void {
 		const runtime = await createAgentSessionRuntime(createRuntime(events), {
 			cwd,
 			agentDir: getAgentDir(),
-			sessionManager: SessionManager.create(cwd),
+			sessionManager: startupSession(cwd),
 		});
+		// Pi writes a session file at the first message, not at startup, so the pane record is written
+		// from the events and after every session replacement rather than here. Only a changed file is
+		// recorded, so a long turn does not rewrite the book per event.
+		// `null` records "this pane has no persisted session": after /new the old record must go, or a
+		// later reboot would reopen the conversation the user just left.
+		let recordedFile: string | null | undefined;
+		const rememberSession = (session: typeof runtime.session): void => {
+			const key = paneKey(process.env);
+			if (!key) return;
+			const file = session.sessionManager?.getSessionFile?.() ?? null;
+			if (file === recordedFile) return;
+			recordedFile = file;
+			try {
+				if (file) recordPaneSession(PANE_BOOK, key, { sessionFile: file, pid: process.pid, cwd, updatedAt: Date.now(), boot: BOOT });
+				else clearPaneRecord(PANE_BOOK, key);
+			} catch {
+				// A record failure must never affect the session; the pane only loses its resume point.
+			}
+		};
 		// Extension component factories receive Pi's theme proxy, which needs an initialised theme.
 		try {
 			initTheme(runtime.session.settingsManager.getTheme());
@@ -182,6 +225,7 @@ function startTsp(): void {
 			// Full event payloads for replay fixtures are recorded only when PI_TERN_EVENT_LOG is set.
 			onEvent: (event) => {
 				uiTrace?.event(event);
+				rememberSession(runtime.session);
 				if (!process.env.PI_TERN_EVENT_LOG) return;
 				try {
 					appendFileSync(process.env.PI_TERN_EVENT_LOG, `${JSON.stringify({ at: Date.now(), sessionFile: runtime.session.sessionManager?.getSessionFile?.(), event })}\n`);
@@ -209,6 +253,8 @@ function startTsp(): void {
 				}
 				return { css, pluginStatus };
 		},
+			// /new goes through Pi's runtime so the session is replaced, persisted and rebound as in Pi's own UI.
+			newSession: async () => runtime.newSession(),
 		});
 		bridge.start("pi");
 		// Command-context actions route to the runtime, which performs the real session replacement.
@@ -226,9 +272,11 @@ function startTsp(): void {
 			next.bindExtensions({ mode: "tui", uiContext: bridge!.uiContext() as never, commandContextActions: commandContextActions as never });
 		runtime.setRebindSession(async (next) => {
 			bridge?.rebind(next as unknown as PiSessionLike);
+			rememberSession(next);
 			await bindSession(next);
 		});
 		await bindSession(runtime.session);
+		rememberSession(runtime.session);
 		stdout.write("\r\n[tern: enter sends; esc cancels or clears; double esc on an empty draft opens the configured session action; ctrl-c closes]\r\n");
 	};
 

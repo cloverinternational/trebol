@@ -9,7 +9,7 @@ import { planExitDetected, simulationReminderMessage } from "../context/swarm-pl
 import { sleepBlockReason } from "../policy/swarm-sleep-blocker.ts";
 import { STDIN_CONFLICT_HOOK_NAME, StdinConflictHook } from "./swarm-stdin-conflict.ts";
 import { rawPi } from "./swarm-tool-surface.ts";
-import { elideOversizedToolOutput } from "./swarm-toolout.ts";
+import { installToolOutputSpill } from "./swarm-toolout-boundary.ts";
 import { TaskGateResumeBudget, evaluateTaskGateResume } from "./task-gate-resume.ts";
 
 type Pi = any;
@@ -73,6 +73,11 @@ export function registerSwarmBuiltinHooks(pi: Pi, options: SwarmBuiltinHookOptio
   const owner = rawPi(pi as object);
   const existing = registrations.get(owner);
   if (existing) return existing;
+  // Output spillover is not a hook: it is installed straight on Pi's
+  // `tool_result` event so it keeps running when every Swarm hook group is
+  // disabled or still inside the warm-up window. Registered before the
+  // taskmanage tool_result hook so after-hooks observe the bounded text.
+  installToolOutputSpill(pi);
   const stdinConflict = new StdinConflictHook();
   const annoyance = new AnnoyanceNudgeState();
   let session = "";
@@ -192,13 +197,10 @@ export function registerSwarmBuiltinHooks(pi: Pi, options: SwarmBuiltinHookOptio
   registerHook(pi, "taskmanage", "tool_result", (event: any, ctx: any) => {
     sessionOf(ctx);
     const failed = event?.isError === true;
-    let { text, index } = firstText(event?.content);
-    // agent_tools.go: oversized results (100k bytes / 1000 lines) are
-    // middle-elided BEFORE after-hooks see them, unless they carry an image.
-    let content: any[] | undefined = Array.isArray(event?.content) ? event.content : undefined;
-    const hasImage = !!content?.some((b: any) => b?.type === "image");
-    const elided = !hasImage && index >= 0 ? elideOversizedToolOutput(text) : undefined;
-    if (elided !== undefined && content) { content = [...content]; content[index] = { ...content[index], text: elided }; text = elided; }
+    // Oversized output was already bounded (and spilled) by the toolout
+    // middleware above, before this hook ran.
+    const { text, index } = firstText(event?.content);
+    const content: any[] | undefined = Array.isArray(event?.content) ? event.content : undefined;
     pipeline.postTool({ toolName: event?.toolName ?? "", params: event?.input ?? {}, toolCallId: event?.toolCallId, failed, output: resultText(content ?? event?.content), ...( { details: event?.details } as any) });
     const phc = event?.toolCallId ? preContext.get(event.toolCallId) ?? "" : "";
     if (event?.toolCallId) preContext.delete(event.toolCallId);
@@ -206,10 +208,12 @@ export function registerSwarmBuiltinHooks(pi: Pi, options: SwarmBuiltinHookOptio
     // error (sdkerr "Error executing …", registry "Error: Tool '…' not
     // found"); a NewErrorResult (IsError) keeps it.
     const goError = failed && /^Error executing |^Error: Tool '/.test(text);
-    if (!phc || goError) return elided !== undefined && content ? { content } : undefined;
+    if (!phc || goError) return undefined;
     const merged = SwarmHookPipeline.applyPreContext(phc, text);
-    if (content && index >= 0) { const next = [...content]; next[index] = { ...next[index], text: merged }; return { content: next }; }
-    return { content: [{ type: "text", text: merged }, ...(Array.isArray(event.content) ? event.content : [])] };
+    // Replacing content clears structuredContent in Pi unless it is resent.
+    const keepStructured = event?.structuredContent === undefined ? {} : { structuredContent: event.structuredContent };
+    if (content && index >= 0) { const next = [...content]; next[index] = { ...next[index], text: merged }; return { content: next, ...keepStructured }; }
+    return { content: [{ type: "text", text: merged }, ...(Array.isArray(event.content) ? event.content : [])], ...keepStructured };
   });
   registerHook(pi, "taskmanage", "turn_end", (event: any) => {
     const content = pipeline.flushTurn();

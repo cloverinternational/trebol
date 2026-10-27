@@ -59,7 +59,7 @@ address in each tree.
 | 20 | `policy` | disk hooks, project structure guard and `/init`, sleep blocker, nudges |
 | 30 | `tools` | every Pi-Swarm `registerTool` surface: bash, fs, search, agents, tasks, schedule, history, vault, research, MCP, ask-user, annoyed; CodeMode is provided by Pi |
 | 40 | `state` | durable session entries: memory history, conversation metadata |
-| 50 | `ui` | control panel, metrics widgets, themes, tools-status command, Pi-Swarm-owned `/btw` side-question overlay |
+| 50 | `ui` | control panel, metrics widgets, themes, tools-status command, Pi-Swarm-owned `/btw` side-question card (input-slot takeover, not an overlay) |
 
 The root `extensions/trebol-toggle/index.ts` is always loaded and remains resident
 when the project extension pack is disabled. Each layer manifest points to its
@@ -165,6 +165,14 @@ The detailed design references are
 `docs/architecture/swarm-tui-to-pi-map.md`, and
 `docs/architecture/hooks-prompts-tools-pi-equivalence.md`. Update those
 documents when a change alters a documented architectural boundary.
+
+Tool-output spillover is documented in `docs/reference/tool-output-spillover.md`.
+Shared persistence and estimated-token budgets live in
+`.pi/lib/runtime/swarm-toolout.ts`; `swarm-toolout-boundary.ts` applies them to
+tool-result text independently of task-hook gates. Bash also spills before its
+formatter can discard output. Recovery files are private OS temporary files,
+not durable project artifacts; the estimate is UTF-8 bytes divided by four,
+rounded up, not a provider tokenizer count.
 
 ## AGENTS.md discovery
 
@@ -551,6 +559,37 @@ Visual check without a model: `node tools/e2e/tern-live-work-demo.mjs` renders o
 (`EXPAND=1` = Ctrl+O, `SPEED=n` = slower) into its own pane; `tern ctl shot <name>` writes
 `target/shots/tern/live/<name>.png` to look at. Behaviour is asserted by
 `.pi/test/tern/work-table.test.ts`, `turn-work.test.ts`, `turn-groups.test.ts` and `tsp.test.ts`.
+
+Measured check without a model: `npm run lint:tern` (`tools/tern/style-lint.mjs`) replays the recorded
+fixtures through the real bridge into a headless Tern at four widths and reports spilled boxes, clipped
+lines, off-scale type, sheet parse errors and deleted-then-re-added stateful nodes; Tern's own sheet bleed is
+the only accepted measurement (`tools/tern/style-lint.baseline`). `npm run lint:tern:self-test` seeds each
+defect and fails if a rule stays silent, so keep a green run honest by running it after changes to the
+sheets or to the node shapes in `bridge.ts`.
+
+### Session durability in a pane
+
+Tern's session daemon owns pane pseudoterminals, so closing a **window** only detaches and the runner
+keeps running; closing the **pane**, quitting `pi`, `/new`, a Tern-only restart or a machine crash ends it.
+Pi's JSONL survives all of those, but resuming is deliberately narrow: **only a start after the machine
+went down reopens the conversation.** `.pi/lib/tern/startup-session.ts` records which session each
+`TERN_PANE` owns (`~/.pi/agent/tern-panes.json`, with the owner pid and the boot generation), and
+`chooseStartupSession` reopens it only when the record came from an earlier boot, its file still exists and
+no live runner owns it. Everything else — a pane that outlived its program in this boot, a forgotten
+record, `PI_TERN_FRESH=1`/`PI_TERN_RESUME=0` — starts a new conversation, because a resume the user did not
+ask for is the worse failure. There is no "most recent session for this directory" fallback. Records
+without a boot generation are dropped, and Pi deletes a session that never held a message, so a record can
+outlive its file (reason `missing`). `/new` runs through the runtime (`newSession` bridge option) and the
+rebound session is recorded, so the pane leaves the old conversation behind immediately.
+
+`bridge.start()` seeds the transcript from `getBranch()`, so a reopened pane draws its history on the first
+frame instead of coming back empty. Keep the record write off the per-event path: only a changed session
+file (or a session with no file yet, which clears the record) is written.
+
+Tests: `npx vitest run .pi/test/tern/startup-session.test.ts .pi/test/tern/commands.test.ts
+.pi/test/tern/dock.test.ts` and `node --experimental-strip-types tools/e2e/tern-durable-resume.mjs` (real
+SDK + real bridge; needs `PI_EXECUTABLE` pointing at an npm-installed Pi when the host Pi is a managed
+standalone build).
 
 ## Validation
 

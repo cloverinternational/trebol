@@ -1,6 +1,6 @@
 {
   "name": "@pi-swarm/integration",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "private": true,
   "type": "module",
   "keywords": [
@@ -17,7 +17,7 @@
       "extensions/swarm-transport-parity/index.ts",
       "extensions/autogenskills/index.ts",
       "extensions/mermaid-response/index.ts",
-  "extensions/auto-graph/index.ts",
+      "extensions/auto-graph/index.ts",
       "extensions/prompt-context-configure/index.ts",
       "extensions/swarm-plan-mode/index.ts",
       "extensions/swarm-prompt/index.ts",
@@ -83,7 +83,9 @@
     "check:install": "node tools/install/check-load.mjs",
     "check:symlinks": "node tools/repo/check-tracked-symlinks.mjs",
     "check:extension-parity": "node tools/install/extension-inventory.mjs --compare docs/parity/extension-surface-before.json --surface-only",
-    "test:ask-user": "node --experimental-strip-types --test extensions/ask-user/tests/*.test.ts"
+    "test:ask-user": "node --experimental-strip-types --test extensions/ask-user/tests/*.test.ts",
+    "lint:tern": "node tools/tern/style-lint.mjs",
+    "lint:tern:self-test": "node tools/tern/style-lint.mjs --self-test"
   },
   "workspaces": [
     "packages/*/*"
