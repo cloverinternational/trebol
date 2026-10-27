@@ -508,6 +508,19 @@ https://docs.stencil.so/tern/index.md first, before planning or editing.
 
 ### Live work rendering contract
 
+Window detachment is not session shutdown. Tern's daemon owns the PTY and
+surface documents; without a visible window, drawing acknowledgements stop
+and `TernInlineSurface` retains only the newest pending view. On reattachment
+the window acknowledges the retained document and pending rendering continues.
+The bridge rejects events explicitly addressed to another surface. A `gone`
+event naming the whole live surface rebuilds its regions and named styles
+from the latest view without disposing Pi, losing the draft or resubscribing.
+Frame sequence numbers stay monotonic; invalid/future acknowledgements do not
+grant credits. Explicit close and process termination remain termination, not
+detachment. This is not daemon-restart/process-crash resurrection; do not emit
+OMP's `omp_session_file` / `omp_restore` keys for Pi.
+See `docs/reference/tern-session-continuity.md` for verification and limits.
+
 The transcript's turn card (`.pi/lib/tern/bridge.ts`, `work-summary.ts`) is a **data** projection, not a
 hand-drawn table. Tern 0.9.5 draws and *clocks* the parts that change every second:
 
