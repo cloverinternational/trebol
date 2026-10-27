@@ -13,13 +13,24 @@ import {
 	type ExtensionCommandContext,
 } from "@earendil-works/pi-coding-agent";
 import { Input, Key, Markdown, matchesKey, type Component, type TUI, type Theme } from "@earendil-works/pi-tui";
+import {
+	BTW_ABORT_EVENT,
+	BTW_CLOSE_EVENT,
+	BTW_STATE_EVENT,
+	BTW_SUBMIT_EVENT,
+	type BtwEntry,
+	type BtwState,
+} from "./src/events.ts";
+
+export { BTW_ABORT_EVENT, BTW_CLOSE_EVENT, BTW_STATE_EVENT, BTW_SUBMIT_EVENT };
+export type { BtwState };
 
 // Pi-Swarm-owned /btw side channel. It is deliberately in-tree and has no
 // runtime dependency on an upstream repository or package.
 // This implementation is derived from the Apache-2.0 pi-btw design; see
 // LICENSE.pi-btw for the required notice.
 const SIDE_PROMPT = "You are a temporary, read-only side agent. Answer directly using the current session as background context. You may inspect files, but never edit them or claim to have changed anything.";
-type Entry = { question: string; answer: string; error?: string };
+type Entry = BtwEntry;
 
 export default function swarmBtw(pi: ExtensionAPI) {
 	let side: AgentSession | undefined;
@@ -29,6 +40,13 @@ export default function swarmBtw(pi: ExtensionAPI) {
 	let closeView: (() => void) | undefined;
 	let opening = false;
 	let overlayGeneration = 0;
+	// The latest command context, so a native frontend's submit can reach the same ask() path.
+	let lastCtx: ExtensionCommandContext | undefined;
+
+	function publish(open = Boolean(view)): void {
+		const state: BtwState = { open, entries, ...(active ? { active: { ...active } } : {}) };
+		pi.events.emit(BTW_STATE_EVENT, state);
+	}
 
 	async function ensureSide(ctx: ExtensionCommandContext): Promise<AgentSession | undefined> {
 		if (side) return side;
@@ -78,6 +96,7 @@ export default function swarmBtw(pi: ExtensionAPI) {
 		const request = { question, answer: "" };
 		active = request;
 		view?.invalidate();
+		publish();
 		try {
 			await session.prompt(question, { source: "extension" });
 			if (active !== request) return;
@@ -90,6 +109,7 @@ export default function swarmBtw(pi: ExtensionAPI) {
 			if (active === request) {
 				active = undefined;
 				view?.invalidate();
+				publish();
 			}
 		}
 	}
@@ -101,6 +121,10 @@ export default function swarmBtw(pi: ExtensionAPI) {
 		const generation = ++overlayGeneration;
 		let closed = false;
 		let finish!: () => void;
+		// No overlay options on purpose. Pi's non-overlay custom surface (interactive-mode.js
+		// showExtensionCustom) clears the editor container, mounts this component in the input slot and
+		// focuses it, then restores the editor plus the saved draft on done(). That is the surface ask-user
+		// already uses, so /btw replaces the input box instead of floating above it.
 		void ctx.ui.custom<void>((tui, theme, _keys, done) => {
 			opening = false;
 			finish = done;
@@ -113,14 +137,11 @@ export default function swarmBtw(pi: ExtensionAPI) {
 					active = undefined;
 				}
 				opening = false;
+				publish(false);
 				done();
 			};
 			view = new BtwView(tui, theme, () => entries, () => active, (question) => void ask(ctx, question), () => { void side?.abort(); }, () => closeView?.());
 			return view;
-		}, {
-			overlay: true,
-			overlayOptions: { width: "78%", minWidth: 48, maxHeight: "78%", anchor: "top-center", margin: { top: 1, left: 2, right: 2 } },
-			onHandle: () => undefined,
 		}).catch((error) => {
 			if (overlayGeneration === generation) {
 				opening = false;
@@ -136,16 +157,34 @@ export default function swarmBtw(pi: ExtensionAPI) {
 				view = undefined;
 				closeView = undefined;
 				active = undefined;
+				publish(false);
 			}
 		});
 		void finish;
 	}
 
+	// A native frontend (Tern) cannot render a pi-tui Component; it submits on the bus instead, and this
+	// reaches the same ask() path as typing in the TUI box.
+	pi.events.on(BTW_SUBMIT_EVENT, (data) => {
+		const question = (data as { question?: unknown } | undefined)?.question;
+		if (typeof question === "string" && question.trim() && lastCtx) void ask(lastCtx, question.trim());
+	});
+	// Abort stops the side agent but keeps the box open, exactly like Escape while a question runs in the TUI.
+	pi.events.on(BTW_ABORT_EVENT, () => {
+		void side?.abort();
+	});
+	// Close is the same path as Escape when idle: it resolves the mounted view and restores the input slot.
+	pi.events.on(BTW_CLOSE_EVENT, () => {
+		closeView?.();
+	});
+
 	pi.registerCommand("btw", {
 		description: "Ask a read-only side question without interrupting the main agent",
 		handler: async (args, ctx) => {
 			if (ctx.mode !== "tui") return ctx.ui.notify("/btw requires interactive TUI mode.", "error");
+			lastCtx = ctx;
 			open(ctx);
+			publish(true);
 			if (args.trim()) await ask(ctx, args.trim());
 		},
 	});
@@ -159,6 +198,14 @@ export class BtwView implements Component {
 	handleInput(data: string): void {
 		if (matchesKey(data, Key.escape)) return this.readActive() ? this.abort() : this.close();
 		this.input.handleInput(data);
+	}
+	// The host sets `focused` on whatever it mounts in the input slot (Focusable). Delegating keeps the inner
+	// Input's caret, hardware cursor and IME behaviour identical to the editor it replaced.
+	get focused(): boolean {
+		return this.input.focused;
+	}
+	set focused(value: boolean) {
+		this.input.focused = value;
 	}
 	render(width: number): string[] {
 		const inner = Math.max(30, width - 4);

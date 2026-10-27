@@ -99,6 +99,62 @@ describe("TranscriptProjector", () => {
 	it("ignores unrelated events", () => {
 		expect(new TranscriptProjector().apply({ type: "compaction_start", reason: "manual" })).toBe(false);
 	});
+
+	// Auto-graph sends its validated plan twice: ASCII text in `content` (Pi's non-Tern renderer) and a native
+	// chart under `details.tsp`. Tern must draw the chart, not the ASCII block and not the one-line notice that
+	// every other visible custom message becomes.
+	it("draws a validated custom-message chart instead of its text", () => {
+		const p = new TranscriptProjector();
+		const message = {
+			role: "custom",
+			customType: "pi-swarm-auto-graph",
+			display: true,
+			content: "Pass rate (2 rows)\nalpha ███ 91\nbeta  ██ 78",
+			details: { plan: { kind: "bars" }, tsp: { id: "auto-graph-0", k: "chart", p: { kind: "bars", size: "sm", summary: "Pass rate", series: [{ value: 91, label: "alpha", title: "alpha: 91" }, { value: 78, label: "beta" }] } } },
+		};
+		expect(p.apply({ type: "message_start", message })).toBe(true);
+		p.apply({ type: "message_end", message });
+		expect(p.nodes()).toEqual([
+			{ id: `chart-${p.items[0]!.id}`, k: "chart", p: { kind: "bars", size: "sm", summary: "Pass rate", series: [{ value: 91, label: "alpha", title: "alpha: 91" }, { value: 78, label: "beta" }] } },
+		]);
+	});
+
+	it("restores the chart from a persisted custom_message entry", () => {
+		const p = new TranscriptProjector();
+		p.replaceFromSessionBranch([
+			{ id: "e1", type: "message", message: { role: "user", content: "chart it" } },
+			{ id: "e2", type: "custom_message", customType: "pi-swarm-auto-graph", display: true, content: "Pass rate", details: { tsp: { k: "chart", p: { kind: "bars", series: [{ value: 1, label: "a" }] } } } },
+		]);
+		expect(p.nodes().filter((n) => n.k === "chart")).toEqual([{ id: "chart-e2", k: "chart", p: { kind: "bars", series: [{ value: 1, label: "a" }] } }]);
+	});
+
+	// `details` is arbitrary extension data, not a trusted node tree: only the documented bars/spark shape passes.
+	it("refuses a custom message's unvalidated node payload", () => {
+		const p = new TranscriptProjector();
+		const payload = (tsp: unknown) => ({ role: "custom", customType: "pi-swarm-auto-graph", display: true, content: "not a chart", details: { tsp } });
+		const cases = [
+			{ id: "x", k: "tool", p: { role: "tern.work" } },
+			{ id: "x", k: "chart", p: { kind: "heatmap", cells: [[1]] } },
+			{ id: "x", k: "chart", p: { kind: "bars", series: [{ value: -1, label: "a" }] } },
+			{ id: "x", k: "chart", p: { kind: "bars", series: [{ value: 1, label: "a", title: { nested: true } }] } },
+			{ id: "x", k: "chart", p: { kind: "bars", series: [] } },
+		];
+		for (const tsp of cases) {
+			const q = new TranscriptProjector();
+			q.apply({ type: "message_start", message: payload(tsp) });
+			q.apply({ type: "message_end", message: payload(tsp) });
+			expect(q.nodes().some((n) => n.k === "chart" || n.k === "tool"), JSON.stringify(tsp)).toBe(false);
+			expect(q.nodes()[0], JSON.stringify(tsp)).toEqual({ id: `msg-${q.items[0]!.id}`, k: "text", p: { role: "tern.notice", tone: "muted", wrap: "none", truncate: "end", text: "not a chart" } });
+		}
+	});
+
+	it("keeps a plain notice for a visible custom message with no chart payload", () => {
+		const p = new TranscriptProjector();
+		const message = { role: "custom", customType: "pi-swarm-goal", display: true, content: "Goal: ship the fixture" };
+		p.apply({ type: "message_start", message });
+		p.apply({ type: "message_end", message });
+		expect(p.nodes()).toEqual([{ id: `msg-${p.items[0]!.id}`, k: "text", p: { role: "tern.notice", tone: "muted", wrap: "none", truncate: "end", text: "Goal: ship the fixture" } }]);
+	});
 });
 
 describe("PiTernBridge", () => {

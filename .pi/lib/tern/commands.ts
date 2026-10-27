@@ -35,7 +35,7 @@ export const BUILTIN_COMMANDS: ReadonlyArray<{ name: string; description: string
 
 // Builtins the Tern frontend runs on the live session (bridge #runBuiltin). The rest need Pi's interactive
 // mode (terminal selectors, clipboard, gist, session switching) and stay unavailable here.
-export const TERN_BUILTINS: ReadonlySet<string> = new Set(["model", "thinking", "compact", "name", "export", "reload", "quit", "resume"]);
+export const TERN_BUILTINS: ReadonlySet<string> = new Set(["model", "thinking", "compact", "name", "export", "reload", "quit", "resume", "new"]);
 
 // OMP's slash-command icon names (its builtin table; commands without one fall back to "action").
 // Tern resolves these OMP symbol names to its own icons.
