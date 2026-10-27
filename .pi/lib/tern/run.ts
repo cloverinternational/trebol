@@ -8,6 +8,9 @@ import { promisify } from "node:util";
 import { readFile } from "node:fs/promises";
 import { appendFileSync } from "node:fs";
 import { join } from "node:path";
+import { StringDecoder } from "node:string_decoder";
+import { PasteMode } from "./paste-mode.ts";
+import { PasteInput } from "./paste-input.ts";
 import {
 	createAgentSessionFromServices,
 	createAgentSessionRuntime,
@@ -50,11 +53,17 @@ function startTsp(): void {
 	let connecting = false;
 	let probeTimer: NodeJS.Timeout | undefined;
 	let lastCtrlC = 0;
+	const pasteMode = new PasteMode((text) => stdout.write(text));
+	const decoder = new StringDecoder("utf8");
+	let pasteInput: PasteInput | undefined;
 
 	const restore = (): void => {
 		if (restored) return;
 		restored = true;
+		pasteInput?.dispose();
+		clearTimeout(pendingTimer);
 		bridge?.close();
+		pasteMode.close();
 		stdin.setRawMode(false);
 		stdin.pause();
 	};
@@ -115,9 +124,17 @@ function startTsp(): void {
 	});
 	// Pasted text stays in the draft; embedded newlines do not submit.
 	keyBuffer.on("paste", (text: string) => bridge?.pasteText(text));
+	pasteInput = new PasteInput((text) => {
+		const parsed = splitInput(pending + text);
+		pending = parsed.rest;
+		for (const msg of parsed.messages) bridge?.handle(msg);
+		keyBuffer.process(parsed.keys);
+	}, (text) => bridge?.pasteText(text), { onRecovery: (reason) => {
+		process.stderr.write(`\r\n[paste recovery: ${reason}. Further input is discarded. Press Ctrl-C separately to resume; nothing is submitted.]\r\n`);
+	} });
 
 	const onData = (chunk: Buffer): void => {
-		const text = chunk.toString("utf8");
+		const text = decoder.write(chunk);
 		if (!bridge) {
 			if (connecting || restored) return;
 			raw += text;
@@ -136,18 +153,22 @@ function startTsp(): void {
 			}
 			return;
 		}
-		const parsed = splitInput(pending + text);
-		pending = parsed.rest;
-		for (const msg of parsed.messages) bridge.handle(msg);
-		keyBuffer.process(parsed.keys);
+		if (pasteInput!.recovering) {
+			// Recovery acknowledgement only; controls inside an active payload never reach here.
+			if (text === "\x03") pasteInput!.resume();
+			return;
+		}
+		pasteInput!.process(text);
 		// A lone ESC is held as a possible APC prefix; with no continuation it is the Escape key.
 		clearTimeout(pendingTimer);
-		if (pending && pending.length < 6)
-			pendingTimer = setTimeout(() => {
+		pendingTimer = setTimeout(() => {
+			pasteInput?.flushEscape();
+			if (pending && pending.length < 6) {
 				const held = pending;
 				pending = "";
 				keyBuffer.process(held);
-			}, ESC_FLUSH_MS);
+			}
+		}, ESC_FLUSH_MS);
 	};
 
 	const uiTrace = process.env.PI_TERN_UI_TRACE === "0" ? undefined : createUiTrace(join(getAgentDir(), "tern-trace"));
@@ -211,6 +232,7 @@ function startTsp(): void {
 		},
 		});
 		bridge.start("pi");
+		pasteMode.start();
 		// Command-context actions route to the runtime, which performs the real session replacement.
 		const commandContextActions = {
 			waitForIdle: () => runtime.session.waitForIdle(),
@@ -235,6 +257,7 @@ function startTsp(): void {
 	stdin.setRawMode(true);
 	stdin.resume();
 	stdin.on("data", onData);
+	stdin.on("end", () => { const tail=decoder.end(); if(tail) pasteInput?.process(tail); pasteInput?.end(); restore(); });
 	// Advertises no edit/undo/send features: this bridge does not apply those events.
 	stdout.write(helloQuery("pi"));
 	probeTimer = setTimeout(() => {

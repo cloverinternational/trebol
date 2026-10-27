@@ -474,7 +474,23 @@ describe("Tern regions and dock structure", () => {
 		expect(replay(writes).get("composer")?.p?.text).toBe(bridge.draft);
 	});
 
-	it("closes the surface with a final frame and an x, leaving no further writes", () => {
+	it("preserves the session and draft through hidden/lost UI and rejects foreign close", () => {
+		const session = fakeSession();
+		const { bridge } = make(session);
+		bridge.appendDraft("draft survives");
+		session.emit({ type: "agent_start" });
+		bridge.handle({ verb: "e", body: { ev: "action", sf: "another-app", act: "close" } });
+		bridge.handle({ verb: "e", body: { ev: "visible", sf: "pi", visible: false } });
+		bridge.handle({ verb: "e", body: { ev: "gone", sf: "pi", ids: ["pi"] } });
+		expect(bridge.closed).toBe(false);
+		expect(session.disposed).toBe(false);
+		expect(session.listenerCount()).toBe(1);
+		expect(bridge.draft).toBe("draft survives");
+		expect(bridge.busy).toBe(true);
+		bridge.close();
+	});
+
+	it("explicit close still shuts down the surface", () => {
 		const { bridge, writes } = make(fakeSession());
 		bridge.appendDraft("/");
 		bridge.close();

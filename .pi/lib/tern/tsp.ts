@@ -284,6 +284,8 @@ export class TernInlineSurface {
 	#acked = 0;
 	#sent: TspView | null = null;
 	#pending: TspView | null = null;
+	#title: string | undefined;
+	readonly #styles = new Map<string, string>();
 
 	constructor(write: TspWriter, id: string, credits: number = DEFAULT_CREDITS, apc: number = APC_LIMIT) {
 		this.#write = write;
@@ -294,6 +296,7 @@ export class TernInlineSurface {
 
 	open(title?: string): void {
 		if (this.#opened) return;
+		this.#title = title;
 		this.#write(encodeTsp("o", { id: this.#id, mode: "inline", ...(title ? { title } : {}) }));
 		this.#opened = true;
 	}
@@ -301,6 +304,7 @@ export class TernInlineSurface {
 	stylesheet(name: string, css: string): void {
 		if (!this.#opened) throw new Error("TernInlineSurface.stylesheet called before open");
 		if (!/^[A-Za-z0-9_-]+$/.test(name)) throw new Error("Invalid TSP stylesheet name");
+		this.#styles.set(name, css);
 		for (const chunk of encodeTspChunks("s", { sf: this.#id, name, css }, this.#apc)) this.#write(chunk);
 	}
 
@@ -312,8 +316,25 @@ export class TernInlineSurface {
 
 	// Ack messages are `{ev:"ack", sf, s}`; `s` is the highest frame applied and drawn.
 	handleEvent(msg: TspMessage): void {
+		if (!this.#opened) return;
+		// A lost document is not a lost agent. Rebuild the latest view without
+		// replacing the session, draft, subscriptions or running turn. Keep the
+		// sequence monotonic so delayed acknowledgements cannot grant new credits.
+		if (msg.verb === "e" && msg.body.ev === "gone" &&
+			(msg.body.sf === undefined || msg.body.sf === this.#id) &&
+			Array.isArray(msg.body.ids) && msg.body.ids.includes(this.#id)) {
+			const latest = this.#pending ?? this.#sent;
+			this.#opened = false;
+			this.#sent = null;
+			this.#pending = latest;
+			this.#acked = this.#seq;
+			this.open(this.#title);
+			for (const [name, css] of this.#styles) this.stylesheet(name, css);
+			this.#flush(false);
+			return;
+		}
 		if (msg.verb !== "e" || msg.body.ev !== "ack" || msg.body.sf !== this.#id) return;
-		if (typeof msg.body.s !== "number") return;
+		if (typeof msg.body.s !== "number" || !Number.isSafeInteger(msg.body.s) || msg.body.s < 0 || msg.body.s > this.#seq) return;
 		this.#acked = Math.max(this.#acked, msg.body.s);
 		this.#flush(false);
 	}

@@ -247,6 +247,30 @@ describe("TernInlineSurface", () => {
 		const surface = new TernInlineSurface(capture().write, "pi1");
 		expect(() => surface.render([])).toThrow(/before open/);
 	});
+
+	it("rebuilds a lost surface with its latest pending view and styles, without accepting stale credits", () => {
+		const { writes, write } = capture();
+		const surface = new TernInlineSurface(write, "pi1", 1);
+		surface.open("Pi session");
+		surface.stylesheet("main", ".x { color: red; }");
+		surface.render([{ id: "a", k: "md", p: { text: "old" } }]);
+		surface.render([{ id: "a", k: "md", p: { text: "latest" } }]);
+		surface.handleEvent({ verb: "e", body: { ev: "gone", sf: "pi1", ids: ["pi1"] } });
+		expect(writes.filter(w => w.includes("tsp;o;"))).toHaveLength(2);
+		expect(writes.filter(w => w.includes("tsp;s;"))).toHaveLength(2);
+		expect(frames(writes).at(-1)).toMatchObject({ s: 2 });
+		expect(JSON.stringify(frames(writes).at(-1))).toContain("latest");
+		expect(frames(writes).at(-1).ops[0][0]).toBe("add");
+		surface.render([{ id: "a", k: "md", p: { text: "next" } }]);
+		for (const s of [1, 999, NaN, 1.5]) surface.handleEvent({ verb: "e", body: { ev: "ack", sf: "pi1", s } });
+		expect(frames(writes)).toHaveLength(2);
+		surface.handleEvent({ verb: "e", body: { ev: "ack", sf: "pi1", s: 2 } });
+		expect(frames(writes)).toHaveLength(3);
+		surface.close();
+		const count = writes.length;
+		surface.handleEvent({ verb: "e", body: { ev: "gone", ids: ["pi1"] } });
+		expect(writes).toHaveLength(count);
+	});
 });
 
 describe("projectTranscript", () => {

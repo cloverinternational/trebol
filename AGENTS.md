@@ -508,6 +508,34 @@ https://docs.stencil.so/tern/index.md first, before planning or editing.
 
 ### Live work rendering contract
 
+Chat paste: `.pi/lib/tern/run.ts` owns DEC 2004 through `paste-mode.ts` only
+after a Tern connection, restores it on shutdown, and decodes UTF-8 across
+stdin chunks. `paste-input.ts` separates bracketed payloads before TSP/key
+parsing, accumulating chunks with a delimiter-sized tail and one final join.
+Chat paste preserves exact text: multiline/control-bearing content is retained
+behind a draft marker, never normalized, executed or auto-submitted.
+Incomplete paste has a 2-second inactivity watchdog and an 8 MiB UTF-8 limit;
+recovery quarantines input until a separate Ctrl-C acknowledgement. Marker
+identity is positional and undo-owned, not inferred from literal spelling.
+See `docs/reference/tern-chat-paste-review-fixes.md` for rejection semantics,
+retention and protocol limits; changes remain pending independent re-review.
+See `docs/reference/tern-chat-paste.md`
+for the OMP source comparison, synthetic benchmark and live-validation limits.
+Reproduce with `node --experimental-strip-types tools/e2e/tern-paste-bench.mjs`.
+
+Window detachment is not session shutdown. Tern's daemon owns the PTY and
+surface documents; without a visible window, drawing acknowledgements stop
+and `TernInlineSurface` retains only the newest pending view. On reattachment
+the window acknowledges the retained document and pending rendering continues.
+The bridge rejects events explicitly addressed to another surface. A `gone`
+event naming the whole live surface rebuilds its regions and named styles
+from the latest view without disposing Pi, losing the draft or resubscribing.
+Frame sequence numbers stay monotonic; invalid/future acknowledgements do not
+grant credits. Explicit close and process termination remain termination, not
+detachment. This is not daemon-restart/process-crash resurrection; do not emit
+OMP's `omp_session_file` / `omp_restore` keys for Pi.
+See `docs/reference/tern-session-continuity.md` for verification and limits.
+
 The transcript's turn card (`.pi/lib/tern/bridge.ts`, `work-summary.ts`) is a **data** projection, not a
 hand-drawn table. Tern 0.9.5 draws and *clocks* the parts that change every second:
 
