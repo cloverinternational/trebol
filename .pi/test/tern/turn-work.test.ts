@@ -75,10 +75,18 @@ describe("replay corpus", () => {
 });
 
 // Rebuilds the node tree from the TSP frames the bridge wrote, exactly as Tern applies them.
-function applyFrames(writes: string[], all?: Map<string, TspNode & { parent: string }>): TspNode[] {
-	type N = TspNode & { parent: string };
-	const nodes = all ?? new Map<string, N>();
-	const order: string[] = [];
+// The caller keeps the state so a forward replay applies each frame once: the replay tests read the
+// view after every event, and re-parsing the whole write log on every event was quadratic — with the
+// extra work-card frames it pushed the slowest recorded fixture past the 5s default test timeout on CI.
+type FrameNode = TspNode & { parent: string };
+type FrameState = { nodes: Map<string, FrameNode>; order: string[] };
+
+function newFrameState(): FrameState {
+	return { nodes: new Map(), order: [] };
+}
+
+function applyFrames(writes: string[], state: FrameState = newFrameState(), from = 0): TspNode[] {
+	const { nodes, order } = state;
 	const add = (node: TspNode, parent: string, before: string | null) => {
 		nodes.set(node.id, { ...node, c: undefined, parent });
 		if (parent === "main") {
@@ -93,7 +101,7 @@ function applyFrames(writes: string[], all?: Map<string, TspNode & { parent: str
 		const at = order.indexOf(id);
 		if (at >= 0) order.splice(at, 1);
 	};
-	for (const w of writes) {
+	for (const w of writes.slice(from)) {
 		if (!w.startsWith(`${ESC}_tsp;f;`)) continue;
 		for (const op of (parseTspMessages(w)[0]?.body as { ops: unknown[][] }).ops) {
 			if (op[0] === "add") add(op[4] as TspNode, String(op[2]), (op[3] as string | null) ?? null);
@@ -135,9 +143,11 @@ describe("replay through the bridge: emitted TSP frames", () => {
 			const bridge = new PiTernBridge(session, { write: (d) => writes.push(d), surfaceId: "pi", credits: 1_000_000 });
 			bridge.start("pi");
 			const frames: string[] = [];
+			const state = newFrameState();
 			for (const e of events) {
+				const from = writes.length;
 				session.emit(e);
-				const view = workView(applyFrames(writes)).join("\n");
+				const view = workView(applyFrames(writes, state, from)).join("\n");
 				if (frames.at(-1) !== view) frames.push(view);
 			}
 			bridge.close?.();
@@ -408,11 +418,11 @@ describe("turn line and running-work bar announce each piece of work once", () =
 		const bridge = new PiTernBridge(session, { write: (d) => writes.push(d), surfaceId: "pi", credits: 1_000_000 });
 		bridge.start("pi");
 		const view = () => {
-			const all = new Map<string, TspNode & { parent: string }>();
-			const main = applyFrames(writes, all);
+			const state = newFrameState();
+			const main = applyFrames(writes, state);
 			return {
 				line: main.filter((n) => n.p?.role === "tern.work-live").map((n) => String(n.p?.text)),
-				bar: [...all.values()].filter((n) => n.parent === "background-work").map((n) => n.id),
+				bar: [...state.nodes.values()].filter((n) => n.parent === "background-work").map((n) => n.id),
 			};
 		};
 		session.emit({ type: "agent_start" });
