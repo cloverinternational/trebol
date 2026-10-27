@@ -81,7 +81,7 @@ Run `/auto on`, then send a task. `/auto status` checks the mode and `/auto off`
 - Disk hooks and policy nudges
 - Pi-native tool renderers plus Swarm hook rows and widgets
 - Conversation metrics, footer segments, themes, control-panel status, and
-  the `/btw` side-question overlay
+  the `/btw` side-question card that takes over the input slot
 
 ### Verification
 
@@ -274,7 +274,7 @@ flowchart TD
 
 | Command | What to expect / important limit |
 | --- | --- |
-| `/btw Why did this test fail?` | Read-only side question using the current session as background. TUI and an active model are required; Escape aborts an active question or closes the overlay. |
+| `/btw Why did this test fail?` | Read-only side question using the current session as background. An active model is required; the card replaces the input box (TUI and Tern), and Escape aborts an active question or closes the card. |
 | `/supervisor status` or `/supervisor` | Inspect configuration/status (JSON in non-interactive mode) or open the TUI settings for optional Jev audit, operational review and memory worker. Workers need configured credentials/adapters; unavailable actions report an error rather than claiming completion. |
 | `/vault list`, `/vault add [id]`, `/vault remove <id>` | List IDs/kinds, enter a global secret through UI prompts, or remove an entry. Add needs an interactive input UI; never paste credentials into chat or commit them. |
 | `/hooks` or `/hooks GROUP on|off` | Inspect or change a known hook group; an unknown group reports an error. |
