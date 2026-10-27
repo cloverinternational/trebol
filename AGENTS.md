@@ -875,6 +875,23 @@ bulk-clean existing candidates, enable supervisor, or certify unrelated records.
 
 ## Installed MCP adapter ownership
 
+Hoja native tools are documented in `docs/reference/hoja-direct-tools.md`:
+Calendar regressions reject impossible due dates before network dispatch.
+`tools/e2e/hoja-schema.ts` captures read-only introspection and validates all
+nine new documents offline with pinned GraphQL 16.11.0, including negative
+controls. Schema validity is not proof of mutation permissions or scalar runtime
+behavior; no real writes belong in this diagnostic.
+`extensions/hoja-mode` registers eleven direct tools (compatible list/get plus
+nine catalog, read and write operations). `.pi/lib/tools/hoja-operations.ts`
+owns the new handlers/contracts, included in the canonical Swarm surface.
+These are not MCP registrations: Pi owns `mcp__hoja__*` separately. Create,
+update and comment follow explicit user requests; native delete additionally
+requires runtime human UI confirmation and fails closed without it. Consent
+guidance stays on when `/hoja off` disables proactive lookup. Verify with
+`node tools/e2e/hoja-direct.mjs` (actual provider payload, no remote writes) and
+the Hoja unit tests. The inspected Pi 1.3.0 includes MCP natively; the following
+adapter-specific guidance applies only when that adapter is actually installed.
+
 When `pi-mcp-adapter` is installed (its `/pi-mcp` command is present), it owns
 `/mcp`, MCP connection negotiation, resources, and prompts. Pi-Swarm skips its
 fallback startup discovery; the fallback diagnostic command is `/swarm-mcp`.
