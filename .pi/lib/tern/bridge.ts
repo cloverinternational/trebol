@@ -978,6 +978,7 @@ export class PiTernBridge {
 	#gitRequest = 0;
 	#gitRefs: GitFileRef[] = [];
 	readonly #onClose?: () => void;
+	readonly #surfaceId: string;
 	readonly #onEventTap?: (event: PiEventLike) => void;
 	readonly #onRenderTap?: (nodes: readonly TspNode[], trigger: string, busy: boolean) => void;
 	#trigger = "ui";
@@ -1036,6 +1037,7 @@ export class PiTernBridge {
 			},
 		};
 		this.#surface = new TernInlineSurface(options.write, options.surfaceId, options.credits, options.apc);
+		this.#surfaceId = options.surfaceId;
 		this.#onClose = options.onClose;
 		this.#onEventTap = options.onEvent;
 		this.#onRenderTap = options.onRender;
@@ -1830,6 +1832,11 @@ export class PiTernBridge {
 	// Routes one parsed TSP message. Returns the promise of any submitted prompt, for tests.
 	handle(msg: TspMessage): Promise<void> | undefined {
 		if (this.#closed) return undefined;
+		if (msg.verb === "e" && msg.body.sf !== undefined && msg.body.sf !== this.#surfaceId) return undefined;
+		if (msg.verb === "e" && msg.body.ev === "gone") {
+			this.#surface.handleEvent(msg);
+			return undefined;
+		}
 		if (msg.verb === "e" && msg.body.ev === "toggle" && typeof msg.body.id === "string" && msg.body.id.startsWith("g-")) {
 			this.#projector.setGroupCollapsed(msg.body.id, msg.body.collapsed === true);
 			this.#render();
