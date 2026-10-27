@@ -37,6 +37,7 @@ if (process.argv[2] === "--child") {
 }
 
 const dir = mkdtempSync(join(tmpdir(), "claw-two-orch-"));
+const children = [];
 try {
 	const { ClawStore } = await import(lib("store.ts"));
 	const { applyEvent } = await import(lib("daemon.ts"));
@@ -45,7 +46,12 @@ try {
 		const proc = spawn(process.execPath, ["--experimental-strip-types", "--no-warnings", fileURLToPath(import.meta.url), "--child", store.dir, session], { stdio: ["ignore", "pipe", "inherit"] });
 		let out = "";
 		const ready = new Promise((resolve) => proc.stdout.on("data", (d) => { out += d; if (out.includes("ready")) resolve(); }));
-		const done = new Promise((resolve) => proc.on("exit", () => resolve(JSON.parse(out.trim().split("\n").at(-1)))));
+		// The result is the last JSON line; anything else on stdout is reported instead of crashing the check.
+		const done = new Promise((resolve) => proc.on("exit", (code) => {
+			const line = out.trim().split("\n").reverse().find((l) => l.startsWith("{"));
+			try { resolve(JSON.parse(line)); } catch { resolve({ session, pid: proc.pid, received: [], error: `child exited ${code} without a result: ${out.slice(-300)}` }); }
+		}));
+		children.push(proc);
 		return { ready, done };
 	};
 	const a = child("sess-A");
@@ -66,5 +72,7 @@ try {
 	process.stdout.write(`${JSON.stringify({ pids: [ra.pid, rb.pid], got }, null, 2)}\n${ok ? "PASS" : "FAIL"}\n`);
 	process.exitCode = ok ? 0 : 1;
 } finally {
+	// A failure before both children finished must not leave them polling a deleted store.
+	for (const proc of children) if (proc.exitCode === null && proc.signalCode === null) proc.kill("SIGKILL");
 	rmSync(dir, { recursive: true, force: true });
 }

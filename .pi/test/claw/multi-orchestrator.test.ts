@@ -3,7 +3,7 @@
  *  inbox owner (orchestrator.json) and one Tern pane (control.json) per workspace, and `/claw on` plus every claw_* call
  *  overwrote both, so the last session to act received every run and every new worker tab opened in its Tern session.
  *  Sandbox only: temp workspace, fake Hoja and Tern, a fake `ensure`; the daemon runs as in-process `tick` calls. */
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -250,6 +250,18 @@ describe("claw: per-session cursor lifecycle", () => {
 		store.registerSession("sess-C", process.pid, () => false);
 		expect(store.readCursor("sess-B")?.offset).toBe(0);
 		expect(store.readCursor("sess-C")?.offset).toBe(store.inboxEnd());
+	});
+
+	it("two sessions racing to inherit the legacy cursor: exactly one does (near miss: no double delivery)", () => {
+		store.appendInbox({ kind: "error", text: "in flight", key: "p1" });
+		store.writeOrchestrator({ offset: 0, owner: "sess-gone", ownerPid: 4242, inflight: { ids: ["p1"], endOffset: store.inboxEnd(), sentAt: new Date().toISOString(), session: "sess-gone" } });
+		// sess-B has claimed the heirship but not yet written `migratedTo`: the window the review pointed at.
+		writeFileSync(join(store.sessionsDir, ".legacy-heir"), "sess-B");
+		store.registerSession("sess-C", process.pid, () => false);
+		expect(store.readCursor("sess-C")?.inflight).toBeUndefined();
+		expect(store.readCursor("sess-C")?.offset).toBe(store.inboxEnd());
+		store.registerSession("sess-B", process.pid, () => false);
+		expect(store.readCursor("sess-B")?.inflight?.ids).toEqual(["p1"]);
 	});
 
 	it("a restarted process of the same session resends an undelivered batch at once", async () => {

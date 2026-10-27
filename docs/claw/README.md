@@ -272,7 +272,7 @@ session keeps its own runs:
 - Known limit: a run belongs to the session id that started it. If that chat is never reopened, its completions stay
   in `inbox.jsonl` and remain visible in `claw_list` (`owner` column) and `claw_read`, but no other session is woken.
 - Evidence: `.pi/test/claw/multi-orchestrator.test.ts` (fails on 0.8.0 with the field symptom), `tools/e2e/claw-two-orchestrators.mjs`
-  (two OS processes on one store), and 10 `session-*` mutations in `tools/claw/mutation-check.mjs`.
+  (two OS processes on one store), and 11 `session-*` mutations in `tools/claw/mutation-check.mjs`.
 
 ## Durability
 

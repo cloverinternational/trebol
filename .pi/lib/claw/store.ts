@@ -343,6 +343,12 @@ export class ClawStore {
 		const name = SAFE_ID.test(session) && session.length <= 120 ? session : `h-${createHash("sha256").update(session).digest("hex").slice(0, 32)}`;
 		return join(this.sessionsDir, `${name}.json`);
 	}
+	private claimLegacy(session: string): boolean {
+		const path = join(this.sessionsDir, ".legacy-heir");
+		try { writeFileSync(path, session, { flag: "wx" }); return true; } catch {
+			try { return readFileSync(path, "utf8") === session; } catch { return false; }
+		}
+	}
 	readCursor(session: string): OrchestratorState | undefined { return session ? readJson<OrchestratorState>(this.cursorPath(session)) : undefined; }
 	writeCursor(session: string, state: OrchestratorState): void { if (session) writeJson(this.cursorPath(session), state); }
 	/** Registers an orchestrator session for inbox delivery; idempotent. A new session starts at the inbox end so it
@@ -356,8 +362,11 @@ export class ClawStore {
 			return existing;
 		}
 		const legacy = readJson<OrchestratorState>(join(this.dir, "orchestrator.json"));
-		const inherit = legacy && !legacy.migratedTo && legacy.owner !== undefined
+		const eligible = legacy && !legacy.migratedTo && legacy.owner !== undefined
 			&& (legacy.owner === session || legacy.ownerPid === undefined || !alive(legacy.ownerPid));
+		// Two sessions registering at once could both pass the check above before either records `migratedTo`; the
+		// exclusive create makes exactly one of them the heir, so an in-flight batch is never handed to two sessions.
+		const inherit = eligible && this.claimLegacy(session);
 		const state: OrchestratorState = inherit
 			? { offset: legacy.offset, inflight: legacy.inflight ? { ...legacy.inflight, session } : undefined, pid }
 			: { offset: this.inboxEnd(), pid };
