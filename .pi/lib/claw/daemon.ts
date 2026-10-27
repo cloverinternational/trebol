@@ -256,6 +256,9 @@ export async function handleRequest(req: Request, deps: DaemonDeps): Promise<unk
 			// Refuse an unknown project or assignee now, not on every later fire (a trigger that can never launch).
 			if (req.action.kind === "spawn") { validateSpawn(req.action); await deps.hoja.resolve(req.action.project, req.action.assignee); }
 			const trigger: Trigger = { id, when, action: req.action, enabled: true, once: req.once, createdAt: now.toISOString(), nextFireAt, fired: 0 };
+			// The session that added the trigger owns what it fires: its notices and the runs it starts.
+			if (req.owner) trigger.owner = req.owner;
+			if (req.pane !== undefined) trigger.pane = req.pane;
 			return store.saveTrigger(trigger);
 		}
 		case "trigger_remove":
@@ -589,7 +592,9 @@ export async function fireTriggers(deps: DaemonDeps, enabled: boolean): Promise<
 			let runId: string | undefined;
 			if (t.action.kind === "spawn") {
 				const { task, project, assignee, label, cwd } = t.action;
-				runId = (await startRun({ task, project, assignee, label, cwd }, deps, { fireKey: due.key, trigger: t.id })).id;
+				const owner = t.action.owner ?? t.owner;
+				const pane = t.action.pane ?? t.pane;
+				runId = (await startRun({ task, project, assignee, label, cwd, ...(owner ? { owner } : {}), ...(pane !== undefined ? { pane } : {}) }, deps, { fireKey: due.key, trigger: t.id })).id;
 			} else {
 				store.appendInbox({ kind: "notify", triggerId: t.id, text: t.action.message, key: due.key });
 			}

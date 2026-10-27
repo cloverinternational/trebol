@@ -194,6 +194,9 @@ export async function startRun(input: SpawnInput, deps: LaunchDeps, key: { reque
 	// Always on: the goal is derived and recorded before any side effect, so it is auditable even if the launch fails.
 	run.goal = startGoal(id, task, at);
 	if (keepOpen) run.keepOpen = true;
+	// The orchestrator session that asked for this run: its inbox items and worker tabs stay with that session.
+	if (typeof input.owner === "string" && input.owner) run.owner = input.owner;
+	if (Number.isInteger(input.pane)) run.pane = input.pane;
 	run.launchStartedAt = at;
 	deps.store.saveRun(run);
 	return continueRun(run, deps);
@@ -348,7 +351,7 @@ export async function continueRun(run: Run, deps: LaunchDeps): Promise<Run> {
 		store.saveRun(run);
 		let session: number;
 		try {
-			session = await clawSession(tern, store.readControl().pane);
+			session = await clawSession(tern, run.pane ?? store.readControl().pane);
 		} catch (error) {
 			// No tab call was made, so the attempt is safe to repeat.
 			run.attempts++;
