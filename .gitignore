@@ -12,6 +12,9 @@ artifacts/
 
 # Build output and dependencies
 **/dist/
+# Generated e2e and probe artifacts (target/shots/tern/**): reproducible by the
+# node tools/e2e/*.mjs scripts that write them, so never a source of truth.
+target/
 
 # Dependencies. The pattern deliberately has NO trailing slash: `node_modules/`
 # matches directories only, which is how an absolute-path symlink named
