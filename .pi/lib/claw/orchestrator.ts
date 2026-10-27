@@ -156,6 +156,7 @@ export function runListing(runs: Run[], nowMs: number, options: { alive?: (pid: 
 			error: r.error, launchNote: r.launchNote, waiting, goal: goalRow(r.goal, nowMs),
 			keepOpen: reach.keepOpen, resumable: reach.resumable, reachability: reach.reason,
 			sessionFile: r.sessionFile, resumes: r.resumeCount ?? 0, resumeError: r.resumeError,
+			owner: r.owner,
 		};
 	});
 }

@@ -18,6 +18,11 @@ Release metadata is kept in `package.json`, `update-manifest.json`, and this fil
 ### Fixed
 
 - `/trebol-update install` now really updates Trebol. Before, it launched `pi update --extensions` detached with output discarded and always said "update started"; Pi only refreshes npm and git sources, so a Trebol installed as a local path (the usual setup) never moved, even though `pi update` printed "Updated packages". The command now detects the install kind: a Pi-managed git clone goes through an awaited `pi update --extensions`, and a local checkout is fetched and fast-forwarded to its upstream, with `npm ci` when `package.json`/`package-lock.json` changed. It refuses, and names the reason, on uncommitted changes, local commits, or a missing upstream. It reports the real commits (`abc1234 → def5678`) and reloads on success. `/trebol-update` also reports a local checkout that is behind its upstream while still at the release version. When a newer release is found, the hourly check installs it automatically whenever that is safe, and asks you to `/reload`. Set `PI_SWARM_AUTO_UPDATE=0` to keep notify-only. Verified against real git repositories (`.pi/test/runtime/swarm-update.test.ts`) and against the real `pi` binary, which left a local-path fixture at its old commit while the new path fast-forwarded it.
+- Claw: several orchestrator sessions on one workspace no longer merge. Each run records the session that started it and
+  that session's Tern pane, so its completions, notices and digest reach only that session and its worker tabs open in
+  that session's Tern window. Previously `/claw on` or any `claw_*` call made the last session the inbox owner for
+  every run and moved every new worker tab into its window. Inbox cursors are per session
+  (`.swarm/claw/sessions/<session>.json`); the old single cursor is migrated once.
 
 ## [0.8.0] - 2026-10-27
 

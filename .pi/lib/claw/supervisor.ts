@@ -307,9 +307,22 @@ export function flushDigest(store: ClawStore, nowMs: number, slo: SloConfig): { 
 	const nowIso = new Date(nowMs).toISOString();
 	let digested = 0;
 	if (read.items.length) {
-		const first = read.items[0].id;
 		digested = read.items.length;
-		store.appendInbox({ kind: "claw_digest", key: `digest:${first}`, text: digestText(read.items, nowMs) });
+		// One digest per orchestrator session: a session's digest names only the runs it started. Notices about runs
+		// without an owner (older runs) form one digest for every session.
+		const groups = new Map<string, Notice[]>();
+		const owners = new Map<string, string>();
+		const ownerOf = (runId: string) => {
+			if (!owners.has(runId)) owners.set(runId, store.getRun(runId)?.owner ?? "");
+			return owners.get(runId)!;
+		};
+		for (const notice of read.items) {
+			const owner = notice.runId ? ownerOf(notice.runId) : "";
+			groups.set(owner, [...(groups.get(owner) ?? []), notice]);
+		}
+		for (const [owner, notices] of groups) {
+			store.appendInbox({ kind: "claw_digest", key: `digest:${notices[0].id}`, text: digestText(notices, nowMs), ...(owner ? { owner } : {}) });
+		}
 		store.writeSupervisor({
 			...state, noticesOffset: read.offset, lastDigestAt: nowIso,
 			digests: state.digests + 1, notices: state.notices + digested, lastTickAt: nowIso,

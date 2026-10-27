@@ -179,6 +179,19 @@ export type OrchestratorOptions = {
 	ensure?: (store: ClawStore, workspace: string) => number | undefined;
 };
 
+/** Records which orchestrator session asked for a run and which Tern pane it lives in, on every request that can
+ *  start one (spawn, and the spawn action of a trigger), so the run's inbox items and worker tabs stay with that
+ *  session. An empty session id stamps nothing (the run is then shared, as before). */
+export function stampOrigin(body: RequestBody, session: string, pane: number | undefined): RequestBody {
+	if (!session) return body;
+	const origin = { owner: session, ...(pane !== undefined ? { pane } : {}) };
+	if (body.kind === "spawn") return { ...body, input: { ...body.input, ...origin } };
+	if (body.kind === "trigger_add") {
+		return { ...body, ...origin, action: body.action.kind === "spawn" ? { ...body.action, ...origin } : body.action };
+	}
+	return body;
+}
+
 export function registerOrchestrator(pi: any, options: OrchestratorOptions = {}) {
 	const workspace = pi.getCwd?.() ?? process.cwd();
 	const store = ClawStore.forWorkspace(workspace);
@@ -191,7 +204,9 @@ export function registerOrchestrator(pi: any, options: OrchestratorOptions = {})
 	let session = "";
 	let live: { ctx: any; valid: () => boolean } | undefined;
 
-	const claim = () => { store.writeOrchestrator({ ...store.readOrchestrator(), owner: session, ownerPid: process.pid }); };
+	/** Registers this session's own inbox cursor. Never takes anything from another session: each Claw session in this
+	 *  workspace receives only the runs it started (see .pi/lib/claw/inbox.ts). */
+	const claim = () => { store.registerSession(session, process.pid, pidAlive); };
 	/** A supervisor that could not be stopped or started is not a silent failure: it is shown in this session and kept
 	 *  in the store's inbox, so `/claw status` and the next session still see it. */
 	const reportLifecycle = (note: string, ctx?: any) => {
@@ -228,9 +243,8 @@ export function registerOrchestrator(pi: any, options: OrchestratorOptions = {})
 		if (saved?.on === true) activate(saved.savedTools);
 		else hideWhileOff();
 		footer.refresh(ctx);
-		// Takeover only when no live process owns the inbox: a dead owner, or this process's previous session.
-		const owner = store.readOrchestrator();
-		if (clawModeOn() && store.readControl().enabled && (!owner.owner || owner.ownerPid === process.pid || (owner.ownerPid !== undefined && !pidAlive(owner.ownerPid)))) claim();
+		// A chat that had Claw on keeps receiving its own runs after a restart or reload: same session, same cursor.
+		if (clawModeOn() && store.readControl().enabled) claim();
 		if (timer) clearInterval(timer);
 		timer = setInterval(() => { void pump().catch(() => undefined); }, 3000);
 		timer.unref?.();
@@ -254,7 +268,7 @@ export function registerOrchestrator(pi: any, options: OrchestratorOptions = {})
 
 	const call = async (body: RequestBody) => {
 		claim();
-		return request(store, workspace, body);
+		return request(store, workspace, stampOrigin(body, session, ownPaneBlock(env)));
 	};
 	const str = (v: unknown, name: string): string => {
 		if (typeof v !== "string" || !v.trim()) throw new Error(`${name} is required`);
