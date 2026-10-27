@@ -1103,6 +1103,8 @@ export class PiTernBridge {
 
 	// Pi replaces the session on resume and similar switches; the bridge follows the replacement.
 	rebind(session: PiSessionLike): void {
+		// Preserve the visible draft, but do not retain undo payloads from the previous session.
+		this.#editor.clearHistory();
 		this.#unsubscribe?.();
 		this.#session = session;
 		this.#unsubscribe = session.subscribe((event) => this.#onEvent(event));
@@ -1728,15 +1730,18 @@ export class PiTernBridge {
 		}
 	}
 
-	// Bracketed or clipboard paste. Large text becomes a marker that expands on submit; small text is flattened to
-	// one line, so embedded newlines never submit.
+	// Preserve multiline text behind a marker too: the single-line composer must not flatten its content.
+	// Paste only edits the draft; embedded newlines never submit.
 	pasteText(text: string): void {
-		const normalized = text.replace(/\r\n?/g, "\n");
-		if (!isLargePaste(normalized) || this.#ui.active || this.#dialog?.active || this.#modelPickerOpen || this.#treePickerOpen) {
-			this.appendDraft(normalized.replace(/\n/g, " "));
+		// Modal editors retain their existing policy; this exact-content contract is for chat.
+		if (this.#ui.active || this.#dialog?.active || this.#modelPickerOpen || this.#treePickerOpen) {
+			this.appendDraft(text.replace(/\r\n?|\n/g, " "));
 			return;
 		}
-		this.#editDraft(() => this.#editor.insertPaste(normalized), { kind: "set" });
+		// Keep controls as stored data, never as terminal output or key actions.
+		if (isLargePaste(text) || /[\x00-\x1f\x7f-\x9f]/.test(text)) {
+			this.#editDraft(() => this.#editor.insertPaste(text), { kind: "set" });
+		} else this.appendDraft(text);
 	}
 
 	// Shift+Enter: a newline in an open multi-line prompt; the composer is single-line.
@@ -2284,6 +2289,7 @@ export class PiTernBridge {
 	}
 
 	close(): void {
+		this.#editor.dispose();
 		this.#workUnsubscribe?.();
 		this.#workUnsubscribe = null;
 		if (this.#closed) return;

@@ -1,6 +1,8 @@
 // Caret, selection, word motion and undo for the Tern composer draft. Pure text state; the bridge reads
 // `text`/`cursor`/`selection` and renders them. Indices are UTF-16 code units; steps never split a surrogate pair.
+interface PasteSpan { start: number; end: number; payload: string }
 export interface DraftSnapshot {
+	spans: PasteSpan[];
 	text: string;
 	cursor: number;
 	anchor: number | null;
@@ -11,7 +13,7 @@ const UNDO_LIMIT = 200;
 // Same thresholds and marker shapes as pi-tui's Editor: a large paste is shown as a marker and expanded on submit.
 const LARGE_PASTE_LINES = 10;
 const LARGE_PASTE_CHARS = 1000;
-const PASTE_MARKER = /\[paste #(\d+)(?: \+\d+ lines| \d+ chars)?\]/g;
+
 
 export function isLargePaste(text: string): boolean {
 	return text.length > LARGE_PASTE_CHARS || text.split("\n").length > LARGE_PASTE_LINES;
@@ -76,10 +78,7 @@ export class DraftEditor {
 	#undo: DraftSnapshot[] = [];
 	// Consecutive typed characters share one undo step, so Ctrl+Z removes a typed run, not one character.
 	#typing = false;
-	// Large pastes kept out of the visible text, keyed by the id in their marker. Never cleared: undo can restore a marker.
-	#pastes = new Map<number, string>();
-	// The exact marker text each paste id was inserted with. Only this text is a marker, so typed look-alikes stay literal.
-	#markers = new Map<number, string>();
+	#spans: PasteSpan[] = [];
 	#pasteCounter = 0;
 
 	get text(): string {
@@ -88,7 +87,9 @@ export class DraftEditor {
 
 	// The text with every paste marker replaced by its pasted content; what gets sent.
 	get expandedText(): string {
-		return this.#text.replace(PASTE_MARKER, (marker, id: string) => this.#markers.get(Number(id)) === marker ? this.#pastes.get(Number(id)) ?? marker : marker);
+		let result = "", at = 0;
+		for (const span of this.#spans) { result += this.#text.slice(at, span.start) + span.payload; at = span.end; }
+		return result + this.#text.slice(at);
 	}
 
 	get cursor(): number {
@@ -103,8 +104,9 @@ export class DraftEditor {
 
 	// Programmatic replacement (completion, submit clearing, restore). Undoable; caret goes to the end.
 	setText(text: string): void {
-		if (text === this.#text) return;
+		if (text === this.#text && this.#spans.length === 0) return;
 		this.#record();
+		this.#spans = [];
 		this.#text = text;
 		this.#cursor = text.length;
 		this.#anchor = null;
@@ -121,17 +123,17 @@ export class DraftEditor {
 	insertPaste(text: string): void {
 		const lines = text.split("\n").length;
 		const id = ++this.#pasteCounter;
-		this.#pastes.set(id, text);
 		const marker = lines > LARGE_PASTE_LINES ? `[paste #${id} +${lines} lines]` : `[paste #${id} ${text.length} chars]`;
-		this.#markers.set(id, marker);
 		this.#record();
 		this.#typing = false;
 		this.#splice(marker);
+		this.#spans.push({ start: this.#cursor - marker.length, end: this.#cursor, payload: text });
+		this.#spans.sort((a,b) => a.start-b.start);
 	}
 
 	#splice(input: string): void {
 		this.#deleteSelection();
-		this.#text = this.#text.slice(0, this.#cursor) + input + this.#text.slice(this.#cursor);
+		this.#replace(this.#cursor, this.#cursor, input);
 		this.#cursor += input.length;
 	}
 
@@ -139,10 +141,9 @@ export class DraftEditor {
 		if (this.selection) return this.#record(), this.#deleteSelection();
 		if (this.#cursor === 0) return;
 		this.#record();
-		const before = this.#text.slice(0, this.#cursor);
-		const pasted = [...this.#markers.values()].find(m => before.endsWith(m));
-		const start = pasted !== undefined ? this.#cursor - pasted.length : prevBoundary(this.#text, this.#cursor);
-		this.#text = this.#text.slice(0, start) + this.#text.slice(this.#cursor);
+		const pasted = this.#spans.find(s => s.end === this.#cursor);
+		const start = pasted ? pasted.start : prevBoundary(this.#text, this.#cursor);
+		this.#replace(start, this.#cursor, "");
 		this.#cursor = start;
 	}
 
@@ -152,7 +153,7 @@ export class DraftEditor {
 		if (this.#cursor === 0) return;
 		this.#record();
 		const start = wordStartBefore(this.#text, this.#cursor);
-		this.#text = this.#text.slice(0, start) + this.#text.slice(this.#cursor);
+		this.#replace(start, this.#cursor, "");
 		this.#cursor = start;
 	}
 
@@ -184,6 +185,7 @@ export class DraftEditor {
 		this.#typing = false;
 		const previous = this.#undo.pop();
 		if (!previous) return;
+		this.#spans = previous.spans.map(s => ({...s}));
 		this.#text = previous.text;
 		this.#cursor = previous.cursor;
 		this.#anchor = null;
@@ -192,14 +194,30 @@ export class DraftEditor {
 	#deleteSelection(): void {
 		const sel = this.selection;
 		if (!sel) return;
-		this.#text = this.#text.slice(0, sel.start) + this.#text.slice(sel.end);
+		this.#replace(sel.start, sel.end, "");
 		this.#cursor = sel.start;
 		this.#anchor = null;
 	}
 
+	// Editing inside a marker invalidates its identity, never reinterprets literal text.
+	#replace(start: number, end: number, text: string): void {
+		const delta = text.length - (end-start);
+		this.#spans = this.#spans.flatMap(s => {
+			if (s.end <= start) return [s];
+			if (s.start >= end) return [{...s, start:s.start+delta, end:s.end+delta}];
+			return [];
+		});
+		this.#text = this.#text.slice(0,start)+text+this.#text.slice(end);
+	}
+	get retainedPasteCount(): number {
+		return new Set([...this.#spans, ...this.#undo.flatMap(s=>s.spans)].map(s=>s.payload)).size;
+	}
+	clearHistory(): void { this.#undo=[]; this.#typing=false; }
+	dispose(): void { this.#spans=[]; this.#undo=[]; this.#text=""; this.#cursor=0; this.#anchor=null; this.#typing=false; }
+
 	#record(): void {
 		this.#typing = false;
-		this.#undo.push({ text: this.#text, cursor: this.#cursor, anchor: this.#anchor });
+		this.#undo.push({ spans: this.#spans.map(s => ({...s})), text: this.#text, cursor: this.#cursor, anchor: this.#anchor });
 		if (this.#undo.length > UNDO_LIMIT) this.#undo.shift();
 	}
 }

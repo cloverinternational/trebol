@@ -144,7 +144,8 @@ describe("PiTernBridge", () => {
 		});
 		bridge.start();
 		await bridge.pasteClipboard();
-		expect(bridge.draft).toBe("first second");
+		expect(bridge.expandedDraft).toBe("first\nsecond");
+		expect(fake.calls).toEqual([]);
 		bridge.close();
 	});
 
