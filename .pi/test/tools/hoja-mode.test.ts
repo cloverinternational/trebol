@@ -240,7 +240,7 @@ describe("shared Hoja client safety", () => {
 });
 
 describe("hoja-mode registration", () => {
-	it("registers only read tools and appends the confirmation rule to the prompt", async () => {
+	it("registers read/write tools and appends the consent rule to the prompt", async () => {
 		const registered: string[] = [];
 		let hook: ((event: any) => any) | undefined;
 		const pi = {
@@ -250,12 +250,13 @@ describe("hoja-mode registration", () => {
 		};
 		const { client } = fakeClient({ issues: { nodes: [] } });
 		registerHojaMode(pi, client);
-		expect(registered).toEqual(["hoja_list", "hoja_get"]);
-		expect(registered.some(n => /update|create|set|delete/.test(n))).toBe(false);
+		expect(registered).toHaveLength(11);
+		expect(registered).toEqual(expect.arrayContaining(["hoja_list", "hoja_get", "hoja_issue_delete"]));
+		expect(new Set(registered).size).toBe(11);
 		const out = hook!({ systemPrompt: "base" });
 		expect(out.systemPrompt.startsWith("base\n")).toBe(true);
 		expect(out.systemPrompt).toContain(HOJA_RULE);
-		expect(HOJA_RULE).toContain("ask the user to confirm");
+		expect(HOJA_RULE).toContain("explicitly requested by the user");
 	});
 	it("registers /hoja and toggles only the proactive guidance", async () => {
 		const hooks = new Map<string, Function>();
@@ -271,10 +272,12 @@ describe("hoja-mode registration", () => {
 		await command.handler("", ctx);
 		expect(notices.at(-1)).toContain("mode on");
 		await command.handler("off", ctx);
-		expect(prompt()).toBeUndefined();
+		expect(prompt().systemPrompt).not.toContain("before answering");
+		expect(prompt().systemPrompt).toContain("explicitly requested by the user");
 		await command.handler("invalid", ctx);
 		expect(notices.at(-1)).toContain("Usage:");
-		expect(prompt()).toBeUndefined();
+		expect(prompt().systemPrompt).not.toContain("before answering");
+		expect(prompt().systemPrompt).toContain("explicitly requested by the user");
 		await command.handler("on", ctx);
 		expect(prompt().systemPrompt).toContain(HOJA_RULE);
 		await command.handler("off", ctx);

@@ -1,5 +1,6 @@
 /** Model-facing contracts for the Hoja read tools registered by extensions/hoja-mode. */
 import type { ToolContract } from "../runtime/tool-contract.ts";
+import { OPERATION_CONTRACTS } from "./hoja-operations.ts";
 
 export const HOJA_LIST_CONTRACT: ToolContract = {
 	description: "List Hoja work items with server-side filters, returning identifier, title, state, priority, assignee, project, createdAt and updatedAt for each. Defaults to open issues; state \"closed\" lists Done and Canceled items (for example what finished yesterday) and state \"open\"/\"all\" widen it. Also filters by assignee, project, team, and by updatedSince/updatedBefore/createdSince/createdBefore (ISO date, a bare YYYY-MM-DD meaning UTC midnight). Returns issues, returnedCount, truncated and the appliedFilter. When truncated is true, returnedCount is NOT the total board size: narrow the filters or raise limit. Read-only; this tool cannot change Hoja.",
@@ -34,6 +35,7 @@ export const HOJA_GET_CONTRACT: ToolContract = {
 };
 
 export const CONTRACTS: Record<string, ToolContract> = {
+	...OPERATION_CONTRACTS,
 	hoja_list: HOJA_LIST_CONTRACT,
 	hoja_get: HOJA_GET_CONTRACT,
 };

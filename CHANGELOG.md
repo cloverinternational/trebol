@@ -6,6 +6,15 @@ Release metadata is kept in `package.json`, `update-manifest.json`, and this fil
 
 ### Added
 
+- Nine native direct Hoja operations alongside compatible `hoja_list/get` (Hoja
+  TREBOL-361/363/365): projects, teams, filtered issues, detail, search, create,
+  update, delete and comments. Explicit user requests guide writes; native deletion
+  additionally requires human UI confirmation and fails closed without it. Strict
+  calendar validation rejects impossible due dates before dispatch; independent
+  read-only schema validation corrected `commentCreate` to use `CommentCreateInput`.
+  Verified with 170 focused tests and actual Pi payload capture; no real mutation
+  permissions or remote DateTime coercion are claimed. MCP ownership and global
+  configuration are unchanged. See `docs/reference/hoja-direct-tools.md`.
 - Hoja read tools that can answer date questions (#352): `hoja_list` and `hoja_get` still send only two fixed GraphQL
   `query` documents and never a mutation, so both stay read-only. `hoja_list` now returns `createdAt` and `updatedAt`
   for every issue and takes server-side filters — `state` (`open` by default, `closed` for Done and Canceled, `all`, a

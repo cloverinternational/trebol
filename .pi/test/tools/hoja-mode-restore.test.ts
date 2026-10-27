@@ -36,7 +36,7 @@ describe("hoja-mode persistence per chat", () => {
 		expect(await hojaB.rule()).toContain(HOJA_RULE);
 		const backToA = instance(a);
 		await backToA.start("resume");
-		expect(await backToA.rule()).toBe("");
+		expect(await backToA.rule()).not.toContain("before answering");
 	});
 
 	it("off persists through a same-session reload, and on after off also persists", async () => {
@@ -46,7 +46,7 @@ describe("hoja-mode persistence per chat", () => {
 		await first.run("off");
 		const afterOff = instance(s);
 		await afterOff.start("reload");
-		expect(await afterOff.rule()).toBe("");
+		expect(await afterOff.rule()).not.toContain("before answering");
 		await afterOff.run("on");
 		const afterOn = instance(s);
 		await afterOn.start("reload");
@@ -58,7 +58,9 @@ describe("hoja-mode persistence per chat", () => {
 		const s: Session = { id: "A", entries: [{ type: "custom", customType: HOJA_ENTRY, data: { enabled: false } }] };
 		const inst = instance(s);
 		await inst.start("resume");
-		expect(await inst.rule()).toBe("");
-		expect(inst.tools).toEqual(["hoja_list", "hoja_get"]);
+		expect(await inst.rule()).not.toContain("before answering");
+		expect(inst.tools).toHaveLength(11);
+		expect(new Set(inst.tools).size).toBe(11);
+		expect(await inst.rule()).toContain("explicitly requested by the user");
 	});
 });
