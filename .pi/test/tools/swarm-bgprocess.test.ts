@@ -6,7 +6,7 @@ import { registerSwarmBackgroundBash } from "../../../extensions/swarm-backgroun
 import { PERMISSIVE_PARAMETERS, overlaySwarmToolSchemas } from "../../lib/runtime/swarm-tool-surface.ts";
 import { TOOL_CONTRACTS } from "../../lib/runtime/tool-contracts.ts";
 import { bgOutputPreview, formatBackgroundDone, MAX_READ_BYTES, SwarmBackgroundProcessManager, takeLines } from "../../lib/tools/swarm-bgprocess.ts";
-import { boundToolOutput, elideOversizedToolOutput } from "../../lib/runtime/swarm-toolout.ts";
+import { boundOversizedToolOutput, boundToolOutput } from "../../lib/runtime/swarm-toolout.ts";
 import { afterTurnFlushListeners } from "../../lib/runtime/swarm-builtin-hooks-runtime.ts";
 
 const root = resolve(import.meta.dirname, "../../..");
@@ -221,14 +221,17 @@ describe("Swarm interactive background bash", () => {
   });
 
   it("middle-elides oversized tool results like agent_tools.go / toolout.Bound", () => {
-    expect(elideOversizedToolOutput("small")).toBeUndefined();
+    expect(boundOversizedToolOutput("small")).toBeUndefined();
+    const root = mkdtempSync(join(tmpdir(), "toolout-bg-"));
     const lines = Array.from({ length: 1500 }, (_, i) => String(i + 1)).join("\n") + "\n";
-    const elided = elideOversizedToolOutput(lines)!;
-    // 996 lines kept: 498 head + 498 tail lines.
+    const elided = boundOversizedToolOutput(lines, { root })!.text;
+    // Reserve room for the marker and retrieval notice within the line cap.
     expect(elided.startsWith("1\n2\n")).toBe(true);
-    expect(elided).toContain("\n498\n\n\n... [");
-    expect(elided).toMatch(/chars elided from oversized tool result; use a narrower query to show more\] \.\.\.\n\n1004\n1005\n/);
-    expect(elided.endsWith("\n1500\n")).toBe(true);
+    expect(elided.split("\n").length).toBeLessThanOrEqual(1000);
+    expect(elided).toMatch(/bytes elided from the middle of this output\] \.\.\./);
+    expect(elided).toContain("Full output saved to: ");
+    expect(elided).toContain("Use `sed -n 'START,ENDp' FILE`");
+    expect(elided).toContain("\n1499\n1500\n");
     const bounded = boundToolOutput("αβγδε", 4, 0);
     expect(bounded.head).toBe("α"); expect(bounded.tail).toBe("ε"); expect(bounded.elidedChars).toBe(6);
     expect(boundToolOutput("a\nb\nc", 0, 1)).toMatchObject({ head: "a", tail: "c", elidedChars: 3 });

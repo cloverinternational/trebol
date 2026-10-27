@@ -93,9 +93,10 @@ describe("root Pi TaskManage extension", () => {
     // State, cleanup, audit, correction and session-owned hook registry.
     // Handoff registration also owns its session lifecycle.
     expect(runtime.handlers.get("session_start")).toHaveLength(6);
-    // Swarm builtin pipeline (first) + task-audit coordinator (second).
+    // Output-spill boundary (plain tool_result handler, always on) + Swarm
+    // builtin pipeline + task-audit coordinator.
     expect(runtime.handlers.get("tool_call")).toHaveLength(2);
-    expect(runtime.handlers.get("tool_result")).toHaveLength(2);
+    expect(runtime.handlers.get("tool_result")).toHaveLength(3);
     expect(runtime.handlers.get("turn_end")).toHaveLength(2);
   });
 
@@ -199,7 +200,9 @@ describe("root Pi TaskManage extension", () => {
     for (const before of befores) allowed = (await before({ toolName: "write", toolCallId: "ok", input: {} }, ctx)) ?? allowed;
     expect(allowed).toBeUndefined();
 
-    const after = runtime.handlers.get("tool_result")![1];
+    // The last tool_result handler is the task-audit coordinator; the output
+    // spill boundary and the builtin pipeline run before it.
+    const after = runtime.handlers.get("tool_result")!.at(-1)!;
     await after({ toolName: "bash", toolCallId: "audit", input: { command: "pwd" }, result: {}, isError: false }, ctx);
     const audited = await tool.execute("audit-get", { operations: [{ key: "get", op: "get", taskId: "1", include_audit: true }] });
     expect(JSON.parse(audited.content[0].text).results[0].data.task.audit_events).toEqual(expect.arrayContaining([
