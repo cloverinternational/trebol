@@ -6,6 +6,20 @@ Release metadata is kept in `package.json`, `update-manifest.json`, and this fil
 
 ### Added
 
+- Tern chat paste keeps the exact pasted text and stops paying per-character
+  work: bracketed payloads are separated before TSP/key parsing, accumulated in
+  chunks and inserted with one render, with incremental UTF-8 decoding and
+  DEC 2004 enabled only after the handshake. Multiline, control-bearing,
+  Unicode and large pastes are preserved verbatim (no OMP-style sanitization)
+  and never auto-submit. Paste markers now carry positional spans, so literal
+  marker-looking text stays literal; payloads live only while reachable from the
+  draft or bounded undo history. An unterminated paste is bounded by a 2 s
+  inactivity watchdog and an 8 MiB UTF-8 cap: the partial fragment is preserved
+  as a draft after a timeout, an over-limit paste is rejected whole, and further
+  input is quarantined until a separate Ctrl-C acknowledgement. See
+  `docs/reference/tern-chat-paste.md` and
+  `docs/reference/tern-chat-paste-review-fixes.md`.
+
 - Hoja read tools that can answer date questions (#352): `hoja_list` and `hoja_get` still send only two fixed GraphQL
   `query` documents and never a mutation, so both stay read-only. `hoja_list` now returns `createdAt` and `updatedAt`
   for every issue and takes server-side filters — `state` (`open` by default, `closed` for Done and Canceled, `all`, a
