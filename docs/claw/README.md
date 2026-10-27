@@ -9,7 +9,7 @@ resume, including the goal generation a resume restores).
 
 ## Commands and tools
 
-- `/claw on` — start the singleton daemon if absent; claim the inbox for this session; rename the tab that holds this pane (`TERN_PANE`) to `Claw`. Only that block's tab is renamed, only after Tern confirms the pane is live and the name sticks. Refusal, a missing pane, or an absent Tern is reported as a warning; Claw stays on. The pane is recorded so worker tabs open in its session. It also switches this session's routing (below).
+- `/claw on` — start the singleton daemon if absent; register this session's own inbox cursor (see *Several Claw sessions on one workspace*); rename the tab that holds this pane (`TERN_PANE`) to `Claw`. Only that block's tab is renamed, only after Tern confirms the pane is live and the name sticks. Refusal, a missing pane, or an absent Tern is reported as a warning; Claw stays on. The pane is recorded so worker tabs open in its session. It also switches this session's routing (below).
 - Routing while on (`.pi/lib/claw/mode.ts`): the single `Agent` tool routes to Claw spawn (`project` required). `Subagent`, `BackgroundTask`, `Delegate`, `DelegateOutput`, `SubagentOutput`, `TaskOutput`, `AgentControl`, `wait_for_agent`, `multi_agent_wait` are removed from the active set and refused at `tool_call`. Orchestrator tools (`claw_spawn|list|read|send|cancel|trigger`) are active only while on. Off restores the prior active set captured at `/claw on`; a session shutdown restores it too and does not change the store control (triggers keep firing).
 - Worker launch is plain terminal pi: the command sets `PI_TERN_UI=0` (the documented bypass of the Tern shell dispatch, `docs/reference/tern-pi-shell-dispatch.md`). Normal tools stay enabled; `-nt` is not used.
 - `/claw off` — suspend triggers and new runs. Running workers keep running and are still reconciled.
@@ -247,6 +247,33 @@ reach it before any run event can exist; `.pi/lib/claw/preflight.ts` decides bot
 The gate is a parse check, not a full load: `npm run check:install` (isolated `DefaultResourceLoader`, no session, no
 model) remains the deeper manual check for registration-time failures such as a duplicate tool.
 
+## Several Claw sessions on one workspace (2026-10-27)
+
+Several orchestrator sessions may run Claw in the same workspace (for example two Tern windows on one machine). Each
+session keeps its own runs:
+
+| State | Scope | Where |
+| --- | --- | --- |
+| Run owner (`run.owner`) and Tern pane (`run.pane`) | per run | stamped by the calling session on `spawn` and on a trigger's spawn action (`stampOrigin` in `extensions/claw/extension.ts`) |
+| Inbox cursor | per session | `.swarm/claw/sessions/<session>.json`; `registerSession` in `.pi/lib/claw/store.ts` |
+| Inbox item address (`item.owner`) | per item | `appendInbox` copies the owner of the item's run or trigger |
+| Digest | per session | `flushDigest` writes one `claw_digest` per owner |
+| Daemon, lock, triggers, control (on/off) | per workspace | unchanged: one supervisor serves every session |
+
+- A session receives the items addressed to it plus unaddressed ones (daemon errors, heartbeats, runs from before
+  owners existed). Another session's items are skipped, so `/claw on` or any `claw_*` call in one session never takes
+  another session's completions. Before this change the last session to act received everything.
+- A run's worker tab opens in the Tern session that holds `run.pane`, not the pane recorded by the latest `/claw on`.
+  `claw_resume` uses the same pane. A run without a pane (older runs) falls back to `control.json` as before.
+- A new session starts reading at the current inbox end, so it never replays history. The same session reopened in a
+  new process (`pi --session`, Tern pane reopen, `/reload`) keeps its cursor and resends an undelivered batch at once.
+- Migration: the old single cursor (`orchestrator.json`) is handed over once, to the session it named, or to the first
+  session that registers when its owner process is gone. `migratedTo` records the handover.
+- Known limit: a run belongs to the session id that started it. If that chat is never reopened, its completions stay
+  in `inbox.jsonl` and remain visible in `claw_list` (`owner` column) and `claw_read`, but no other session is woken.
+- Evidence: `.pi/test/claw/multi-orchestrator.test.ts` (fails on 0.8.0 with the field symptom), `tools/e2e/claw-two-orchestrators.mjs`
+  (two OS processes on one store), and 10 `session-*` mutations in `tools/claw/mutation-check.mjs`.
+
 ## Durability
 
 - One daemon per workspace (`.swarm/claw/daemon.lock`, pid-checked; a dead owner is reclaimed). Started detached via
@@ -265,7 +292,7 @@ model) remains the deeper manual check for registration-time failures such as a 
   and is reported failed, never retried.
 - Triggers fire with a key (`trg@scheduled-time` or `trg@run`); runs and inbox items dedupe on it.
 - Hoja writes go through an outbox with read-back; each comment carries `<!-- claw-op:ID -->` and is skipped if already visible.
-- Inbox (`inbox.jsonl`) is durable; the owning session delivers unread items on start and every 3 s.
+- Inbox (`inbox.jsonl`) is durable; each registered session delivers its own unread items on start and every 3 s.
 
 ## Self-supervision (2026-10-22)
 

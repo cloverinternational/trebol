@@ -4,6 +4,14 @@ Release metadata is kept in `package.json`, `update-manifest.json`, and this fil
 
 ## [Unreleased]
 
+### Fixed
+
+- Claw: several orchestrator sessions on one workspace no longer merge. Each run records the session that started it and
+  that session's Tern pane, so its completions, notices and digest reach only that session and its worker tabs open in
+  that session's Tern window. Previously `/claw on` or any `claw_*` call made the last session the inbox owner for
+  every run and moved every new worker tab into its window. Inbox cursors are per session
+  (`.swarm/claw/sessions/<session>.json`); the old single cursor is migrated once.
+
 ## [0.8.0] - 2026-10-27
 
 ### Highlights

@@ -187,7 +187,7 @@ export async function resumeRun(run: Run, deps: ResumeDeps): Promise<Run> {
 	run.launchWarning = gate.warnings.length ? gate.warnings.join("; ").slice(0, 400) : undefined;
 	let session: number;
 	try {
-		session = await clawSession(deps.tern, store.readControl().pane);
+		session = await clawSession(deps.tern, run.pane ?? store.readControl().pane);
 	} catch (error) {
 		throw failed(`Tern: ${(error as Error).message}`);
 	}

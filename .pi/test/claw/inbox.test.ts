@@ -25,7 +25,7 @@ describe("claw inbox: persist-before-ack", () => {
 	beforeEach(() => {
 		dir = mkdtempSync(join(tmpdir(), "claw-inbox-"));
 		store = ClawStore.forWorkspace(dir);
-		store.writeOrchestrator({ offset: 0, owner: "s1", ownerPid: process.pid });
+		store.registerSession("s1", process.pid, () => true);
 	});
 	afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
@@ -33,13 +33,13 @@ describe("claw inbox: persist-before-ack", () => {
 		store.appendInbox({ kind: "notify", text: "first", key: "k1" });
 		const h = harness(store, "s1");
 		expect(await pumpInbox(h.deps)).toBe("sent");
-		expect(store.readOrchestrator().offset).toBe(0);
-		expect(store.readOrchestrator().inflight?.ids).toEqual(["k1"]);
+		expect(store.readCursor("s1")!.offset).toBe(0);
+		expect(store.readCursor("s1")!.inflight?.ids).toEqual(["k1"]);
 		expect(await pumpInbox(h.deps)).toBe("waiting");
 		h.persist();
 		expect(await pumpInbox(h.deps)).toBe("advanced");
-		expect(store.readOrchestrator().offset).toBeGreaterThan(0);
-		expect(store.readOrchestrator().inflight).toBeUndefined();
+		expect(store.readCursor("s1")!.offset).toBeGreaterThan(0);
+		expect(store.readCursor("s1")!.inflight).toBeUndefined();
 		expect(h.sent).toHaveLength(1);
 	});
 
@@ -49,21 +49,22 @@ describe("claw inbox: persist-before-ack", () => {
 		h.persisted.push({ customType: INBOX_TYPE, content: "earlier", display: true, details: { eventIds: ["dup-1"] } });
 		expect(await pumpInbox(h.deps)).toBe("advanced");
 		expect(h.sent).toHaveLength(0);
-		expect(store.readOrchestrator().offset).toBeGreaterThan(0);
+		expect(store.readCursor("s1")!.offset).toBeGreaterThan(0);
 	});
 
-	it("a restart with an in-flight batch resends it to the new process unless its ids are already persisted", async () => {
+	it("a restart of the same session with an in-flight batch resends it unless its ids are already persisted", async () => {
 		store.appendInbox({ kind: "notify", text: "lost-wake", key: "wk-1" });
 		const before = harness(store, "s1");
+		before.deps.pid = 111;
 		await pumpInbox(before.deps);
-		// Process dies before persistence. A new process (new session) takes ownership and resumes.
-		store.writeOrchestrator({ ...store.readOrchestrator(), owner: "s2", ownerPid: 999999 });
-		const after = harness(store, "s2");
+		// Process dies before persistence. The same session reopens in a new process and resumes its own cursor.
+		const after = harness(store, "s1");
+		after.deps.pid = 222;
 		expect(await pumpInbox(after.deps)).toBe("sent");
 		expect(after.sent[0].details.eventIds).toEqual(["wk-1"]);
 		after.persist();
 		expect(await pumpInbox(after.deps)).toBe("advanced");
-		expect(store.readOrchestrator().offset).toBeGreaterThan(0);
+		expect(store.readCursor("s1")!.offset).toBeGreaterThan(0);
 	});
 
 	it("an overdue in-flight batch in the same session is resent with the same stable id", async () => {
@@ -75,13 +76,14 @@ describe("claw inbox: persist-before-ack", () => {
 		expect(h.sent.map((m) => m.details.eventIds)).toEqual([["slow-1"], ["slow-1"]]);
 	});
 
-	it("a non-owner session delivers nothing and writes nothing", async () => {
+	it("an unregistered session delivers nothing and writes nothing", async () => {
 		store.appendInbox({ kind: "notify", text: "for owner", key: "o-1" });
 		const h = harness(store, "not-owner");
-		const before = JSON.stringify(store.readOrchestrator());
+		const before = JSON.stringify(store.readCursor("s1")!);
 		expect(await pumpInbox(h.deps)).toBe("not_owner");
 		expect(h.sent).toHaveLength(0);
-		expect(JSON.stringify(store.readOrchestrator())).toBe(before);
+		expect(JSON.stringify(store.readCursor("s1")!)).toBe(before);
+		expect(store.readCursor("not-owner")).toBeUndefined();
 	});
 
 	it("overlapping pumps on one store run a single send", async () => {
@@ -99,8 +101,8 @@ describe("claw inbox: persist-before-ack", () => {
 		const h = harness(store, "s1");
 		h.deps.send = async () => false;
 		expect(await pumpInbox(h.deps)).toBe("idle");
-		expect(store.readOrchestrator().inflight).toBeUndefined();
-		expect(store.readOrchestrator().offset).toBe(0);
+		expect(store.readCursor("s1")!.inflight).toBeUndefined();
+		expect(store.readCursor("s1")!.offset).toBe(0);
 	});
 
 	it("every inbox item carries a stable id; appending the same key twice writes one item", () => {

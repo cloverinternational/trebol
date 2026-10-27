@@ -73,7 +73,7 @@ describe("claw mode persists per chat across reload", () => {
 		expect(typeof clawAgentRoute()).toBe("function");
 		expect(ensureCalls.n).toBe(1);
 		expect(JSON.stringify(store.readControl())).toBe(controlBefore);
-		expect(store.readOrchestrator().owner).toBe("chat-A");
+		expect(store.readCursor("chat-A")).toBeDefined();
 	});
 
 	it("/claw off then reload stays off and restores the exact pre-Claw tool set", async () => {
@@ -113,7 +113,7 @@ describe("claw mode persists per chat across reload", () => {
 		expect(clawModeOn()).toBe(false);
 		expect(other.pi.active).toEqual(expect.not.arrayContaining(CLAW_TOOLS));
 		expect(other.pi.active).toEqual(expect.arrayContaining(["Subagent", "Agent"]));
-		expect(ClawStore.forWorkspace(cwd).readOrchestrator().owner).not.toBe("chat-B");
+		expect(ClawStore.forWorkspace(cwd).readCursor("chat-B")).toBeUndefined();
 	});
 
 	it("session switch back to an off chat restores off; the switched-away chat keeps its own state", async () => {

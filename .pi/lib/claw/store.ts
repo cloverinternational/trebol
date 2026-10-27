@@ -1,13 +1,16 @@
 /** File-backed state for /claw. Layout under <workspace>/.swarm/claw:
  *  - runs/<id>.json, runs/<id>.task.md, runs/<id>.events.jsonl (append-only, written by the worker process)
  *  - triggers/<id>.json, requests/<id>.json (clients -> daemon), responses/<id>.json (daemon -> clients)
- *  - inbox.jsonl (append-only, daemon -> orchestrator), orchestrator.json (inbox offset and owning session)
+ *  - inbox.jsonl (append-only, daemon -> orchestrator). Each item carries the `owner` session of the run or trigger it
+ *    is about; an item with no owner (daemon-wide, or a run from before owners existed) is for every Claw session.
+ *  - sessions/<session>.json: one inbox cursor per orchestrator session, so two Claw sessions in one workspace each
+ *    receive only their own runs. orchestrator.json is the single pre-session cursor, read once for migration.
  *  - control.json (on/off), daemon.lock (singleton), daemon.log
  *  Single writer rule: only the daemon writes runs/ and triggers/; clients only write requests/ and control.json.
  *  Workers only append to their own events file. Stays free of parameter properties so the daemon can run under
  *  `node --experimental-strip-types`. */
-import { appendFileSync, closeSync, existsSync, fstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { randomBytes } from "node:crypto";
+import { appendFileSync, closeSync, existsSync, fstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { createHash, randomBytes } from "node:crypto";
 import { join } from "node:path";
 
 import type { Resolved } from "./hoja.ts";
@@ -30,8 +33,16 @@ export type Finish = { outcome: "completed" | "failed" | "needs_user"; summary: 
 export type RunAskState = "open" | "answered" | "cancelled" | "unresolved";
 export type RunAsk = { flowId: string; title?: string; questionIds: string[]; openedAt: string; state: RunAskState; closedAt?: string };
 export type OutboxOp = { id: string; kind: "comment"; body: string; done: boolean } | { id: string; kind: "state"; state: string; done: boolean };
-export type SpawnInput = { task: string; project: string; assignee?: string; label?: string; cwd?: string; provider?: string; model?: string; keepOpen?: boolean };
-export type Run = {
+/** Which orchestrator session a run belongs to and where its tabs open. Stamped by the calling session on every
+ *  request that can start a run (spawn, trigger_add); absent on runs from before per-session ownership. */
+export type Origin = {
+	/** Pi session id of the orchestrator that asked for this run; its inbox items go to that session only. */
+	owner?: string;
+	/** That orchestrator's Tern block (TERN_PANE): the run's worker tabs open in the Tern session holding it. */
+	pane?: number;
+};
+export type SpawnInput = Origin & { task: string; project: string; assignee?: string; label?: string; cwd?: string; provider?: string; model?: string; keepOpen?: boolean };
+export type Run = Origin & {
 	id: string; label: string; task: string; cwd: string; status: RunStatus; phase: RunPhase;
 	createdAt: string; updatedAt: string; project: string; assignee?: string; provider?: string; model?: string;
 	requestedAssignee?: string; requestId?: string; fireKey?: string; trigger?: string;
@@ -118,7 +129,7 @@ export type ClawEvent = {
 };
 export type TriggerWhen = { kind: "cron"; cron: string } | { kind: "at"; at: string } | { kind: "on_exit"; runId: string; on?: RunStatus[] };
 export type TriggerAction = ({ kind: "spawn" } & SpawnInput) | { kind: "notify"; message: string };
-export type Trigger = {
+export type Trigger = Origin & {
 	id: string; when: TriggerWhen; action: TriggerAction; enabled: boolean; once: boolean; createdAt: string;
 	nextFireAt?: string; fired: number; lastFiredAt?: string; lastRunId?: string; lastError?: string; retryAt?: string;
 };
@@ -137,7 +148,7 @@ export type InboxKind =
 	/** One collapsed digest per window (see .pi/lib/claw/supervisor.ts) and an all-clear heartbeat, so silence is health. */
 	| "claw_digest" | "claw_heartbeat";
 /** `id` is the stable delivery identity: the dedup key when one exists, otherwise a generated id. It is what the receiver records in its transcript. */
-export type InboxItem = { id: string; at: string; key?: string; kind: InboxKind; runId?: string; triggerId?: string; text: string };
+export type InboxItem = { id: string; at: string; key?: string; kind: InboxKind; runId?: string; triggerId?: string; text: string; owner?: string };
 /** A low-severity notice held for the next digest. Delivered only inside a `claw_digest` inbox item, so per-event
  *  chatter never wakes the orchestrator one item at a time. Same dedupe-on-key contract as InboxItem. */
 export type Notice = { id: string; at: string; key?: string; kind: InboxKind; runId?: string; text: string };
@@ -163,16 +174,21 @@ export type Request =
 	| { id: string; kind: "keep"; createdAt: string; runId: string; keep: boolean }
 	/** Relaunch this run's worker tab on its recorded session file: same run, same Hoja issue, same conversation. */
 	| { id: string; kind: "resume"; createdAt: string; runId: string }
-	| { id: string; kind: "trigger_add"; createdAt: string; when: TriggerWhen; action: TriggerAction; once: boolean }
+	| { id: string; kind: "trigger_add"; createdAt: string; when: TriggerWhen; action: TriggerAction; once: boolean; owner?: string; pane?: number }
 	| { id: string; kind: "trigger_remove"; createdAt: string; triggerId: string }
 	/** Caller gave up waiting. Settles the target request: refused (not started) if still undispatched, else reports its outcome. */
 	| { id: string; kind: "withdraw"; createdAt: string; requestId: string };
 /** code "not_started" is a definitive refusal with no side effect (expired or withdrawn before dispatch). */
 export type Response = { id: string; ok: boolean; result?: unknown; error?: string; code?: "not_started" };
+/** One orchestrator session's inbox cursor (sessions/<session>.json). `owner`/`ownerPid` remain only on the legacy
+ *  single cursor (orchestrator.json); `migratedTo` marks that it was handed to a session and is no longer read. */
 export type OrchestratorState = {
-	offset: number; owner?: string; ownerPid?: number;
-	/** Inbox items handed to a session whose persistence is not yet seen in that session's transcript. */
-	inflight?: { ids: string[]; endOffset: number; sentAt: string; session: string };
+	offset: number; owner?: string; ownerPid?: number; migratedTo?: string;
+	/** The process that last registered this cursor. */
+	pid?: number;
+	/** Inbox items handed to a session whose persistence is not yet seen in that session's transcript. `pid` is the
+	 *  process that sent them: a different process (a restart of the same session) resends at once. */
+	inflight?: { ids: string[]; endOffset: number; sentAt: string; session: string; pid?: number };
 };
 /** The daemon singleton lock. `fingerprint` is the code key the daemon was started from (see ./fingerprint.ts); it is
  *  absent on a lock written before that check existed, which is what makes an old supervisor recognizable. */
@@ -223,6 +239,7 @@ export class ClawStore {
 	readonly logPath: string;
 	readonly noticesPath: string;
 	readonly supervisorPath: string;
+	readonly sessionsDir: string;
 
 	constructor(dir: string) {
 		this.dir = dir;
@@ -236,7 +253,8 @@ export class ClawStore {
 		this.logPath = join(dir, "daemon.log");
 		this.noticesPath = join(dir, "notices.jsonl");
 		this.supervisorPath = join(dir, "supervisor.json");
-		for (const d of [this.runsDir, this.triggersDir, this.requestsDir, this.responsesDir]) mkdirSync(d, { recursive: true });
+		this.sessionsDir = join(dir, "sessions");
+		for (const d of [this.runsDir, this.triggersDir, this.requestsDir, this.responsesDir, this.sessionsDir]) mkdirSync(d, { recursive: true });
 	}
 	static forWorkspace(workspace: string): ClawStore { return new ClawStore(join(workspace, ".swarm", "claw")); }
 	newId(prefix: "run" | "trg" | "req" | "evt"): string { return `${prefix}-${Date.now().toString(36)}-${randomBytes(3).toString("hex")}`; }
@@ -295,11 +313,16 @@ export class ClawStore {
 	writeResponse(res: Response): void { writeJson(join(this.responsesDir, `${res.id}.json`), res); }
 	removeRequest(id: string): void { rmSync(join(this.requestsDir, `${id}.json`), { force: true }); }
 
+	/** Addressed to the owner of the run or trigger the item is about, read from the persisted record (every run is
+	 *  saved before its first side effect). No owner: the item is for every Claw session in this workspace. */
 	appendInbox(item: Omit<InboxItem, "at" | "id">): void {
 		if (item.key && this.readInbox(0).items.some((i) => i.key === item.key)) return;
 		const id = item.key ?? this.newId("evt");
-		appendFileSync(this.inboxPath, `${JSON.stringify({ id, at: new Date().toISOString(), ...item })}\n`);
+		const owner = item.owner ?? (item.runId ? this.getRun(item.runId)?.owner : undefined) ?? (item.triggerId ? this.getTrigger(item.triggerId)?.owner : undefined);
+		appendFileSync(this.inboxPath, `${JSON.stringify({ id, at: new Date().toISOString(), ...item, ...(owner ? { owner } : {}) })}\n`);
 	}
+	/** Byte length of the inbox: where a newly registered session starts reading. */
+	inboxEnd(): number { try { return statSync(this.inboxPath).size; } catch { return 0; } }
 	readInbox(offset: number) { return readLines<InboxItem>(this.inboxPath, offset); }
 	/** Low-severity notices, folded into the next digest. Durable and append-only like the inbox; deduped on key. */
 	appendNotice(item: Omit<Notice, "at" | "id">): void {
@@ -315,6 +338,33 @@ export class ClawStore {
 	/** Owner = the Pi session that drives the inbox; only that session delivers inbox items. */
 	readOrchestrator(): OrchestratorState { return readJson<OrchestratorState>(join(this.dir, "orchestrator.json")) ?? { offset: 0 }; }
 	writeOrchestrator(state: OrchestratorState): void { writeJson(join(this.dir, "orchestrator.json"), state); }
+	/** Session ids are Pi's (uuid-like); anything else is hashed so it can never escape sessionsDir. */
+	private cursorPath(session: string): string {
+		const name = SAFE_ID.test(session) && session.length <= 120 ? session : `h-${createHash("sha256").update(session).digest("hex").slice(0, 32)}`;
+		return join(this.sessionsDir, `${name}.json`);
+	}
+	readCursor(session: string): OrchestratorState | undefined { return session ? readJson<OrchestratorState>(this.cursorPath(session)) : undefined; }
+	writeCursor(session: string, state: OrchestratorState): void { if (session) writeJson(this.cursorPath(session), state); }
+	/** Registers an orchestrator session for inbox delivery; idempotent. A new session starts at the inbox end so it
+	 *  never replays other sessions' history. The legacy single cursor is handed over once: to the session it named, or,
+	 *  when that owner is no longer running, to the first session that registers. */
+	registerSession(session: string, pid: number, alive: (pid: number) => boolean): OrchestratorState | undefined {
+		if (!session) return undefined;
+		const existing = this.readCursor(session);
+		if (existing) {
+			if (existing.pid !== pid) this.writeCursor(session, { ...existing, pid });
+			return existing;
+		}
+		const legacy = readJson<OrchestratorState>(join(this.dir, "orchestrator.json"));
+		const inherit = legacy && !legacy.migratedTo && legacy.owner !== undefined
+			&& (legacy.owner === session || legacy.ownerPid === undefined || !alive(legacy.ownerPid));
+		const state: OrchestratorState = inherit
+			? { offset: legacy.offset, inflight: legacy.inflight ? { ...legacy.inflight, session } : undefined, pid }
+			: { offset: this.inboxEnd(), pid };
+		this.writeCursor(session, state);
+		if (inherit) this.writeOrchestrator({ ...legacy, migratedTo: session });
+		return state;
+	}
 
 	/** Absent control file means on. `pane` is the orchestrator's Tern block (TERN_PANE) recorded by /claw on; worker tabs open in its session. */
 	readControl(): { enabled: boolean; pane?: number; supervise?: Record<string, unknown> } {
