@@ -130,6 +130,8 @@ function startTsp(): void {
 			bridge.moveTabOrCursor(effect.delta);
 		} else if (effect.kind === "toggleOutput") {
 			bridge.toggleToolOutput();
+		} else if (effect.kind === "detach") {
+			bridge.backgroundForegroundWork();
 		} else if (effect.kind === "text") bridge.appendDraft(effect.text);
 	});
 	// Pasted text stays in the draft; embedded newlines do not submit.

@@ -28,6 +28,12 @@ describe("Tern key decoding", () => {
 		expect(keyEffect("\x1b")).toEqual({ kind: "escape" });
 	});
 
+	it("maps Ctrl+B to the background detach in both encodings", () => {
+		// Legacy C0 (0x02) from an ordinary terminal, and kitty CSI-u from a terminal that reports modifiers.
+		expect(keyEffect("\x02")).toEqual({ kind: "detach" });
+		expect(keyEffect("\x1b[98;5u")).toEqual({ kind: "detach" });
+	});
+
 	it("maps arrows to picker movement and keeps plain legacy text", () => {
 		expect(keyEffect("\x1b[A")).toEqual({ kind: "up" });
 		expect(keyEffect("\x1b[B")).toEqual({ kind: "down" });

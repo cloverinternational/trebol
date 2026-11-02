@@ -315,3 +315,34 @@ describe("framed result card under a styling theme", () => {
     for (const row of rows) expect(visibleWidth(row)).toBeLessThanOrEqual(80);
   });
 });
+
+describe("bash label preference", () => {
+  it("leads the call row with the caller's description instead of the command", () => {
+    const row = formatBashCall({ command: "rm -rf build", description: "Clean build output" }, theme);
+    expect(row).toContain("Clean build output");
+    expect(row).not.toContain("rm -rf build");
+  });
+
+  // Negative control: without a label the row must still say something true.
+  it("falls back to the command when no description is supplied", () => {
+    expect(formatBashCall({ command: "ls -la" }, theme)).toContain("$ ls -la");
+  });
+
+  it("uses the description in the running call card", () => {
+    const rows = bashCallCardComponent({ command: "npm run build", description: "Build the runtime" }, theme, truncate).render(60).join("\n");
+    expect(rows).toContain("Build the runtime");
+    expect(rows).not.toContain("npm run build");
+  });
+
+  it("uses the description in the settled result card header", () => {
+    const result = { content: [{ type: "text", text: "ok" }], details: { command: "npm run build", description: "Build the runtime", exit_code: 0, duration_ms: 1200 } };
+    const rows = bashResultCardComponent(result, {}, theme).render(60).join("\n");
+    expect(rows).toContain("Build the runtime");
+    expect(rows).not.toContain("npm run build");
+  });
+
+  it("still shows the command when the call carries no description", () => {
+    const result = { content: [{ type: "text", text: "ok" }], details: { command: "npm run build", exit_code: 0, duration_ms: 10 } };
+    expect(bashResultCardComponent(result, {}, theme).render(60).join("\n")).toContain("npm run build");
+  });
+});

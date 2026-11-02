@@ -1,4 +1,4 @@
-import { PERMISSIVE_PARAMETERS, overlaySwarmToolSchemas } from "../../lib/runtime/swarm-tool-surface.ts";
+import { loadSwarmCanonicalTools, PERMISSIVE_PARAMETERS, overlaySwarmToolSchemas } from "../../lib/runtime/swarm-tool-surface.ts";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
@@ -7,6 +7,7 @@ import { AgentManager, type Runner } from "../../../packages/tools/agents/src/in
 import { SwarmAgentTools } from "../../lib/tools/swarm-agent-tools.ts";
 import { registerSwarmAgentTools } from "../../../extensions/swarm-agent-tools/extension.ts";
 import { TOOL_CONTRACTS } from "../../lib/runtime/tool-contracts.ts";
+import { runningWorkSnapshot } from "../../lib/ui/running-work.ts";
 
 const root = resolve(import.meta.dirname, "../../..");
 
@@ -36,6 +37,32 @@ describe("Swarm agent orchestration tools", () => {
     d.resolve("done");
   });
 
+  it("backgrounds a foreground Subagent run without cancelling it", async () => {
+    const d = deferred();
+    const logic = new SwarmAgentTools(new AgentManager({ runner: async () => d.promise }));
+    const running = logic.subagent({ task: "slow subagent" });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(logic.requestWaitBackground()).toBe(true);
+    const result = JSON.parse((await running).text);
+    expect(result).toMatchObject({ status: "async_launched" });
+    // The worker keeps running; only its claim on the turn is released, so the bar can show it.
+    expect(runningWorkSnapshot().find(item => item.id === result.agent_id)?.foreground).toBe(false);
+    d.resolve("done");
+  });
+
+  it("backgrounds a multi_agent_wait without cancelling the agents", async () => {
+    const d = deferred();
+    const logic = new SwarmAgentTools(new AgentManager({ runner: async () => d.promise }));
+    const a = JSON.parse((await logic.backgroundTask({ task: "first" })).text).agent_id;
+    const b = JSON.parse((await logic.backgroundTask({ task: "second" })).text).agent_id;
+    const waiting = logic.multiWait({ agent_ids: [a, b], timeout_seconds: 60 });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(logic.requestWaitBackground()).toBe(true);
+    const result = JSON.parse((await waiting).text);
+    expect(result).toMatchObject({ wait_status: "backgrounded", agent_count: 2, completed_count: 0, agents_cancelled: false });
+    d.resolve("done");
+  });
+
   it("advertises the owned contract descriptions and schemas byte-for-byte", () => {
     const { tools } = harness(async () => "done");
     expect(tools.map(t => t.name)).toEqual(names);
@@ -43,7 +70,9 @@ describe("Swarm agent orchestration tools", () => {
       const contract = TOOL_CONTRACTS[tool.name];
       expect(tool.description).toBe(contract.description);
       expect(tool.parameters).toEqual(PERMISSIVE_PARAMETERS);
-      expect(JSON.stringify(overlaySwarmToolSchemas({ tools: [{ type: "function", function: { name: tool.name, description: tool.description, parameters: tool.parameters } }] })!.tools[0].function.parameters)).toBe(JSON.stringify(contract.parameters));
+      // The wire schema is the canonical surface: it injects the shared
+      // `description` label once, so it is no longer byte-identical to the contract.
+      expect(JSON.stringify(overlaySwarmToolSchemas({ tools: [{ type: "function", function: { name: tool.name, description: tool.description, parameters: tool.parameters } }] })!.tools[0].function.parameters)).toBe(JSON.stringify(loadSwarmCanonicalTools().get(tool.name)!.parameters));
     }
     expect(tools.some(t => t.name === "Agent" || t.name === "AgentControl")).toBe(false);
   });

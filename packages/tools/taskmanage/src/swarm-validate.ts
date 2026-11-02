@@ -205,7 +205,9 @@ export function swarmValidateTaskManageParams(params: unknown): string | undefin
   try {
     const normalized = normalizeTaskManageParams(params);
     const raw = isObj(normalized) ? normalized : {};
-    for (const field of Object.keys(raw)) if (field !== "operations" && field !== "mode") fail(`unknown top-level field ${q(field)}`);
+    // The call label belongs to presentation; operation descriptions remain task data.
+    for (const field of Object.keys(raw)) if (field !== "operations" && field !== "mode" && field !== "description") fail(`unknown top-level field ${q(field)}`);
+    if (raw.description !== undefined && typeof raw.description !== "string") fail("description must be a string");
     const ops = raw.operations;
     if (ops === undefined) fail("operations is required");
     if (!Array.isArray(ops)) fail("operations must be an array");

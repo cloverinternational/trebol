@@ -13,6 +13,7 @@ import { bashCallComponent, bashResultComponent, formatBashCall } from "../../.p
 import { withDefaultToolRenderer } from "../../packages/runtime/core/src/tool-renderer.ts";
 import { onAgentSettled } from "../../.pi/lib/runtime/agent-settled.ts";
 import { createSessionWakeup } from "../../.pi/lib/runtime/session-wakeup.ts";
+import { detachRunningWork } from "../../.pi/lib/ui/running-work.ts";
 
 type Pi = any;
 const registrations = new WeakSet<object>();
@@ -113,11 +114,13 @@ export function registerSwarmBackgroundBash(inputPi: Pi): void {
   // consumes any matched extension shortcut, so this key no longer reaches
   // cursor-left while Pi is focused.
   pi.registerShortcut?.("ctrl+b", {
-    description: "Move the running Bash command to the background",
+    description: "Move the running Bash command or agent wait to the background",
     handler: (ctx: any) => {
-      const moved = (globalThis as any)[BACKGROUND_BASH_DETACH]?.() === true;
+      // The shared dispatch also reaches the agent tools' wait detach, so this
+      // shortcut and the running-work panel agree on what the key does.
+      const moved = detachRunningWork();
       ctx.ui?.notify?.(
-        moved ? "Bash command moved to background" : "No foreground Bash command to background",
+        moved ? "Moved running work to the background" : "Nothing running in the foreground to background",
         moved ? "info" : "warning",
       );
     },

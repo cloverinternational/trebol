@@ -14,6 +14,7 @@ import {
   visibleRunningWork,
   runningWorkListLabel,
   runningWorkFooterHints,
+  detachRunningWork,
   browsableRunningWork,
   RECENT_WORK_MS,
   scopeRunningWorkToSession,
@@ -45,6 +46,36 @@ describe("running work footer interaction", () => {
   afterEach(() => {
     setRunningWorkExpanded(false);
     for (const item of runningWorkSnapshot()) removeRunningWork(item.id);
+  });
+
+  it("detaches Bash first, then an agent wait, and reports when there is nothing to move", () => {
+    const globals = globalThis as any;
+    const bash = Symbol.for("pi-swarm-background-bash-detach");
+    const wait = Symbol.for("pi-swarm-wait-for-agent-background");
+    const calls: string[] = [];
+    // A Bash command that already finished declines, so the wait behind it gets its turn.
+    globals[bash] = () => { calls.push("bash"); return false; };
+    globals[wait] = () => { calls.push("wait"); return true; };
+    try {
+      expect(detachRunningWork()).toBe(true);
+      expect(calls).toEqual(["bash", "wait"]);
+    } finally {
+      delete globals[bash];
+      delete globals[wait];
+    }
+    expect(detachRunningWork()).toBe(false);
+  });
+
+  it("handles Ctrl+B before the drawer opens, even with no visible work", () => {
+    const globals = globalThis as any;
+    const wait = Symbol.for("pi-swarm-wait-for-agent-background");
+    globals[wait] = () => true;
+    try {
+      expect(runningWorkSnapshot()).toHaveLength(0);
+      expect(handleRunningWorkInput("\x02")).toBe(true);
+    } finally {
+      delete globals[wait];
+    }
   });
 
   it("collapses when the user resumes editing the prompt", () => {

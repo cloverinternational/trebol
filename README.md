@@ -279,6 +279,8 @@ flowchart TD
 | `/vault list`, `/vault add [id]`, `/vault remove <id>` | List IDs/kinds, enter a global secret through UI prompts, or remove an entry. Add needs an interactive input UI; never paste credentials into chat or commit them. |
 | `/hooks` or `/hooks GROUP on|off` | Inspect or change a known hook group; an unknown group reports an error. |
 | `/goal CONDITION`, `/goal status|clear` | Persist a goal condition, inspect it, or clear it. An overlong condition is rejected. |
+| `/upgrade PROMPT` | Rewrite the prompt into a deeper version (a professional's extra work, raw source material, methods, and an independent check), then run the rewritten prompt as one follow-up turn. |
+| `/upgradegoal PROMPT` | `/upgrade` plus a goal: the wrapped prompt becomes both the goal condition and the turn that runs it, so the loop continues until the upgraded work is judged done. Nothing is sent when the input is empty, over 4000 characters, when a goal is already active, or when the `swarm-goal` extension is not loaded. |
 | `/loop [10m] TASK`, `/loop status|stop` | Schedule repeats in the current session; default interval is 10 minutes. Loops expire and are cancelled on shutdown/reload; use `scheduler` for delay/cron jobs. |
 | `/trebol-update` or `/trebol-update install` | Check the release manifest (and, for a local checkout, whether it is behind its upstream), or install: a Pi-managed git clone runs `pi update --extensions`, and a local checkout is fast-forwarded (plus `npm ci` when dependencies changed), then Pi reloads. It refuses on uncommitted or diverged work. Newer releases auto-install when safe; `PI_SWARM_AUTO_UPDATE=0` keeps notify-only. |
 | `/swarm-autogen status|on|off|manual` | Show or change generated-skill mode; restart/reload to apply. |

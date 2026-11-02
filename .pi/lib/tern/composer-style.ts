@@ -97,4 +97,6 @@ export const PI_COMPOSER_CSS = `
 [data-role='tasks.call'] { font-family: var(--tv-font, var(--mono)); }
 [data-role='tasks.body'] { gap: 3px; padding: 4px 2px; }
 [data-role='tasks.state'] { color: var(--t3); font-size: 10px; padding: 2px 4px 0; }
+/* The composer's Background button: the bar's other facts are clickable too, so it takes the pointer. */
+[data-role='omp.composer.background'] { cursor: pointer; }
 `;

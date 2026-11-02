@@ -1,8 +1,16 @@
 // Pure factual summaries of tool steps for the work table. No model output, no raw argument dumps.
 import { describe, expect, it } from "vitest";
-import { activityView, currentTaskLine, summarizeWorkStep, type WorkStep } from "../../lib/tern/work-summary.ts";
+import { activityView, currentTaskLine, stepHead, summarizeWorkStep, type WorkStep } from "../../lib/tern/work-summary.ts";
 
 describe("work step summaries (pure)", () => {
+	// The label is not a bash-only idea: any known tool that carries a description
+	// surfaces it as the head's intent, so the target alone is never the whole story.
+	it("surfaces a description as head intent for every known tool, not only bash", () => {
+		expect(stepHead("read", { path: "src/a.ts", description: "Inspect the parser" }))
+			.toMatchObject({ verb: "Read", target: "src/a.ts", intent: "Inspect the parser" });
+		expect(stepHead("TaskManage", { description: "Close the task" }).intent).toBe("Close the task");
+	});
+
 	it("names known tools with a plain action and a target from recognized arguments only", () => {
 		expect(summarizeWorkStep({ id: "t-1", name: "read", args: { path: "src/a.ts", offset: 1, secret: "x" }, status: "ok", took: 120 }))
 			.toEqual({ id: "t-1", label: "Read", target: "src/a.ts", result: "Done · 120 ms", tone: "success" });

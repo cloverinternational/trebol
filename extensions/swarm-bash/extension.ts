@@ -46,7 +46,7 @@ export function registerSwarmBash(pi: Pi): void {
     // so they opt out of Pi's default padded Box shell entirely.
     renderShell: "self",
     renderCall(args: BashParams, theme: any) {
-      return bashCallCardComponent({ command: args.command, timeout_seconds: args.timeout_seconds }, theme, (text, width) => truncateToWidth(text, width, "…"));
+      return bashCallCardComponent({ command: args.command, description: args.description, timeout_seconds: args.timeout_seconds }, theme, (text, width) => truncateToWidth(text, width, "…"));
     },
     renderResult(result: any, options: any, theme: any) {
       return bashResultCardComponent(result, options, theme, wrapTextWithAnsi);

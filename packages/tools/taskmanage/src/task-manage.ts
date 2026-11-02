@@ -70,7 +70,8 @@ export interface Operation {
   addBlocks?: Ref[]; addBlockedBy?: Ref[]; addNote?: string; noteType?: NoteType; include_audit?: boolean;
   questions?: TaskQuestion[]; answers?: TaskAnswer[];
 }
-export interface Params { operations: Operation[]; mode?: Mode }
+/** The batch description is a presentation label, not a task description. */
+export interface Params { operations: Operation[]; mode?: Mode; description?: string }
 export interface Failure { code: string; message: string; retryable: boolean }
 export interface Result { key: string; op: Operation["op"]; status: "succeeded" | "failed" | "skipped"; data?: unknown; error?: Failure }
 export interface Batch { status: "succeeded" | "partial" | "failed"; results: Result[] }
@@ -186,6 +187,7 @@ const operationSchema = (op: string) => ({
 export const taskManageSchema = {
   type: "object", required: ["operations"], additionalProperties: false,
   properties: {
+    description: { type: "string", description: "Brief rendering label for this call; not stored on tasks." },
     mode: { type: "string", enum: ["sequential", "atomic"] },
     operations: { type: "array", minItems: 1, maxItems: 50, items: { oneOf: ["create", "update", "get", "list"].map(operationSchema) } },
   },
@@ -769,8 +771,13 @@ export class TaskManager {
   }
   execute(params: Params, signal?: AbortSignal): Batch {
     this.worktrees = undefined; // One discovery per batch; never retain revoked worktrees across calls.
-    if (!isObj(params) || Object.keys(params).some(key => key !== "operations" && key !== "mode"))
+    if (!isObj(params))
       return { status: "failed", results: [{ key: "batch", op: "list", status: "failed", error: fail("validation_failed", "unknown batch field") }] };
+    const unknownField = Object.keys(params).find(key => key !== "operations" && key !== "mode" && key !== "description");
+    if (unknownField !== undefined)
+      return { status: "failed", results: [{ key: "batch", op: "list", status: "failed", error: fail("validation_failed", `unknown top-level field ${JSON.stringify(unknownField)}`) }] };
+    if (params.description !== undefined && typeof params.description !== "string")
+      return { status: "failed", results: [{ key: "batch", op: "list", status: "failed", error: fail("validation_failed", "description must be a string") }] };
     const ops = Array.isArray(params.operations)
       ? params.operations.map(operation => {
           if (!isObj(operation)) return operation;

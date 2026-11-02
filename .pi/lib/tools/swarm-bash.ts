@@ -52,13 +52,19 @@ export function normalizeBashParams(value: unknown): BashParams {
   return { ...params, command: typeof params.command === "string" ? params.command : "", timeout_seconds: timeout ?? 90 } as BashParams;
 }
 
-/** Pi's native Bash call preview: keep the command visible in the dim tool row. */
-export function formatBashCall(args: { command?: string; timeout_seconds?: number; timeout?: number } | undefined, theme: any): string {
+/**
+ * Pi's native Bash call preview. The caller's label leads; the command is only
+ * the fallback, because a row that exists to say "what is happening" should not
+ * open with a shell command.
+ */
+export function formatBashCall(args: { command?: string; description?: string; timeout_seconds?: number; timeout?: number } | undefined, theme: any): string {
   const command = typeof args?.command === "string" ? args.command : "...";
+  const description = typeof args?.description === "string" ? args.description.trim() : "";
   const timeout = args?.timeout_seconds ?? args?.timeout;
   const timeoutSuffix = timeout ? theme?.fg?.("muted", ` (timeout ${timeout}s)`) ?? ` (timeout ${timeout}s)` : "";
   const display = command || (theme?.fg?.("toolOutput", "...") ?? "...");
-  const title = theme?.fg?.("toolTitle", theme?.bold?.(`$ ${display}`) ?? `$ ${display}`) ?? `$ ${display}`;
+  const plain = description || `$ ${display}`;
+  const title = theme?.fg?.("toolTitle", theme?.bold?.(plain) ?? plain) ?? plain;
   return title + timeoutSuffix;
 }
 
@@ -209,7 +215,7 @@ const commandHeaderRow = (value: string, width: number, truncate?: (text: string
  * OMP-style framed call card: the command alone in a frame, shown while the
  * command runs (the result card replaces the display once it settles).
  */
-export function bashCallCardComponent(args: { command?: string; timeout_seconds?: number; timeout?: number } | undefined, theme: any, truncate?: (text: string, width: number) => string): { render: (width: number) => string[]; invalidate: () => void } {
+export function bashCallCardComponent(args: { command?: string; description?: string; timeout_seconds?: number; timeout?: number } | undefined, theme: any, truncate?: (text: string, width: number) => string): { render: (width: number) => string[]; invalidate: () => void } {
   return {
     render: (width: number) => {
       if (width <= 0) return [""];
@@ -238,6 +244,7 @@ export function bashResultCardComponent(result: any, options: any = {}, theme: a
   const timeoutSecs = Number(details.timeout_seconds);
   const exitCode = details.exit_code;
   const command = typeof details.command === "string" ? details.command : "";
+  const description = typeof details.description === "string" ? details.description.trim() : "";
   const background = failed ? undefined : extractBackgroundDisplayText(raw, details);
   const body = stripANSI(failed ? raw : background ?? extractBashDisplayText(raw)).trimEnd();
   const dim = (text: string) => theme?.fg?.(failed ? "error" : "toolOutput", text) ?? text;
@@ -247,11 +254,11 @@ export function bashResultCardComponent(result: any, options: any = {}, theme: a
     render: (width: number) => {
       if (width <= 0) return [""];
       const inner = Math.max(1, width - 4);
-      // Header: "<icon> bash · $ <command>" bounded to the content width.
+      // Header: "<icon> bash · <description>", falling back to "$ <command>".
       const icon = partial ? "·" : timedOut ? "⚠" : failed ? "✗" : "✓";
       const headPrefix = `${icon} bash · `;
-      const commandRow = commandHeaderRow(`$ ${command || "..."}`, Math.max(1, inner - headPrefix.length), undefined);
-      const header = headColor(headPrefix) + muted(`$ ${commandRow.replace(/^\$ /, "")}`);
+      const commandRow = commandHeaderRow(description || `$ ${command || "..."}`, Math.max(1, inner - headPrefix.length), undefined);
+      const header = headColor(headPrefix) + muted(description ? commandRow : `$ ${commandRow.replace(/^\$ /, "")}`);
       const outputRows = body ? toDisplayRows(body, inner, wrapToWidth) : [];
       const collapsed = !options?.expanded && outputRows.length > BASH_PREVIEW_LINES;
       const shown = collapsed ? outputRows.slice(-BASH_PREVIEW_LINES) : outputRows;

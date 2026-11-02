@@ -28,6 +28,7 @@ export type KeyEffect =
 	| { kind: "undo" }
 	| { kind: "deleteWord" }
 	| { kind: "toggleOutput" }
+	| { kind: "detach" }
 	| { kind: "text"; text: string };
 
 // Sequences parseKey leaves unnamed or names by their legacy byte: VT220 Home/End (Linux console, tmux, some
@@ -95,6 +96,9 @@ export function keyEffect(sequence: string): KeyEffect | null {
 	if (name === "ctrl+a" || name === "super+a") return { kind: "selectAll" };
 	if (name === "ctrl+z" || name === "super+z") return { kind: "undo" };
 	if (name === "ctrl+o") return { kind: "toggleOutput" };
+	// Ctrl+B is Trebol's own chord, not a pi-tui editor binding: it moves the work blocking the turn
+	// (a running Bash call, an agent wait, a foreground subagent) to the running-work bar.
+	if (name === "ctrl+b") return { kind: "detach" };
 	if (name && EDIT_KEYS[name]) return EDIT_KEYS[name]!;
 	if (name === "up") return { kind: "up" };
 	if (name === "down") return { kind: "down" };

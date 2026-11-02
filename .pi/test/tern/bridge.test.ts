@@ -223,6 +223,27 @@ describe("PiTernBridge", () => {
 		expect(out.writes.some((w) => w.startsWith(`${ESC}_tsp;f;`))).toBe(true);
 	});
 
+	it("sends Ctrl+B to the shared detach, which the running-work writers publish", () => {
+		const out = capture();
+		const { session } = fakeSession();
+		const bridge = new PiTernBridge(session, { write: out.write, surfaceId: "pi", credits: CREDITS });
+		bridge.start("pi");
+		const globals = globalThis as any;
+		const wait = Symbol.for("pi-swarm-wait-for-agent-background");
+		let detached = 0;
+		globals[wait] = () => { detached++; return true; };
+		try {
+			expect(bridge.backgroundForegroundWork()).toBe(true);
+			expect(detached).toBe(1);
+		} finally {
+			delete globals[wait];
+		}
+		// With no writer registered the chord is inert instead of throwing.
+		expect(bridge.backgroundForegroundWork()).toBe(false);
+		expect(detached).toBe(1);
+		bridge.close();
+	});
+
 	it("submits typed text and queues a follow-up while busy", async () => {
 		const out = capture();
 		const fake = fakeSession();
@@ -382,12 +403,13 @@ describe("bridge rendering and draft ownership", () => {
 		expect(all).toContain('"status":"done"');
 	});
 
-	it("uses OMP's optional Bash name in the verb and description as intent", () => {
+	it("uses OMP's optional Bash name in the verb and leads with the description", () => {
 		const p = new TranscriptProjector();
 		p.apply({ type: "tool_execution_start", toolCallId: "named", toolName: "bash", args: { name: "Tests", description: "Run focused checks", command: "npm test" } });
 		p.apply({ type: "tool_execution_end", toolCallId: "named", toolName: "bash", result: { content: [{ type: "text", text: "ok" }], details: { exit_code: 0 } }, isError: false });
-		// The head names the command as a `command` target; the description is the intent tooltip.
-		expect(detail(p, "named").p).toMatchObject({ title: "Bash · Tests", target: "npm test", targetKind: "command", intent: "Run focused checks" });
+		// The head names what the step is for; the command is not the head line.
+		expect(detail(p, "named").p).toMatchObject({ title: "Bash · Tests", target: "Run focused checks", targetKind: "text" });
+		expect(detail(p, "named").p?.intent).toBeUndefined();
 	});
 
 	it("renders live bash output before completion and replaces it with human-readable final output", () => {
@@ -415,7 +437,7 @@ describe("bridge rendering and draft ownership", () => {
 		p.apply({ type: "tool_execution_update", toolCallId: "failed", partialResult: { content: [{ type: "text", text: "before failure" }] } });
 		p.apply({ type: "tool_execution_end", toolCallId: "failed", toolName: "bash", result: { content: [{ type: "text", text: "Error executing bash: Command exited with code 7" }], details: { exit_code: 7, duration_ms: 50 } }, isError: true });
 		const failed = detail(p, "failed");
-		expect(failed.p).toMatchObject({ status: "error", exit: 7, title: "Bash", target: "exit 7", targetKind: "command", intent: "Check status" });
+		expect(failed.p).toMatchObject({ status: "error", exit: 7, title: "Bash", target: "Check status", targetKind: "text" });
 		expect(failed.c?.[0]?.c?.[0]).toMatchObject({ k: "ansi", p: { text: "before failure", follow: true } });
 		expect(failed.c?.[0]?.c?.[1]?.c?.[0]?.p).toMatchObject({ spans: [{ t: "exit 7" }] });
 		p.apply({ type: "tool_execution_start", toolCallId: "cancelled", toolName: "bash", args: { command: "sleep 10" } });

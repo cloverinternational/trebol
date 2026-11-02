@@ -1,4 +1,4 @@
-import { PERMISSIVE_PARAMETERS, overlaySwarmToolSchemas } from "../../lib/runtime/swarm-tool-surface.ts";
+import { loadSwarmCanonicalTools, PERMISSIVE_PARAMETERS, overlaySwarmToolSchemas } from "../../lib/runtime/swarm-tool-surface.ts";
 import { TOOL_CONTRACTS } from "../../lib/runtime/tool-contracts.ts";
 import { afterEach, describe, expect, it } from "vitest";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -36,7 +36,8 @@ describe("Swarm history and vault surfaces", () => {
       const actual = registered.find((x) => x.name === name), wanted = TOOL_CONTRACTS[name];
       expect(JSON.stringify(actual.description)).toBe(JSON.stringify(wanted.description));
       expect(actual.parameters).toEqual(PERMISSIVE_PARAMETERS);
-      expect(JSON.stringify(overlaySwarmToolSchemas({ tools: [{ type: "function", function: { name, description: actual.description, parameters: actual.parameters } }] })!.tools[0].function.parameters)).toBe(JSON.stringify(wanted.parameters));
+      // Canonical surface, not the raw contract: the label field is injected once.
+      expect(JSON.stringify(overlaySwarmToolSchemas({ tools: [{ type: "function", function: { name, description: actual.description, parameters: actual.parameters } }] })!.tools[0].function.parameters)).toBe(JSON.stringify(loadSwarmCanonicalTools().get(name)!.parameters));
     }
   });
 

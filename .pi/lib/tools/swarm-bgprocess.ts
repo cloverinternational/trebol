@@ -28,6 +28,8 @@ interface ProcessRecord {
   id: string;
   owner?: () => boolean;
   command: string;
+  /** The caller's label, kept so the running-work row can outlive the process without showing the command. */
+  description?: string;
   cwd: string;
   env: Record<string, string>;
   state: ProcessState;
@@ -382,7 +384,7 @@ export class SwarmBackgroundProcessManager {
     const spawned = new Promise<Error | undefined>(r => { settleSpawn = r; });
     const rec: ProcessRecord = {
       owner: this.captureOwner?.(),
-      id, command, cwd: params.cwd ?? "", env, state: "running", child, pid: child.pid ?? 0,
+      id, command, ...(params.description ? { description: params.description } : {}), cwd: params.cwd ?? "", env, state: "running", child, pid: child.pid ?? 0,
       startedMs, lines: [], bytesWritten: 0, stdout: "", stderr: "", pendingStdout: [], pendingStderr: [], openLine: { stdout: { open: false }, stderr: { open: false } }, completion, spawned, backgrounded: false,
     };
     this.processes.set(id, rec);
@@ -432,7 +434,9 @@ export class SwarmBackgroundProcessManager {
       rec.signal = outcome.signal;
       rec.exitCode = outcome.exitCode;
       if (rec.state !== "cancelled") rec.state = rec.exitCode === 0 ? "completed" : "failed";
-      if (this.ownsSession(rec)) setRunningWork({ id: rec.id, kind: "bash", label: rec.command, status: rec.state, startedAt: rec.startedMs, endedAt: rec.endedMs, detail: rec.command, output: rec.lines.slice(-12).map(line => line.content).join("\n") });
+      // Keep the description the call was started with: the row must not revert to
+      // the raw command the moment the process exits.
+      if (this.ownsSession(rec)) setRunningWork({ id: rec.id, kind: "bash", label: rec.description || rec.command, status: rec.state, startedAt: rec.startedMs, endedAt: rec.endedMs, detail: rec.command, output: rec.lines.slice(-12).map(line => line.content).join("\n") });
       finish();
       this.notifyTerminal(rec);
     };

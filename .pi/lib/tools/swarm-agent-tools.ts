@@ -79,6 +79,10 @@ export class AgentToolValidationError extends Error {}
 export class SwarmAgentTools {
   private onBackgroundComplete?: (result: AgentResult) => void | Promise<void>;
   private captureCompletionOwner?: () => () => boolean;
+  /**
+   * The call currently blocking the turn on an agent: `wait_for_agent`, `multi_agent_wait`, or a
+   * foreground `Subagent`. Its `detach` resolves that call early without cancelling the agent.
+   */
   private waiting?: { id: string; detach: () => void };
   availableAgents(): string[] {
     const custom = typeof (this.manager as any).profileNames === "function" ? (this.manager as any).profileNames() as string[] : [];
@@ -209,7 +213,15 @@ export class SwarmAgentTools {
         return result.status === "completed" ? { text: result.output ?? "" } : { text: `Sub-agent execution failed: ${result.error ?? "unknown error"}`, isError: true };
       } catch (err) { return { text: `Sub-agent execution failed: ${String(err)}`, isError: true }; }
     }
-    const result = await e.done;
+    // The agent ran with `background: true` from the start, so this call only owns the wait. Ctrl+B
+    // releases the wait exactly as auto_background_seconds does when its timer expires: the worker
+    // keeps running, its item moves to the running-work bar, and the result carries the id to poll.
+    let detach!: () => void;
+    const detached = new Promise<"background">(resolve => { detach = () => resolve("background"); });
+    this.waiting = { id: e.id, detach };
+    const result = await Promise.race([e.done, detached]);
+    if (this.waiting?.id === e.id) this.waiting = undefined;
+    if (result === "background") { this.entries.set(e.id, e); e.foreground = false; patchRunningWork(e.id, { foreground: false }); return this.backgroundLaunch(e); }
     let out = result.status === "completed" ? (result.output ?? "") : `Sub-agent execution failed: ${result.error ?? "unknown error"}`;
     if (Buffer.byteLength(out) > MAX_OUTPUT) {
       const head = Buffer.from(out).subarray(0, MAX_OUTPUT).toString("utf8");
@@ -314,6 +326,7 @@ export class SwarmAgentTools {
     return { text: json(this.resultObject(result, e.outputFile)) };
   }
 
+  /** Ctrl+B: release the call blocking on an agent (a wait, or a foreground Subagent) without cancelling it. */
   requestWaitBackground(): boolean {
     if (!this.waiting) return false;
     this.waiting.detach();
@@ -332,7 +345,17 @@ export class SwarmAgentTools {
       const e = this.entry(id); if (!e) this.fail(`agent '${id}' not found: agent '${id}' not found`); return e;
     });
     const all = Promise.all(entries.map(e => e.done));
-    const results = timeout === 0 ? await all : await Promise.race([all, new Promise<undefined>(r => setTimeout(r, timeout * 1000))]);
+    // Waiting on several agents blocks the turn just as long, so Ctrl+B releases it the same way.
+    let detach!: () => void;
+    const detached = new Promise<"background">(resolve => { detach = () => resolve("background"); });
+    const waitKey = `multi:${entries.map(e => e.id).join(",")}`;
+    this.waiting = { id: waitKey, detach };
+    const results = await Promise.race(timeout === 0 ? [all, detached] : [all, new Promise<undefined>(r => setTimeout(r, timeout * 1000)), detached]);
+    if (this.waiting?.id === waitKey) this.waiting = undefined;
+    if (results === "background") {
+      const states = entries.map(e => e.result ? this.resultObject(e.result, e.outputFile, false) : ({ agent_id: e.id, status: "running" }));
+      return { text: json({ wait_status: "backgrounded", timeout_seconds: timeout, agent_count: states.length, completed_count: entries.filter(e => e.result).length, agents: states, agents_cancelled: false, message: "Wait backgrounded by Ctrl+B with the agents still running; use multi_agent_wait or TaskOutput again to check them." }) };
+    }
     const waitStatus = results ? "completed" : "timeout";
     const states = entries.map(e => e.result ? this.resultObject(e.result, e.outputFile, false) : ({ agent_id: e.id, status: "running" }));
     const completed = entries.filter(e => e.result).length;

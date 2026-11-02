@@ -28,7 +28,9 @@ describe("work steps (projector)", () => {
 		p.setGroupView("g-t-a", "all");
 		const [live] = groups(p.nodes(false, { currentTask: CURRENT }));
 		expect(steps(live!).map((s) => s.id)).toEqual(["t-a", "t-b"]);
-		expect(step(live!, "t-a")?.p).toMatchObject({ name: "bash", title: "Bash", status: "done", target: "npm test", targetKind: "command", intent: "Check build", took: 10 });
+		// A labelled step leads with its description; the command is not the head line.
+		expect(step(live!, "t-a")?.p).toMatchObject({ name: "bash", title: "Bash", status: "done", target: "Check build", targetKind: "text", took: 10 });
+		expect(step(live!, "t-a")?.p?.intent).toBeUndefined();
 		expect(step(live!, "t-b")?.p).toMatchObject({ name: "read", title: "Read", status: "running", target: "src/login.ts", targetKind: "path" });
 		// Nothing hand-drawn is left behind: the terminal owns the row rendering.
 		expect((live!.c ?? []).some((n) => n.k === "list" || n.k === "item")).toBe(false);
@@ -88,7 +90,7 @@ describe("work steps (projector)", () => {
 		const p = new TranscriptProjector();
 		user(p, "go");
 		const long = "pnpm exec vitest run src/auth/login.test.ts src/auth/session.test.ts --reporter=verbose --coverage.enabled=false --pool=forks 2>&1 | tee /tmp/login.log";
-		start(p, "long", { command: long, description: "Run the login tests" });
+		start(p, "long", { command: long });
 		const stepNode = step(groups(p.nodes(false))[0]!, "t-long")!;
 		expect(String(stepNode.p?.target).length).toBe(64);
 		expect(String(stepNode.p?.target)).toMatch(/…$/);
@@ -99,6 +101,21 @@ describe("work steps (projector)", () => {
 		// A short command is not repeated: the head already names it.
 		start(p, "short", { command: "npm test" });
 		expect((step(groups(p.nodes(false))[0]!, "t-short")!.c?.[0]?.c ?? []).some((n) => n.k === "code")).toBe(false);
+	});
+
+	it("leads a labelled step with its description and keeps the command one expand away", () => {
+		const p = new TranscriptProjector();
+		user(p, "go");
+		const long = "pnpm exec vitest run src/auth/login.test.ts --reporter=verbose";
+		start(p, "labelled", { command: long, description: "Run the login tests" });
+		const collapsed = step(groups(p.nodes(false))[0]!, "t-labelled")!;
+		expect(collapsed.p).toMatchObject({ target: "Run the login tests", targetKind: "text" });
+		expect(collapsed.p?.intent).toBeUndefined();
+		// Collapsed: the shell is not quoted at all.
+		expect((collapsed.c?.[0]?.c ?? []).some((n) => n.k === "code")).toBe(false);
+		// Expanded: the exact command is still reachable for an audit or a stop decision.
+		const expanded = step(groups(p.nodes(true))[0]!, "t-labelled")!;
+		expect((expanded.c?.[0]?.c ?? [])[0]).toMatchObject({ k: "code", p: { role: "omp.tool.bash.command", text: long } });
 	});
 
 	it("draws an apply_patch as a diff with its own +a −d, and folds it once settled", () => {
@@ -188,7 +205,7 @@ describe("work card through the bridge (native events)", () => {
 		const [live] = groups(h.nodes());
 		const running = step(live!, "t-live")!;
 		// Open while it runs, so its output shows live without a click.
-		expect(running.p).toMatchObject({ status: "running", collapsed: false, target: "printf first; sleep 1", targetKind: "command", intent: "Print", age: 0 });
+		expect(running.p).toMatchObject({ status: "running", collapsed: false, target: "Print", targetKind: "text", age: 0 });
 		// The body is the OMP run box: tailing output and the terminal-clocked foot.
 		expect(running.c?.[0]).toMatchObject({ k: "col", p: { role: "omp.run" } });
 		expect(running.c?.[0]?.c?.[0]).toMatchObject({ k: "ansi", p: { text: "first", follow: true } });

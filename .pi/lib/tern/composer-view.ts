@@ -40,6 +40,12 @@ export interface ComposerFacts {
 	cost?: number;
 	/** Attachment chips (attachments.ts), drawn above the editor line. */
 	chips?: TspNode;
+	/**
+	 * True only while Ctrl+B would really move work to the background: a live foreground call exists and a
+	 * writer published its detach (running-work.ts `hasRunningWorkDetach`). The button is a projection of that
+	 * state, never a second way to start it, so it cannot offer a click that does nothing.
+	 */
+	backgroundable?: boolean;
 }
 
 export const PLACEHOLDER = "What are we cooking?";
@@ -151,6 +157,19 @@ export function composerNodes(f: ComposerFacts, above: TspNode[] = []): TspNode[
 	const submit: TspNode = f.busy
 		? { id: "stop", k: "text", p: { role: "omp.composer.stop", text: `Stop${f.queuedFollowUp ? ` · ${f.queuedFollowUp} queued` : ""}`, tone: "error", title: `Stop  esc · Alt+Enter queues follow-up${f.queuedFollowUp ? ` · ${f.queuedFollowUp} queued` : ""}`, actions: { click: "interrupt" } } }
 		: { id: "send", k: "kbd", p: { role: "omp.composer.send", keys: ["enter"], title: "Send  ⏎", actions: { click: "submit" } } };
+	// Tern-only affordance for the chord no terminal draws: while Ctrl+B would detach the work blocking the
+	// turn, the bar shows the key it stands for and takes a click on it. Same dispatch as the key
+	// (`bg.background` → bridge.backgroundForegroundWork), so the two can never drift.
+	const background: TspNode | undefined = f.backgroundable
+		? {
+			id: "composer-background", k: "row",
+			p: { role: "omp.composer.background", gap: "xs", align: "center", title: "Move the running work to the background  ctrl+b", actions: { click: "bg.background" } },
+			c: [
+				{ id: "composer-background-label", k: "text", p: { role: "omp.composer.background.label", spans: [{ t: "Background", s: "muted" }], wrap: "none", actions: { click: "bg.background" } } },
+				{ id: "composer-background-keys", k: "kbd", p: { keys: ["ctrl", "b"], actions: { click: "bg.background" } } },
+			],
+		}
+		: undefined;
 	const bar: TspNode = {
 		id: "composer-bar",
 		k: "row",
@@ -161,6 +180,7 @@ export function composerNodes(f: ComposerFacts, above: TspNode[] = []): TspNode[
 			{ id: "extras", k: "status", p: { role: "omp.composer.extras", transparent: true, grow: 1 }, c: git ? [git] : [] },
 			...(turn ? [turn] : []),
 			{ id: "usage", k: "text", p: { role: "omp.composer.usage", text: usage, wrap: "none", ...(usage ? { title: `Session cost ${usage}` } : {}), actions: { click: "status.cost" } } },
+			...(background ? [background] : []),
 			submit,
 		],
 	};

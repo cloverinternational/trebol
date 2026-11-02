@@ -96,12 +96,30 @@ function openInspection(ctx: any, title: string, body: string): void {
     } else ctx?.ui?.notify?.(safeBody, "info");
   } catch { ctx?.ui?.notify?.("Unable to open work inspection", "warning"); }
 }
+/**
+ * Ctrl+B: take the work blocking the turn off the turn. The running Bash call
+ * wins over an agent wait, because it is what a stuck turn almost always is.
+ * Each writer publishes its detach under a global symbol; both input surfaces
+ * (Pi's editor and Tern's keymap) go through here instead of repeating the
+ * order, so a key that works in one works in the other.
+ */
+const DETACH_SYMBOLS = ["pi-swarm-background-bash-detach", "pi-swarm-wait-for-agent-background"] as const;
+/** Whether any writer published a detach; the footer and Tern's composer advertise the key only then. */
+export function hasRunningWorkDetach(): boolean {
+  const globals = globalThis as Record<PropertyKey, unknown>;
+  return DETACH_SYMBOLS.some((name) => typeof globals[Symbol.for(name)] === "function");
+}
+export function detachRunningWork(): boolean {
+  const globals = globalThis as Record<PropertyKey, unknown>;
+  for (const name of DETACH_SYMBOLS) {
+    const detach = globals[Symbol.for(name)];
+    if (typeof detach === "function" && detach() === true) return true;
+  }
+  return false;
+}
 export function handleRunningWorkInput(data: string, ctx?: any): boolean {
   if (data === "\x02") {
-    const detach = (globalThis as any)[Symbol.for("pi-swarm-background-bash-detach")];
-    if (typeof detach === "function" && detach()) return true;
-    const wait = (globalThis as any)[Symbol.for("pi-swarm-wait-for-agent-background")];
-    if (typeof wait === "function" && wait()) return true;
+    if (detachRunningWork()) return true;
   }
   if (!browsableRunningWork().length) return false;
   // Match Pi's own input decoding (including Kitty/CSI modifier forms), not
@@ -186,10 +204,6 @@ export function runningWorkListLabel(item: RunningWorkItem, maxPreview = 36): st
 
 export function runningWorkFooterHints(): string {
   const hints = ["↑/↓ select", "Enter inspect", "Esc close"];
-  const globals = globalThis as Record<PropertyKey, unknown>;
-  if (typeof globals[Symbol.for("pi-swarm-background-bash-detach")] === "function"
-    || typeof globals[Symbol.for("pi-swarm-wait-for-agent-background")] === "function") {
-    hints.push("Ctrl+B detach/wait");
-  }
+  if (hasRunningWorkDetach()) hints.push("Ctrl+B detach/wait");
   return hints.join("  ");
 }

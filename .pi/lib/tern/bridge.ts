@@ -5,6 +5,7 @@
 // (select, confirm, input, editor, notify, text widgets) are answered by native Tern dialogs (ext-ui.ts),
 // so every extension command works without per-command code. They resolve only from user action.
 import { onRunningWorkChange, runningWorkSnapshot, type RunningWorkItem } from "../ui/running-work-store.ts";
+import { detachRunningWork, hasRunningWorkDetach } from "../ui/running-work.ts";
 import { readSubagentConversationCached } from "../ui/running-work-view.ts";
 import {
 	autocompleteCommands,
@@ -878,12 +879,19 @@ function taskManageToolNode(item: Item, status: "running" | "done" | "error" | "
 function bashToolNode(item: Item, status: "running" | "done" | "error" | "cancelled", outputExpanded: boolean): TspNode {
 	const args = item.args as { command?: unknown; description?: unknown; name?: unknown } | undefined;
 	const command = typeof args?.command === "string" && args.command ? args.command : "…";
-	// OMP's optional name annotates the verb; the description becomes the head's intent.
+	// The caller's label leads the head; the command is demoted to the body, so the
+	// collapsed row says what the step is for instead of quoting the shell. A step
+	// with no label keeps the command where it was.
+	const description = typeof args?.description === "string" ? args.description.trim() : "";
 	const label = typeof args?.name === "string" && args.name ? `Bash · ${args.name}` : "Bash";
 	const head = stepHead("bash", item.args);
-	// A command long enough to be truncated in the head is shown in full in the body, which is where it can wrap.
-	const headTarget = head.target !== undefined && head.target.length > STEP_HEAD_TARGET ? `${head.target.slice(0, STEP_HEAD_TARGET - 1)}…` : head.target;
-	const showsCommand = command.length > STEP_HEAD_TARGET || command.includes("\n");
+	// A target long enough to be truncated in the head is shown in full in the body, which is where it can wrap.
+	const rawTarget = description || head.target;
+	const headTarget = rawTarget !== undefined && rawTarget.length > STEP_HEAD_TARGET ? `${rawTarget.slice(0, STEP_HEAD_TARGET - 1)}…` : rawTarget;
+	const targetKind: "text" | "command" = description ? "text" : "command";
+	// Expanded steps keep the exact command reachable (a stop or audit decision needs
+	// it); a collapsed step does not quote the shell.
+	const showsCommand = description ? outputExpanded : command.length > STEP_HEAD_TARGET || command.includes("\n");
 	const elapsed = status === "running" ? Date.now() - (item.startedAt ?? Date.now()) : item.took ?? 0;
 	const state = status === "running" ? "Running" : status === "cancelled" ? "Cancelled" : item.timedOut ? "Timed out" : status === "error" ? item.exit !== undefined ? `exit ${item.exit}` : "Failed" : "Done";
 	const tone = status === "running" ? "pending" : status === "done" ? "success" : status === "cancelled" ? "muted" : item.timedOut ? "warning" : "error";
@@ -907,8 +915,8 @@ function bashToolNode(item: Item, status: "running" | "done" | "error" | "cancel
 		id: item.id, k: "tool",
 		p: {
 			role: "omp.tool.bash", key: item.id.slice(2), name: "bash", title: label,
-			...(headTarget !== undefined ? { target: headTarget, targetKind: "command" } : {}),
-			...(head.intent !== undefined ? { intent: head.intent } : {}),
+			...(headTarget !== undefined ? { target: headTarget, targetKind } : {}),
+			...(!description && head.intent !== undefined ? { intent: head.intent } : {}),
 			// Open while it runs, so the tail of its output is visible; folded once settled, where the head keeps the
 			// command, the state, the exit code and the duration. Ctrl+O opens every step.
 			command, status, frame: "inline", collapsible: true, collapsed: status !== "running" && !outputExpanded,
@@ -1322,6 +1330,10 @@ export class PiTernBridge {
 		if (this.#dialog?.active) return [...this.#taskTop(), ...this.#dialog.nodes(this.#columns)];
 		if (this.#btw?.active) return [...this.#taskTop(), ...this.#btw.nodes()];
 		const work = this.#backgroundWork();
+		// Tern-only affordance: the bar draws ctrl+b as a button only while that chord would really move work
+		// off the turn — one foreground item is live and a writer published its detach.
+		const backgroundable = hasRunningWorkDetach()
+			&& runningWorkSnapshot().some((item) => (item.status === "queued" || item.status === "running") && item.foreground === true);
 		const usage = contextUsageOf(this.#session) as { tokens?: unknown; contextWindow?: unknown } | undefined;
 		const window = typeof usage?.contextWindow === "number" && usage.contextWindow > 0 ? usage.contextWindow : undefined;
 		const tokens = typeof usage?.tokens === "number" && Number.isFinite(usage.tokens) ? usage.tokens : null;
@@ -1345,6 +1357,7 @@ export class PiTernBridge {
 			effortKind: this.#kinds.includes("effort"),
 			git: this.#git,
 			cost: costOf(this.#session),
+			backgroundable,
 			...(this.#attachments.length ? { chips: attachmentChips(this.#attachments) } : {}),
 		}, this.#taskTop()), ...this.#ui.widgetNodes("belowEditor")];
 	}
@@ -1873,6 +1886,15 @@ export class PiTernBridge {
 		}
 	}
 
+	// Ctrl+B. Tern owns the keys, so the Pi-side running-work panel never sees this chord here: it goes to
+	// the same detach the panel uses, and the writers' store updates redraw the background card.
+	backgroundForegroundWork(): boolean {
+		if (this.#closed) return false;
+		const moved = detachRunningWork();
+		if (moved) this.#render();
+		return moved;
+	}
+
 	selectAllDraft(): void {
 		this.#editField((field) => field.selectAll(), { kind: "set" });
 	}
@@ -2232,6 +2254,8 @@ export class PiTernBridge {
 		if (act === "bg.open" && typeof msg.body.value === "string") { this.#openWorkView(msg.body.value); return undefined; }
 		if (act === "bg.close") { this.#closeWorkView(); return undefined; }
 		if (act === "bg.stop" && typeof msg.body.value === "string") { this.#stopWork(msg.body.value); return undefined; }
+		// The composer's Background button: the same dispatch the ctrl+b key reaches in run.ts.
+		if (act === "bg.background") { this.backgroundForegroundWork(); return undefined; }
 		if (act === "git.file" && typeof msg.body.value === "string") {
 			const ref = this.#gitRefs[Number(msg.body.value)];
 			return ref ? this.#showGitDiff(ref.section, ref.entry.path) : undefined;

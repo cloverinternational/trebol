@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { registerSwarmBackgroundBash } from "../../../extensions/swarm-background-bash/extension.ts";
-import { PERMISSIVE_PARAMETERS, overlaySwarmToolSchemas } from "../../lib/runtime/swarm-tool-surface.ts";
+import { loadSwarmCanonicalTools, PERMISSIVE_PARAMETERS, overlaySwarmToolSchemas } from "../../lib/runtime/swarm-tool-surface.ts";
 import { TOOL_CONTRACTS } from "../../lib/runtime/tool-contracts.ts";
 import { bgOutputPreview, formatBackgroundDone, MAX_READ_BYTES, SwarmBackgroundProcessManager, takeLines } from "../../lib/tools/swarm-bgprocess.ts";
 import { boundOversizedToolOutput, boundToolOutput } from "../../lib/runtime/swarm-toolout.ts";
@@ -58,7 +58,9 @@ describe("Swarm interactive background bash", () => {
       expect(tool.parameters).toEqual(PERMISSIVE_PARAMETERS);
       expect(tool.description).toBe(TOOL_CONTRACTS[tool.name].description);
       const overlaid: any = overlaySwarmToolSchemas({ tools: [{ type: "function", function: tool }] });
-      expect(overlaid.tools[0].function.parameters).toEqual(TOOL_CONTRACTS[tool.name].parameters);
+      // The wire schema is the canonical surface, which injects the shared
+      // `description` label once for every tool rather than per contract.
+      expect(overlaid.tools[0].function.parameters).toEqual(loadSwarmCanonicalTools().get(tool.name)!.parameters);
     }
   });
 

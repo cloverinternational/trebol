@@ -47,6 +47,20 @@ expands every card. Clicking a card's head folds that one card locally in Tern.
 
 Each piece of work is announced by exactly one indicator while it runs.
 
+There are three ways to make that move, and they are one dispatch: Ctrl+B in Pi, Ctrl+B in Tern
+(`keys.ts` → `run.ts` → `PiTernBridge.backgroundForegroundWork`), and Tern's composer **Background** button
+(`bg.background`). All three call `detachRunningWork()`, which tries the running Bash call first and then each
+agent wait, and each writer's store patch (`foreground: false`) is what moves the row from the turn line to the
+background card. The button is drawn only while that call could succeed — a live foreground item plus a
+published writer — so it never shows a control that does nothing.
+
+Ctrl+B is the way a foreground item moves from the first column to the second, and it is the same chord in
+both surfaces: Pi's editor reads `0x02` in `handleRunningWorkInput`, and Tern maps `ctrl+b` in
+`.pi/lib/tern/keys.ts` to a `detach` effect that `run.ts` hands to `PiTernBridge.backgroundForegroundWork()`.
+Both call `detachRunningWork` in `.pi/lib/ui/running-work.ts`, which asks the Bash manager first and then the
+agent tools (`wait_for_agent`, `multi_agent_wait`, a foreground `Subagent`); each detach releases only the
+wait, never the work.
+
 ## Verification
 
 - `.pi/test/tern/turn-work.test.ts` replays real recorded sessions (`.pi/test/tern/fixtures/turn-work/`,

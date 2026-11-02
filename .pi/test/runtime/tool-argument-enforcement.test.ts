@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { validateToolArguments } from "../../../vendor/pi-mono/packages/ai/src/utils/validation.ts";
-import { applySwarmSurface, PERMISSIVE_PARAMETERS, VALIDATES_OWN_ARGUMENTS } from "../../lib/runtime/swarm-tool-surface.ts";
+import { applySwarmSurface, loadSwarmCanonicalTools, PERMISSIVE_PARAMETERS, VALIDATES_OWN_ARGUMENTS } from "../../lib/runtime/swarm-tool-surface.ts";
 import { TOOL_CONTRACTS } from "../../lib/runtime/tool-contracts.ts";
 
 const surfaced = (name: string) => applySwarmSurface({ name, description: "", parameters: {} } as any) as any;
@@ -11,7 +11,9 @@ describe("tool argument enforcement", () => {
   it("enforces the real schema for every tool that does not validate its own input", () => {
     for (const name of Object.keys(TOOL_CONTRACTS)) {
       if (VALIDATES_OWN_ARGUMENTS.has(name)) continue;
-      expect(surfaced(name).parameters, name).toEqual(TOOL_CONTRACTS[name].parameters);
+      // Compare against the canonical surface, not the raw contract: the shared
+      // `description` field is injected once when the surface is built.
+      expect(surfaced(name).parameters, name).toEqual(loadSwarmCanonicalTools().get(name)!.parameters);
     }
   });
 

@@ -162,7 +162,10 @@ export function stepHead(name: string | undefined, args: unknown): StepHead {
 	const spec = HEADS[raw];
 	if (!spec) return { name: iconName(raw), verb: oneLine(raw, 40) };
 	const target = spec.target(args);
-	const intent = spec.intent?.(args);
+	// Any tool may carry a `description`; the head prefers it as the intent line so
+	// a raw argument is never the only thing a reader can see. Tools with their own
+	// intent rule keep it.
+	const intent = spec.intent?.(args) ?? intentOf(args);
 	return {
 		name: spec.name,
 		verb: spec.verb,
