@@ -17,6 +17,9 @@ export type IssueRef = { id: string; identifier: string };
 export type IssueView = {
 	id: string; identifier: string; title: string; description: string; state: string;
 	teamId: string; projectId: string; assigneeId: string; comments: string[];
+	/** Parent issue id when this is a sub-issue. `Issue.parent` and `IssueCreateInput.parentId` are both
+	 *  supported by the Hoja schema (verified by read-only introspection), so hierarchy is read back, not assumed. */
+	parentId?: string; parentIdentifier?: string;
 };
 
 type Member = { id: string; name: string; email?: string };
@@ -117,9 +120,13 @@ export class HojaClient {
 		return id;
 	}
 
-	async createIssue(r: Resolved, title: string, description: string, state = "In Progress"): Promise<IssueRef> {
+	async createIssue(r: Resolved, title: string, description: string, state = "In Progress", options: { parentId?: string } = {}): Promise<IssueRef> {
 		const d = await this.gql<any>(`mutation($input: IssueCreateInput!) { issueCreate(input: $input) { success issue { id identifier } } }`, {
-			input: { title: title.slice(0, 250), description, teamId: r.teamId, projectId: r.projectId, assigneeId: r.assigneeId, stateId: this.stateId(r, state) },
+			input: {
+				title: title.slice(0, 250), description, teamId: r.teamId, projectId: r.projectId, assigneeId: r.assigneeId, stateId: this.stateId(r, state),
+				// Only send a parent that an existing issue provided; a caller can never guess an id.
+				...(options.parentId ? { parentId: options.parentId } : {}),
+			},
 		});
 		if (!d.issueCreate?.success || !d.issueCreate.issue) throw new Error("Hoja issueCreate did not succeed");
 		return d.issueCreate.issue;
@@ -128,14 +135,24 @@ export class HojaClient {
 	/** Read-back used after every write; the caller compares the fields it cares about. */
 	async readIssue(issueId: string): Promise<IssueView> {
 		const d = await this.gql<any>(`query($id: String!) { issue(id: $id) { id identifier title description state { name } team { id } project { id } assignee { id }
+			parent { id identifier }
 			comments(first: 100) { nodes { body } } } }`, { id: issueId });
 		const i = d.issue;
 		if (!i) throw new Error(`Hoja issue ${issueId} not found on read-back`);
 		return {
 			id: i.id, identifier: i.identifier, title: i.title ?? "", description: i.description ?? "", state: i.state?.name ?? "",
 			teamId: i.team?.id ?? "", projectId: i.project?.id ?? "", assigneeId: i.assignee?.id ?? "",
+			...(i.parent ? { parentId: i.parent.id ?? "", parentIdentifier: i.parent.identifier ?? "" } : {}),
 			comments: (i.comments?.nodes ?? []).map((c: { body: string }) => c.body),
 		};
+	}
+
+	/** Adopt an issue the caller named, server-side and by exact identifier. A reused issue is never written to. */
+	async findIssueByIdentifier(identifier: string): Promise<IssueRef | undefined> {
+		const d = await this.gql<any>(`query ($first: Int!, $filter: IssueFilter) { issues(first: $first, filter: $filter) { nodes { id identifier } } }`,
+			{ first: 2, filter: { identifier: { eq: identifier } } });
+		const hit = (d.issues?.nodes ?? []).find((n: { identifier?: string }) => n.identifier?.toUpperCase() === identifier.toUpperCase());
+		return hit ? { id: hit.id, identifier: hit.identifier } : undefined;
 	}
 
 	/** Reconciliation after a crash: an issue already created for this run carries its marker in the description.

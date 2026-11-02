@@ -1,10 +1,15 @@
 import { modeFooter } from "../../.pi/lib/runtime/mode-footer.ts";
-/** Hoja mode: read-only Hoja tools plus a rule that makes the agent check Hoja before advising on work. */
+/** Hoja mode: read-only Hoja tools, coarse TaskManage → Hoja publication, and a rule that makes the agent check
+ *  Hoja before advising on work. */
 import { HojaClient, HojaRequestError } from "../../.pi/lib/claw/hoja.ts";
 import { latestSessionModeEntry } from "../../.pi/lib/runtime/session-mode-entry.ts";
 import { HOJA_GET_CONTRACT, HOJA_LIST_CONTRACT } from "../../.pi/lib/tools/swarm-hoja.contract.ts";
+import {
+	HOJA_TASK_ENTRY, publicationNote, publicationSummary, publishBatch, replayHojaRecords,
+	type HojaRecords, type HojaTaskRecord, type HojaWriter, type PublishOutcome,
+} from "./publish.ts";
 
-export const HOJA_RULE = "Hoja mode: for any question about work, status, priority, or what to do next, call hoja_list (or hoja_get for one identifier) before answering. Hoja tools are read-only. Never say a Hoja change was made. If a Hoja change is needed, state the exact change and ask the user to confirm it in this conversation; do not attempt it.";
+export const HOJA_RULE = "Hoja mode: for any question about work, status, priority, or what to do next, call hoja_list (or hoja_get for one identifier) before answering. Automatic publication is on: TaskManage publishes one Hoja issue per coarse task — a task with no parent, or one marked metadata {\"hoja\":\"publish\"} — and keeps steps local with metadata {\"hoja\":\"local\"} (child tasks stay local unless promoted; a promoted child is created under its parent's issue and is deferred rather than filed as a root). Before starting, check the project and whether an issue already exists: run hoja_list with the project name to confirm it is visible, set metadata {\"hojaProject\":\"<exact project name>\"} for a non-default project, and {\"hojaIssue\":\"TREBOL-123\"} to reuse an existing issue. Publication is automatic, so read its outcome in the TaskManage result and act on it: a no_project skip creates nothing and is retried only when you set metadata.hojaProject on a later TaskManage update of that task, and an unconfirmed create is never repeated automatically. This mode never moves, closes or comments on an issue, including a reused or shared one; state the exact change and ask the user to confirm it in this conversation. /hoja off disables publication and this guidance for the chat; hoja_list and hoja_get stay read-only.";
 export const HOJA_ENTRY = "hoja-mode";
 
 /** Every Hoja read is one of these two constant documents. No caller-supplied GraphQL ever reaches the client:
@@ -140,13 +145,38 @@ export function hojaTools(client: Gql) {
 	];
 }
 
-export function registerHojaMode(pi: any, client: Gql = new HojaClient()) {
+/** Publication needs the write surface; a client registered for reads only (or a read-only double) simply skips it. */
+const asWriter = (client: unknown): HojaWriter | undefined => {
+	const candidate = client as Partial<HojaWriter> | undefined;
+	const methods = ["resolve", "createIssue", "readIssue", "findIssueByMarker", "findIssueByIdentifier"] as const;
+	return candidate && methods.every((method) => typeof candidate[method] === "function") ? candidate as HojaWriter : undefined;
+};
+
+export interface HojaModeOptions {
+	/** Project used when a task names none; defaults to HOJA_PROJECT. */
+	project?: string;
+}
+
+export function registerHojaMode(pi: any, client: Gql = new HojaClient(), options: HojaModeOptions = {}) {
 	let enabled = true;
+	let records: HojaRecords = {};
+	/** Bumped on /hoja off, session start and shutdown. A batch captures it and stops before its next write when it
+	 *  no longer matches, so a stale in-flight batch can never publish into a chat that is gone or turned off. */
+	let generation = 0;
+	/** Publication is serialized: one batch at a time, in order, so a second TaskManage call always sees the first
+	 *  batch's associations instead of racing it into a duplicate issue. */
+	let queue: Promise<unknown> = Promise.resolve();
 	const footer = modeFooter("hoja", () => enabled);
-	const setEnabled = (next: boolean) => { enabled = next; pi.appendEntry?.(HOJA_ENTRY, { enabled }); };
+	const writer = asWriter(client);
+	const project = () => options.project ?? (process.env.HOJA_PROJECT?.trim() || undefined);
+	const setEnabled = (next: boolean) => {
+		enabled = next;
+		generation += 1;
+		pi.appendEntry?.(HOJA_ENTRY, { enabled });
+	};
 	for (const tool of hojaTools(client)) pi.registerTool(tool);
 	pi.registerCommand("hoja", {
-		description: "Hoja work mode: /hoja on|off|status (read-only; session-local)",
+		description: "Hoja work mode: /hoja on|off|status (publishes coarse tasks; session-local)",
 		handler: async (args: string, ctx: any) => {
 			const action = args.trim().toLowerCase() || "status";
 			if (action === "on") setEnabled(true);
@@ -156,12 +186,63 @@ export function registerHojaMode(pi: any, client: Gql = new HojaClient()) {
 				return;
 			}
 			footer.refresh(ctx);
-			ctx.ui?.notify?.(`Hoja mode ${enabled ? "on" : "off"}. ${enabled ? "Work questions check Hoja first." : "Automatic Hoja-first guidance disabled; read tools remain available."} Read-only. Saved per chat; kept across /reload, resume and fork.`, "info");
+			ctx.ui?.notify?.(`Hoja mode ${enabled ? "on" : "off"}. ${enabled ? "Work questions check Hoja first; coarse TaskManage tasks publish to Hoja." : "Automatic publication and Hoja-first guidance disabled; read tools remain available."} Hoja tools are read-only and publication never moves or closes an issue. Saved per chat; kept across /reload, resume and fork.`, "info");
 		},
 	});
 	// A new chat has no saved entry and starts on; a reloaded or resumed chat restores its own saved choice.
-	pi.on("session_start", (_event: unknown, ctx: any) => { enabled = latestSessionModeEntry<{ enabled?: boolean }>(ctx, HOJA_ENTRY)?.enabled !== false; footer.refresh(ctx); });
-	pi.on("session_shutdown", (_event: unknown, ctx: any) => footer.clear(ctx));
+	pi.on("session_start", (_event: unknown, ctx: any) => {
+		generation += 1;
+		enabled = latestSessionModeEntry<{ enabled?: boolean }>(ctx, HOJA_ENTRY)?.enabled !== false;
+		// Associations are journaled per chat, so a reload or resume can never publish the same task twice.
+		records = replayHojaRecords(ctx?.sessionManager?.getBranch?.() ?? ctx?.sessionManager?.getEntries?.() ?? []);
+		footer.refresh(ctx);
+	});
+	pi.on("session_shutdown", (_event: unknown, ctx: any) => {
+		generation += 1;
+		footer.clear(ctx);
+	});
+	// Publication reacts to TaskManage results only. No other tool can create a Hoja issue.
+	pi.on("tool_result", (event: any, ctx: any) => {
+		if (!enabled || event?.toolName !== "TaskManage" || !writer) return;
+		// `details.batch` is the structured envelope TaskManage already emits; `details` alone is its legacy shape.
+		const batch = event?.details?.batch ?? event?.details;
+		if (!batch || !Array.isArray(batch.results)) return;
+		const startGeneration = generation;
+		const sessionKey = String(ctx?.sessionManager?.getSessionId?.() ?? "session");
+		const work = async () => {
+			let outcome: PublishOutcome;
+			try {
+				outcome = await publishBatch(event.input, batch, {
+					enabled: true, sessionKey, project: project(), writer, records,
+					// The intent is journaled before the create request, so a crash mid-write leaves a durable trail.
+					journal: (entry: HojaTaskRecord) => {
+						if (startGeneration === generation) pi.appendEntry?.(HOJA_TASK_ENTRY, entry);
+					},
+					isActive: () => startGeneration === generation,
+				});
+			} catch {
+				// A publication bug must never fail the TaskManage call that already succeeded.
+				if (startGeneration === generation) ctx?.ui?.notify?.("Hoja publication did not run; task state is unaffected.", "warning");
+				return undefined;
+			}
+			// The chat changed or the mode went off while this batch ran: its state belongs to the old chat.
+			if (startGeneration !== generation) return undefined;
+			records = outcome.applied;
+			const summary = publicationSummary(outcome);
+			if (summary) ctx?.ui?.notify?.(summary, outcome.records.every(r => r.state === "linked") && !outcome.blocked.length ? "info" : "warning");
+			// The model, not the UI, has to learn the outcome: a notification is invisible to it, and a silent skip is
+			// how an agent keeps believing work was filed when it was not.
+			const note = publicationNote(outcome);
+			if (!note) return undefined;
+			const content = Array.isArray(event.content)
+				? event.content
+				: typeof event.content === "string" ? [{ type: "text" as const, text: event.content }] : [];
+			return { content: [...content, { type: "text" as const, text: note }] };
+		};
+		const queued = queue.then(work, work);
+		queue = queued.then(() => undefined, () => undefined);
+		return queued;
+	});
 	pi.on("before_agent_start", (event: any) => enabled
 		? { systemPrompt: String(event.systemPrompt ?? "") + "\n" + HOJA_RULE }
 		: undefined);
