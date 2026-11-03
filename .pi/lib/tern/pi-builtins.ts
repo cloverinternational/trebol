@@ -8,6 +8,7 @@
 import { createMcpExtension } from "@earendil-works/pi-coding-agent";
 import { clearMcpStatus, publishMcpStatus } from "../tools/mcp-status.ts";
 import { piDistUrl } from "../tools/pi-dist.ts";
+import { clearMcpHost, publishMcpHost } from "./mcp-host.ts";
 
 type Factory = (pi: any) => unknown;
 export interface BuiltinExtension { name: string; factory: Factory; builtin: true; replaceable?: boolean }
@@ -30,6 +31,7 @@ export function withMcpStatus(factory: Factory): Factory {
 		const owner = {};
 		const tools = new Map<string, Set<string>>();
 		let sessionId: string | undefined;
+		let command: ((args: string, ctx: any) => Promise<unknown>) | undefined;
 		const publish = () => publishMcpStatus(owner, [...tools].filter(([, names]) => names.size > 0).map(([server]) => server), sessionId);
 		const track = (definition: { name?: unknown; exposure?: unknown }) => {
 			const match = typeof definition?.name === "string" ? MCP_TOOL.exec(definition.name) : null;
@@ -42,11 +44,17 @@ export function withMcpStatus(factory: Factory): Factory {
 		};
 		const observed = new Proxy(pi, {
 			get(target, key) {
+				if (key === "registerCommand") return (name: string, definition: any) => {
+					if (name === "mcp") command = definition.handler;
+					return target.registerCommand(name, definition);
+				};
 				if (key === "registerTool") return (definition: { name?: unknown; exposure?: unknown }) => { const result = target.registerTool(definition); track(definition); return result; };
 				if (key === "on") {
 					return (event: string, handler: (e: unknown, ctx: any) => unknown) => target.on(event, async (e: unknown, ctx: any) => {
 						if (event === "session_start") {
+							clearMcpHost(owner);
 							sessionId = ctx?.sessionManager?.getSessionId?.();
+							if (sessionId && command) publishMcpHost(owner, sessionId, pi, ctx, command);
 							tools.clear();
 							publish();
 						}
@@ -54,6 +62,7 @@ export function withMcpStatus(factory: Factory): Factory {
 						if (event === "session_shutdown") {
 							tools.clear();
 							clearMcpStatus(owner);
+							clearMcpHost(owner);
 						}
 						return result;
 					});

@@ -1,6 +1,7 @@
 // Process-wide, read-only view of the MCP servers and tools the active Pi session has registered.
 // transport-parity publishes it from Pi's own tool definitions; the Tern `/mcp` view reads it.
-// No slot means unavailable; an empty server list means no MCP server is configured (or connected).
+// No slot means unavailable; an empty server list means no MCP tools are registered.
+// It cannot establish whether servers are configured, connecting, or resource-only.
 //
 // This is deliberately separate from mcp-status.ts: that slot is Pi-Swarm's fallback client view
 // (the startup card's connection line), while this one describes what the built-in MCP extension

@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { createAgentSessionFromServices, createAgentSessionServices, SessionManager } from "@earendil-works/pi-coding-agent";
 import { piBuiltinExtensions, withMcpStatus } from "../../lib/tern/pi-builtins.ts";
 import { readMcpStatus } from "../../lib/tools/mcp-status.ts";
+import { readMcpHost } from "../../lib/tern/mcp-host.ts";
 
 describe("piBuiltinExtensions", () => {
 	it("is Pi's own list, with MCP kept replaceable", async () => {
@@ -28,6 +29,28 @@ describe("piBuiltinExtensions", () => {
 });
 
 describe("withMcpStatus", () => {
+	it("publishes the captured command only for its current session and clears it on shutdown", async () => {
+		const handlers = new Map<string, any>();
+		const calls: unknown[] = [];
+		const pi = { on: (name: string, fn: any) => handlers.set(name, fn), registerCommand() {}, registerTool() {} };
+		withMcpStatus((api) => {
+			api.registerCommand("mcp", { handler: async (args: string, ctx: any) => { calls.push([args, ctx.mode]); } });
+			api.on("session_start", () => {});
+			api.on("session_shutdown", () => {});
+		})(pi);
+		let id = "host-first";
+		const ctx = { sessionManager: { getSessionId: () => id }, ui: {} };
+		await handlers.get("session_start")({}, ctx);
+		await readMcpHost(id)!.command("reconnect", "github");
+		expect(calls).toEqual([["reconnect github", "rpc"]]);
+		id = "host-second";
+		await handlers.get("session_start")({}, ctx);
+		expect(readMcpHost("host-first")).toBeUndefined();
+		expect(readMcpHost("host-second")).toBeDefined();
+		await handlers.get("session_shutdown")({}, ctx);
+		expect(readMcpHost("host-second")).toBeUndefined();
+	});
+
 	function fakePi() {
 		const handlers = new Map<string, (e: unknown, ctx: unknown) => unknown>();
 		const registered: string[] = [];

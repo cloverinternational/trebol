@@ -37,22 +37,82 @@ function bridgeWith(prompt = vi.fn(async () => {})) {
       skills: () => [],
     },
   } as any);
-  return { bridge, writes, prompt };
+  return { bridge, writes, prompt, session };
 }
 
 describe("Tern /mcp", () => {
-  it("prints the inventory instead of dispatching to Pi's unrenderable TUI panel", async () => {
-    const owner = {};
+  it("opens from startup, isolates edits/pastes, and restores the composer on Escape", async () => {
     const { bridge, writes, prompt } = bridgeWith();
+    try {
+      bridge.start("test"); bridge.setDraft("keep this draft");
+      await bridge.handle({ verb: "e", body: { ev: "action", act: "mcp.open" } } as any);
+      bridge.applyMcpKey({ kind: "text", text: "github" });
+      bridge.pasteText("search only");
+      bridge.handle({ verb: "e", body: { ev: "edit", id: "composer", from: 0, to: 15, len: 15, cursor: 4, text: "oops" } } as any);
+      expect(bridge.draft).toBe("keep this draft");
+      expect(prompt).not.toHaveBeenCalled();
+      writes.length = 0;
+      bridge.escape();
+      expect(bridge.draft).toBe("keep this draft");
+      expect(writes.join("")).toContain('"del","mcp-overlay"');
+    } finally { bridge.close(); }
+  });
+
+  it("reads late registrations and exposure changes without a model turn", async () => {
+    const owner = {};
+    const { bridge, writes, prompt, session } = bridgeWith();
+    let definitions: typeof DEFINITIONS = [];
+    let active = ["tool_search"];
+    session.getAllTools = () => definitions;
+    session.getActiveToolNames = () => active;
+    try {
+      bridge.start("test");
+      publishMcpInventory(owner, deriveMcpInventory([], []), "s1");
+      // Background connection completes after the startup alignment snapshot.
+      definitions = DEFINITIONS;
+      writes.length = 0;
+      await bridge.submit("/mcp");
+      expect(drawn(writes)).toContain('"k":"overlay"');
+      expect(drawn(writes)).toContain('"id":"hoja"');
+      await bridge.handle({ verb: "e", body: { ev: "select", id: "mcp-servers", item: "hoja" } } as any);
+      expect(drawn(writes)).toContain("Deferred tools are discoverable through tool_search");
+
+      definitions = [{ name: "mcp__hoja__list_issues", exposure: "hidden" }];
+      active = [];
+      writes.length = 0;
+      await bridge.submit("/mcp");
+      expect(drawn(writes)).toContain("Hidden tools are unreachable by design");
+
+      // A current empty registry must also beat a stale nonempty snapshot.
+      publishMcpInventory(owner, deriveMcpInventory(DEFINITIONS, []), "s1");
+      definitions = [];
+      writes.length = 0;
+      await bridge.submit("/mcp");
+      expect(drawn(writes)).toContain("No MCP servers observed");
+      expect(drawn(writes)).not.toContain("No MCP servers are configured");
+      expect(prompt).not.toHaveBeenCalled();
+    } finally {
+      bridge.close();
+      clearMcpInventory(owner);
+    }
+  });
+
+  it("opens a native inventory instead of dispatching to Pi's unrenderable TUI panel", async () => {
+    const owner = {};
+    const { bridge, writes, prompt, session } = bridgeWith();
+    session.getAllTools = () => DEFINITIONS;
+    session.getActiveToolNames = () => ["mcp__github__get_me", "codemode"];
     try {
       bridge.start("test");
       publishMcpInventory(owner, deriveMcpInventory(DEFINITIONS, ["mcp__github__get_me", "codemode"]), "s1");
       writes.length = 0;
       await bridge.submit("/mcp");
       const surface = drawn(writes);
-      expect(surface).toContain("MCP servers (2)");
+      expect(surface).toContain('"k":"overlay"');
+      expect(surface).toContain('"k":"table"');
       expect(surface).toContain("github");
-      expect(surface).toContain("deferred: needs tool_search, which is not active");
+      await bridge.handle({ verb: "e", body: { ev: "select", id: "mcp-servers", item: "hoja" } } as any);
+      expect(drawn(writes)).toContain("Deferred tools need tool_search, which is inactive");
       // The command never reached Pi's handler, so no model turn started.
       expect(prompt).not.toHaveBeenCalled();
     } finally {
@@ -67,7 +127,7 @@ describe("Tern /mcp", () => {
       bridge.start("test");
       writes.length = 0;
       await bridge.submit("/mcp");
-      expect(drawn(writes)).toContain("MCP inventory unavailable");
+      expect(drawn(writes)).toContain("Pi management adapter unavailable");
     } finally {
       bridge.close();
     }

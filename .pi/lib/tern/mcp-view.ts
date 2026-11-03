@@ -1,7 +1,7 @@
 // Text for Tern's `/mcp` route. Pi's own `/mcp` opens a TUI component
 // (`ctx.ui.custom`), which this frontend cannot render: it disposes the panel and
 // prints "needs Pi's terminal UI". Tern instead prints the same inventory as
-// transcript lines, from the snapshot transport-parity publishes.
+// transcript lines, from Pi's live registry (published snapshot on older hosts).
 //
 // Pure and dependency-free so the wording can be asserted in tests.
 
@@ -12,7 +12,7 @@ export const MCP_COMMAND_HINT = "  next: /mcp reconnect <server> · /mcp login <
 const UNKNOWN =
 	"MCP inventory unavailable: no session has published it yet. It appears once the MCP extension has loaded a server for this session in Tern.";
 
-const NONE = "No MCP servers are configured for this session.";
+const NONE = "No MCP tools are registered in this session yet. Servers may still be connecting, disabled, or have no tools.";
 
 /** How a server's tools reach the model, stated as a fact about this session. */
 function reachLine(server: McpServerInventory, reachable: boolean): string {

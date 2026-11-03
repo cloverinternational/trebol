@@ -47,7 +47,7 @@ describe("deriveMcpInventory", () => {
 describe("mcpInventoryLines (Tern /mcp)", () => {
   it("distinguishes an unpublished snapshot from an empty configuration", () => {
     expect(mcpInventoryLines(undefined)[0]).toMatch(/unavailable/i);
-    expect(mcpInventoryLines(deriveMcpInventory([], []))[0]).toMatch(/No MCP servers are configured/i);
+    expect(mcpInventoryLines(deriveMcpInventory([], []))[0]).toMatch(/No MCP tools are registered/i);
   });
 
   it("states each server's exposure and why its tools are or are not reachable", () => {
