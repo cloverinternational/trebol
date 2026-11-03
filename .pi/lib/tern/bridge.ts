@@ -15,19 +15,24 @@ import {
 	type CommandSource,
 } from "./commands.ts";
 import type { Model } from "@earendil-works/pi-ai";
+import { editingBanner, imageAttachments, MESSAGE_EDIT, MESSAGE_EDIT_CANCEL, MESSAGE_FOCUS, MESSAGE_RESEND, messageActionRow, messageItemFromNode, resolveUserEntry, userEntriesOf, type EditState, type UserEntry } from "./message-actions.ts";
+import { buildTreeModel, DEFAULT_TREE_FILTER, nextFilter, sessionTreePickerNode, TREE_FILTERS, type TreeFilter, type TreeModel, type TreeRow } from "./session-tree.ts";
 import { encodeTspBlob, projectTranscript, type TspMessage, type TspNode, type TspWriter, TernInlineSurface } from "./tsp.ts";
 import { composerNodes, modelDisplayName, type GitFacts } from "./composer-view.ts";
 import { artifactNodes, previewFile, type ArtifactPreview } from "./artifact-previews.ts";
 import { readMcpStatus, subscribeMcpStatus } from "../tools/mcp-status.ts";
 import { readMcpInventory } from "../tools/mcp-inventory.ts";
 import { mcpInventoryLines } from "./mcp-view.ts";
-import { STARTUP_CSS, gitDiffNodes, gitDismissNode, gitFileRefs, gitStatusNodes, readRepoStatus, startupBlob, startupNodes, trebolVersion, watchRepo, type GitFileRef, type RepoStatus } from "./startup-card.ts";
-import { readFileDiff, type GitSection } from "./git-status.ts";
+import { STARTUP_CSS, gitDismissNode, readRepoStatus, startupBlob, startupNodes, trebolVersion, watchRepo, type RepoStatus } from "./startup-card.ts";
+import { commitIndex, discardPaths, readCommitDiff, readFileDiff, stagePaths, unstagePaths, type GitSection } from "./git-status.ts";
+import { PI_GIT_CSS, gitHelpNodes, gitPanelNodes, gitPanelRefs, type GitDiffMode, type GitPanelRef, type GitSidebarStyle } from "./git-panel.ts";
+import { contextDismissNode, contextPanelNodes, readContextBreakdown } from "./context-panel.ts";
 import { patchArtifactPaths } from "../tools/swarm-artifacts.ts";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { readGitFacts } from "./git-facts.ts";
 import { PI_COMPOSER_CSS } from "./composer-style.ts";
 import { TERN_WORK_CSS } from "./work-style.ts";
+import { PI_CONTEXT_CSS } from "./context-style.ts";
 import { TERN_MARKDOWN_CSS } from "./markdown-style.ts";
 import { projectTaskView, type TaskView, type TaskViewRow, type TaskViewSessionManager } from "./task-view.ts";
 import { buildBoard } from "./task-board.ts";
@@ -73,6 +78,12 @@ export interface PiSessionLike {
 	navigateTree?(targetId: string): Promise<{ cancelled: boolean; editorText?: string }>;
 	getUserMessagesForForking?(): Array<{ entryId: string; text: string }>;
 	getContextUsage?(): unknown;
+	/** The effective system prompt as one string; the `/context` card splits it (context-panel.ts). */
+	readonly systemPrompt?: unknown;
+	/** The live agent state: the prompt, the tool roster and the transcript the `/context` card measures. */
+	readonly agent?: {
+		readonly state?: { readonly systemPrompt?: unknown; readonly tools?: unknown; readonly messages?: unknown };
+	};
 	getSessionStats?(): { cost?: unknown };
 	readonly thinkingLevel?: unknown;
 	readonly modelRuntime?: { getAvailableSnapshot(): ReadonlyArray<Model<any>>; getAvailable?(): Promise<ReadonlyArray<Model<any>>> };
@@ -499,7 +510,12 @@ export class TranscriptProjector {
 		this.#items.push({ id: `n${++this.#seq}`, role, text });
 	}
 
-	nodes(outputExpanded = false, options: { currentTask?: CurrentTask } = {}): TspNode[] {
+	// Your messages on screen, in order: the bubbles Edit and Resend can resolve to Pi entries.
+	userItemIds(): string[] {
+		return this.#items.filter((item) => item.role === "user" && !item.turnStart).map((item) => item.id);
+	}
+
+	nodes(outputExpanded = false, options: { currentTask?: CurrentTask; messageFocus?: string; editing?: string; busy?: boolean } = {}): TspNode[] {
 		const out: TspNode[] = [];
 		const segments = segmentTranscript(this.#items);
 		// Only the newest turn can still be running; an earlier group is settled once a user message follows it.
@@ -542,7 +558,13 @@ export class TranscriptProjector {
 				out.push({ id: `msg-${item.id}`, k: "text", p: { role: "tern.notice", tone: "muted", wrap: "none", truncate: "end", text: goalLine(item.text) } });
 				return;
 			}
-			out.push(...projectTranscript([{ id: item.id, role: item.role as Exclude<Role, "tool">, text: item.text, streaming: item.streaming }]));
+			const [node] = projectTranscript([{ id: item.id, role: item.role as Exclude<Role, "tool">, text: item.text, streaming: item.streaming }]);
+			if (node && item.role === "user") {
+				// A click shows what you can do with it; a right-click offers the same.
+				node.p = { ...node.p, actions: { click: MESSAGE_FOCUS, menu: [MESSAGE_EDIT, MESSAGE_RESEND, "copy"] }, title: "Click to edit or resend", ...(options.editing === item.id ? { tone: "accent" } : {}) };
+				if (options.messageFocus === item.id) node.c = [...(node.c ?? []), messageActionRow(item.id, options.busy === true)];
+			}
+			if (node) out.push(node);
 		});
 		return out;
 	}
@@ -1078,10 +1100,27 @@ export class PiTernBridge {
 	#repoWatch: (() => void) | undefined;
 	#repoWatchKey = "";
 	#mcpUnsubscribe: (() => void) | undefined;
-	#gitView: { mode: "list" } | { mode: "diff"; ref: GitFileRef; text: string } | undefined;
+	#gitView: { mode: "list" } | { mode: "diff"; ref: GitPanelRef; text: string } | undefined;
 	// Bumped on every Git view navigation, session change and close; a diff read lands only if it is still the latest.
 	#gitRequest = 0;
-	#gitRefs: GitFileRef[] = [];
+	#gitRefs: GitPanelRef[] = [];
+	#gitDiffMode: GitDiffMode = "split";
+	#gitStyle: GitSidebarStyle = "tree";
+	#gitCollapsed = new Set<string>();
+	#gitStatus: { text: string; tone: string } | undefined;
+	#gitFocus: "summary" | "body" | undefined;
+	readonly #gitSummary = new DraftEditor();
+	readonly #gitBody = new DraftEditor({ multiline: true });
+	#gitAmend = false;
+	#gitBusy = false;
+	#gitPendingDiscard: string | undefined;
+	#gitHelp = false;
+	#gitLoading: { section: GitPanelRef["section"]; path: string; promise: Promise<void> } | undefined;
+	#gitStyled = false;
+	// OMP's `/context` card, opened from the composer's context meter, `/context`, or a click on the panel's hint.
+	#contextView = false;
+	// The card's own sheet is sent with its first frame, so a session that never opens it pays no startup frame.
+	#contextStyled = false;
 	// Background item whose output sheet is open, and the timer that keeps its output fresh.
 	#workViewId: string | undefined;
 	#workViewTimer: ReturnType<typeof setInterval> | undefined;
@@ -1112,7 +1151,13 @@ export class PiTernBridge {
 	#model: string | undefined;
 	#modelPickerOpen = false;
 	#treePickerOpen = false;
-	#treePickerItems: Array<{ id: string; label: string; description?: string }> = [];
+	#treeModel: TreeModel | undefined;
+	// The bubble showing its Edit/Resend row, and the edit in progress (nothing in the session changes until send).
+	#messageFocus: string | undefined;
+	#editing: EditState | undefined;
+	#treeVisible: TreeRow[] = [];
+	#treeFilter: TreeFilter = DEFAULT_TREE_FILTER;
+	#treeQuery = "";
 	#treePickerSelected: string | undefined;
 	#lastEligibleEscapeAt = 0;
 	#modelQuery = "";
@@ -1183,6 +1228,13 @@ export class PiTernBridge {
 	// Bind as Pi's ExtensionUIContext (session.bindExtensions({ uiContext })).
 	uiContext(): Record<string, unknown> {
 		return this.#ui.context();
+	}
+
+	/** One line in the transcript, as an extension `ui.notify` renders; used for shortcut failures. */
+	notice(text: string): void {
+		if (this.closed) return;
+		this.#projector.add("system", text);
+		this.#render();
 	}
 
 	get busy(): boolean {
@@ -1299,6 +1351,7 @@ export class PiTernBridge {
 		if (event.type === "session_tree") {
 			const branch = this.#session.sessionManager?.getBranch?.();
 			if (Array.isArray(branch)) this.#projector.replaceFromSessionBranch(branch);
+			this.#messageFocus = undefined;
 		}
 		if (event.type === "queue_update") {
 			this.#queuedSteering = Array.isArray(event.steering) ? event.steering.filter((text): text is string => typeof text === "string") : [];
@@ -1361,23 +1414,16 @@ export class PiTernBridge {
 			cost: costOf(this.#session),
 			backgroundable,
 			...(this.#attachments.length ? { chips: attachmentChips(this.#attachments) } : {}),
-		}, this.#taskTop()), ...this.#ui.widgetNodes("belowEditor")];
+		}, [...(this.#editing ? [editingBanner(this.#editing)] : []), ...this.#taskTop()]), ...this.#ui.widgetNodes("belowEditor")];
 	}
 
-	// The bar's facts are clickable in OMP (it opens panels). Pi has no such panels; a click states the
-	// same real fact in the transcript instead.
+	// The bar's facts are clickable in OMP (it opens panels). The context meter opens OMP's own context card
+	// (`#openContextView`); the rest state the same real fact in the transcript, since Pi has no such panel.
 	#statusFact(act: string): string | undefined {
 		if (act === "status.model") return `model: ${modelDisplayName(this.#session.model) ?? this.#model ?? "none"} (use /model to switch)`;
 		if (act === "status.cost") {
 			const cost = costOf(this.#session);
 			return cost === undefined ? "session cost unknown" : `session cost $${cost.toFixed(4)}`;
-		}
-		if (act === "status.context") {
-			const u = contextUsageOf(this.#session) as { tokens?: unknown; contextWindow?: unknown } | undefined;
-			if (typeof u?.contextWindow !== "number") return "context usage unknown";
-			const used = typeof u.tokens === "number" ? `${u.tokens} of ${u.contextWindow} tokens` : `unknown of ${u.contextWindow} tokens`;
-			const at = compactionPercent(this.#session, u.contextWindow);
-			return `context: ${used}${at !== undefined ? `, auto-compact at ${Math.round(at)}%` : ""}`;
 		}
 		return undefined;
 	}
@@ -1446,36 +1492,287 @@ export class PiTernBridge {
 
 	#openGitView(): void {
 		if (!this.#repo?.git) return;
+		if (!this.#gitStyled) {
+			this.#gitStyled = true;
+			this.#surface.stylesheet("git", PI_GIT_CSS);
+		}
 		this.#gitRequest++;
 		this.#gitView = { mode: "list" };
+		this.#gitFocus = undefined;
+		this.#gitStatus = undefined;
+		this.#gitHelp = false;
+		this.#gitAmend = false;
+		this.#gitSummary.setText("");
+		this.#gitBody.setText("");
+		this.#gitRefs = gitPanelRefs(this.#repo);
+		const first = this.#gitRefs[0];
+		if (first) void this.#showGitDiff(first.section, first.entry.path);
+		else this.#render();
+	}
+
+	#gitPanelRefs(): GitPanelRef[] {
+		return this.#repo?.git ? gitPanelRefs(this.#repo) : [];
+	}
+
+	// OMP's `/context` card, off the same facts its composer meter draws: Pi's provider-reported total and
+	// window, the live system prompt and tool roster, and Pi's own compaction reserve as the threshold.
+	#openContextView(): void {
+		if (!this.#contextStyled) {
+			this.#contextStyled = true;
+			this.#surface.stylesheet("context", PI_CONTEXT_CSS);
+		}
+		this.#contextView = true;
 		this.#render();
 	}
 
-	#showGitDiff(section: GitSection, path: string): Promise<void> {
+	#closeContextView(): void {
+		if (!this.#contextView) return;
+		this.#contextView = false;
+		this.#render();
+	}
+
+	#contextNodes(): TspNode[] {
+		const usage = contextUsageOf(this.#session) as { contextWindow?: unknown } | undefined;
+		const window = typeof usage?.contextWindow === "number" ? usage.contextWindow : 0;
+		const percentAt = window > 0 ? compactionPercent(this.#session, window) : undefined;
+		const thresholdTokens = percentAt === undefined ? undefined : (window * percentAt) / 100;
+		return [contextDismissNode(), ...contextPanelNodes(readContextBreakdown(this.#session, { thresholdTokens }))];
+	}
+
+	#showGitDiff(section: GitPanelRef["section"], path: string): Promise<void> {
 		const repo = this.#repo;
 		if (!repo?.git) return Promise.resolve();
-		const ref = gitFileRefs(repo.snapshot).find((r) => r.section === section && r.entry.path === path);
+		const refs = this.#gitPanelRefs();
+		const ref = refs.find((r) => r.section === section && r.entry.path === path) ?? refs.find((r) => r.entry.path === path);
 		if (!ref) {
 			this.#gitRequest++;
 			this.#gitView = { mode: "list" };
 			this.#render();
 			return Promise.resolve();
 		}
+		this.#gitRefs = refs;
+		if (this.#gitLoading && this.#gitLoading.section === ref.section && this.#gitLoading.path === ref.entry.path) return this.#gitLoading.promise;
 		const request = ++this.#gitRequest;
 		const current = () => !this.#closed && request === this.#gitRequest;
 		// The diff node is added only with its text: a later text update to an existing diff node is not applied by Tern.
-		return readFileDiff(repo.root, ref.entry, section).then(
+		const read = ref.section === "commit" ? readCommitDiff(repo.root, ref.entry.path) : readFileDiff(repo.root, ref.entry, ref.section as GitSection);
+		const promise = read.then(
 			(text) => {
+				if (this.#gitLoading?.promise === promise) this.#gitLoading = undefined;
 				if (!current()) return;
 				this.#gitView = { mode: "diff", ref, text };
 				this.#render();
 			},
 			() => {
+				if (this.#gitLoading?.promise === promise) this.#gitLoading = undefined;
 				if (!current()) return;
 				this.#gitView = { mode: "diff", ref, text: "Diff unavailable." };
 				this.#render();
 			},
 		);
+		this.#gitLoading = { section: ref.section, path: ref.entry.path, promise };
+		return promise;
+	}
+
+	#gitSelected(): GitPanelRef | undefined {
+		return this.#gitView?.mode === "diff" ? this.#gitView.ref : undefined;
+	}
+
+	#gitMoveSelection(delta: 1 | -1): undefined {
+		const refs = this.#gitPanelRefs();
+		if (!refs.length) return undefined;
+		const current = this.#gitSelected();
+		const at = current ? refs.findIndex((ref) => ref.section === current.section && ref.entry.path === current.entry.path) : -1;
+		const next = at < 0 ? (delta > 0 ? 0 : refs.length - 1) : (at + delta + refs.length) % refs.length;
+		void this.#showGitDiff(refs[next].section, refs[next].entry.path);
+		return undefined;
+	}
+
+	#gitAct(act: string, value?: string): Promise<void> | undefined {
+		const rest = act.slice("git.".length);
+		const at = rest.indexOf("=");
+		const name = at < 0 ? rest : rest.slice(0, at);
+		const arg = at < 0 ? value : rest.slice(at + 1);
+		switch (name) {
+			case "file": {
+				const index = Number(arg);
+				const ref = this.#gitPanelRefs()[index];
+				return ref ? this.#showGitDiff(ref.section, ref.entry.path) : undefined;
+			}
+			case "toggle": {
+				if (!arg) return undefined;
+				if (this.#gitCollapsed.has(arg)) this.#gitCollapsed.delete(arg);
+				else this.#gitCollapsed.add(arg);
+				this.#render();
+				return undefined;
+			}
+			case "fold.unstaged":
+			case "fold.staged":
+				return this.#gitAct(`git.toggle=section:${name.slice(5)}`);
+			case "mode":
+				if (arg === "unified" || arg === "split") this.#gitDiffMode = arg;
+				this.#render();
+				return undefined;
+			case "style":
+				if (arg === "path" || arg === "tree") this.#gitStyle = arg;
+				this.#render();
+				return undefined;
+			case "focus.summary":
+				this.#gitFocus = "summary";
+				this.#render();
+				return undefined;
+			case "focus.body":
+				this.#gitFocus = "body";
+				this.#render();
+				return undefined;
+			case "prev":
+				this.#gitMoveSelection(-1);
+				return undefined;
+			case "next":
+				this.#gitMoveSelection(1);
+				return undefined;
+			case "help":
+				this.#gitHelp = !this.#gitHelp;
+				this.#render();
+				return undefined;
+			case "back":
+				this.#gitRequest++;
+				this.#gitHelp = false;
+				this.#gitFocus = undefined;
+				this.#gitStatus = undefined;
+				this.#gitView = { mode: "list" };
+				this.#render();
+				return undefined;
+			case "close":
+				this.#gitRequest++;
+				this.#gitView = undefined;
+				this.#gitHelp = false;
+				this.#gitFocus = undefined;
+				this.#gitStatus = undefined;
+				this.#render();
+				return undefined;
+			case "stage":
+			case "unstage": {
+				const ref = this.#gitSelected();
+				if (!ref || ref.section === "commit") return undefined;
+				return this.#gitStageRef(ref, name === "stage");
+			}
+			case "stageAll":
+				return this.#gitStageAll(true);
+			case "unstageAll":
+				return this.#gitStageAll(false);
+			case "discard": {
+				const ref = this.#gitSelected();
+				return ref ? this.#gitDiscardRef(ref) : undefined;
+			}
+			case "amend":
+				this.#gitAmend = !this.#gitAmend;
+				if (this.#gitAmend && this.#repo?.git && this.#repo.head && !this.#gitSummary.text && !this.#gitBody.text) {
+					this.#gitSummary.setText(this.#repo.head.subject);
+					this.#gitBody.setText(this.#repo.head.body);
+				}
+				this.#render();
+				return undefined;
+			case "commit":
+				return this.#gitCommit();
+			default:
+				return undefined;
+		}
+	}
+
+	#gitStageRef(ref: GitPanelRef, stage: boolean): Promise<void> {
+		const repo = this.#repo;
+		if (!repo?.git) return Promise.resolve();
+		this.#gitBusy = true;
+		this.#render();
+		const run = stage ? stagePaths(repo.root, [ref.entry.path]) : unstagePaths(repo.root, [ref.entry.path]);
+		return run.then((error) => {
+			this.#gitBusy = false;
+			this.#gitStatus = error
+				? { text: error.replace(/\s+/g, " ").trim(), tone: "error" }
+				: { text: `${stage ? "Staged" : "Unstaged"} ${ref.entry.path}`, tone: "success" };
+			this.#loadRepo();
+			this.#render();
+		});
+	}
+
+	#gitStageAll(stage: boolean): Promise<void> {
+		const repo = this.#repo;
+		if (!repo?.git) return Promise.resolve();
+		const paths = repo.snapshot.entries.filter((entry) => (stage ? true : entry.staged)).map((entry) => entry.path);
+		if (!paths.length) {
+			this.#gitStatus = { text: stage ? "Nothing to stage" : "Nothing staged", tone: "warning" };
+			this.#render();
+			return Promise.resolve();
+		}
+		this.#gitBusy = true;
+		this.#render();
+		const run = stage ? stagePaths(repo.root, paths) : unstagePaths(repo.root, paths);
+		return run.then((error) => {
+			this.#gitBusy = false;
+			this.#gitStatus = error
+				? { text: error.replace(/\s+/g, " ").trim(), tone: "error" }
+				: { text: stage ? "Staged all changes" : "Unstaged all changes", tone: "success" };
+			this.#loadRepo();
+			this.#render();
+		});
+	}
+
+	#gitDiscardRef(ref: GitPanelRef): Promise<void> {
+		const repo = this.#repo;
+		if (!repo?.git || ref.section === "commit") return Promise.resolve();
+		const key = `${ref.section}:${ref.entry.path}`;
+		if (this.#gitPendingDiscard !== key) {
+			this.#gitPendingDiscard = key;
+			this.#gitStatus = { text: `Discard changes to ${ref.entry.path}? Click Discard again to confirm`, tone: "warning" };
+			this.#render();
+			return Promise.resolve();
+		}
+		this.#gitPendingDiscard = undefined;
+		this.#gitBusy = true;
+		this.#render();
+		return discardPaths(repo.root, [ref.entry]).then((error) => {
+			this.#gitBusy = false;
+			this.#gitStatus = error
+				? { text: error.replace(/\s+/g, " ").trim(), tone: "error" }
+				: { text: `Discarded ${ref.entry.path}`, tone: "success" };
+			this.#loadRepo();
+			this.#render();
+		});
+	}
+
+	#gitCommit(): Promise<void> {
+		const repo = this.#repo;
+		if (!repo?.git) return Promise.resolve();
+		const summary = this.#gitSummary.text.trim();
+		const body = this.#gitBody.expandedText.trim();
+		if (!summary && body) {
+			this.#gitStatus = { text: "Write a commit summary first", tone: "warning" };
+			this.#render();
+			return Promise.resolve();
+		}
+		const stageAll = repo.snapshot.entries.every((entry) => !entry.staged) && !this.#gitAmend;
+		const message = body ? `${summary}\n\n${body}` : summary;
+		if (!message && !this.#gitAmend) {
+			this.#gitStatus = { text: "Nothing to commit", tone: "warning" };
+			this.#render();
+			return Promise.resolve();
+		}
+		this.#gitBusy = true;
+		this.#render();
+		return commitIndex(repo.root, message || repo.head?.subject || "Amend commit", { amend: this.#gitAmend, stageAll }).then((error) => {
+			this.#gitBusy = false;
+			if (error) this.#gitStatus = { text: error.replace(/\s+/g, " ").trim(), tone: "error" };
+			else {
+				this.#gitStatus = { text: this.#gitAmend ? "Amended commit" : "Created commit", tone: "success" };
+				this.#gitSummary.setText("");
+				this.#gitBody.setText("");
+				this.#gitAmend = false;
+				this.#gitFocus = undefined;
+			}
+			this.#loadRepo();
+			this.#render();
+		});
 	}
 
 	#refreshGit(): void {
@@ -1495,12 +1792,29 @@ export class PiTernBridge {
 	// in the editor and the bridge routes ↑/↓, Tab, Enter and Esc to it.
 	#layer(): TspNode[] {
 		if (this.#workViewId !== undefined) return backgroundWorkOutputNodes(runningWorkSnapshot().find((item) => item.id === this.#workViewId));
+		if (this.#contextView) return this.#contextNodes();
 		if (this.#gitView && this.#repo?.git) {
 			// The dismiss layer sits under the card, so a click outside the card closes the view.
 			const dismiss = gitDismissNode();
-			if (this.#gitView.mode === "diff") return [dismiss, gitDiffNodes(this.#gitView.ref, this.#gitView.text)];
-			this.#gitRefs = gitFileRefs(this.#repo.snapshot);
-			return [dismiss, gitStatusNodes(this.#repo, this.#gitRefs)];
+			this.#gitRefs = gitPanelRefs(this.#repo);
+			const panel = gitPanelNodes(
+				this.#repo,
+				{
+					selected: this.#gitView.mode === "diff" ? this.#gitView.ref : undefined,
+					diffText: this.#gitView.mode === "diff" ? this.#gitView.text : undefined,
+					diffMode: this.#gitDiffMode,
+					style: this.#gitStyle,
+					collapsed: this.#gitCollapsed,
+					status: this.#gitStatus,
+					summary: this.#gitSummary.text,
+					body: this.#gitBody.expandedText,
+					amend: this.#gitAmend,
+					focus: this.#gitFocus,
+					busy: this.#gitBusy,
+				},
+				this.#columns,
+			);
+			return this.#gitHelp ? [dismiss, panel, gitHelpNodes()] : [dismiss, panel];
 		}
 		if (this.#ui.active) return this.#ui.nodes();
 		if (this.#treePickerOpen) return [this.#treePickerNode()];
@@ -1509,16 +1823,26 @@ export class PiTernBridge {
 	}
 
 	#treePickerNode(): TspNode {
-		const items: unknown[] = [];
-		const order: string[] = [];
-		for (const item of this.#treePickerItems) {
-			items.push({ id: item.id, label: item.label, ...(item.description ? { detail: item.description } : {}) });
-			order.push(item.id);
-		}
-		return {
-			id: "session-tree-picker", k: "picker",
-			p: { title: "Session tree", noun: "entries", size: "lg", layout: "rows", items, order, selected: this.#treePickerSelected ?? null, total: order.length, empty: "No session entries", actions: [{ id: "navigate", label: "Navigate", keys: ["enter"], primary: true, disabled: !this.#treePickerSelected }, { id: "close", label: "Cancel", keys: ["esc"] }] },
-		};
+		const { node, visible } = sessionTreePickerNode(this.#treeModel ?? { rows: [], forkCount: 0, turnCount: 0 }, {
+			filter: this.#treeFilter, query: this.#treeQuery, selected: this.#treePickerSelected,
+			sessionName: this.#session.sessionManager?.getSessionName?.() ?? undefined, now: Date.now(),
+		});
+		this.#treeVisible = visible;
+		this.#treePickerSelected = (node.p as { selected?: string | null }).selected ?? undefined;
+		return node;
+	}
+
+	#closeSessionTree(): void {
+		this.#treePickerOpen = false;
+		this.#treePickerSelected = undefined;
+		this.#treeModel = undefined;
+		this.#treeVisible = [];
+		this.#treeQuery = "";
+	}
+
+	#setTreeFilter(filter: TreeFilter): void {
+		this.#treeFilter = filter;
+		this.#render();
 	}
 
 	#openSessionTree(): void {
@@ -1536,39 +1860,25 @@ export class PiTernBridge {
 			this.#render();
 			return;
 		}
-		const rows: Array<{ id: string; label: string; description?: string }> = [];
-		const visit = (nodes: unknown, depth: number): void => {
-			if (!Array.isArray(nodes)) return;
-			for (const raw of nodes) {
-				if (!raw || typeof raw !== "object") continue;
-				const node = raw as { entry?: { id?: unknown; type?: unknown; message?: unknown; timestamp?: unknown }; children?: unknown; label?: unknown };
-				const entry = node.entry;
-				if (entry && typeof entry.id === "string") {
-					const content = messageText(entry.message);
-					const role = roleOf(entry.message);
-					const label = typeof node.label === "string" && node.label ? node.label : content || String(entry.type ?? "entry");
-					rows.push({ id: entry.id, label: `${"  ".repeat(Math.min(depth, 8))}${role === "user" ? "You" : role === "assistant" ? "Pi" : ""} ${label}`.trim(), description: typeof entry.timestamp === "string" ? entry.timestamp : undefined });
-				}
-				visit(node.children, depth + 1);
-			}
-		};
-		visit(tree, 0);
-		if (!rows.length) {
+		const leaf = manager?.getLeafId?.();
+		const model = buildTreeModel(tree, typeof leaf === "string" ? leaf : undefined);
+		if (!model.rows.length) {
 			this.#projector.add("system", "No entries in session");
 			this.#render();
 			return;
 		}
-		this.#treePickerItems = rows;
-		const leaf = manager?.getLeafId?.();
-		this.#treePickerSelected = typeof leaf === "string" && rows.some((row) => row.id === leaf) ? leaf : rows.at(-1)?.id;
+		this.#treeModel = model;
+		this.#treeQuery = "";
+		this.#treePickerSelected = model.leafId;
 		this.#treePickerOpen = true;
 		this.#render();
 	}
 
 	async #navigateSessionTree(): Promise<void> {
 		const target = this.#treePickerSelected;
-		this.#treePickerOpen = false;
-		if (!target || !this.#session.navigateTree) { this.#render(); return; }
+		const leaf = this.#treeModel?.leafId;
+		this.#closeSessionTree();
+		if (!target || target === leaf || !this.#session.navigateTree) { this.#render(); return; }
 		try {
 			const result = await this.#session.navigateTree(target);
 			if (result.cancelled) this.#projector.add("system", "Session navigation cancelled");
@@ -1760,9 +2070,12 @@ export class PiTernBridge {
 	#render(): void {
 		if (this.#closed) return;
 		this.#syncSession();
-		const focus = this.#ui.focusId ?? (this.#treePickerOpen ? "session-tree-picker" : this.#modelPickerOpen ? "model-picker-sheet" : "composer");
-		const transcript = this.#projector.nodes(this.#toolOutputExpanded, { currentTask: this.#currentTask() });
-		this.#surface.render([...startupNodes(this.#logo, this.#version, this.#repo, readMcpStatus(this.#session.sessionManager?.getSessionId?.() as string | undefined)), ...transcript], this.#dock(), focus, this.#layer(), this.#complete.selectedId);
+		const gitFocus = this.#gitView && this.#gitFocus ? (this.#gitFocus === "summary" ? "git-summary" : "git-body-field") : undefined;
+		const focus = this.#ui.focusId ?? gitFocus ?? (this.#treePickerOpen ? "session-tree-picker" : this.#modelPickerOpen ? "model-picker-sheet" : "composer");
+		const transcript = this.#projector.nodes(this.#toolOutputExpanded, { currentTask: this.#currentTask(), messageFocus: this.#messageFocus, editing: this.#editing?.itemId, busy: this.#busy });
+		// The git sheet replaces the composer, as OMP's fullscreen git app does; hiding the dock also gives the
+		// full sheet the whole pane instead of leaving the composer under it.
+		this.#surface.render([...startupNodes(this.#logo, this.#version, this.#repo, readMcpStatus(this.#session.sessionManager?.getSessionId?.() as string | undefined)), ...transcript], this.#gitView ? [] : this.#dock(), focus, this.#layer(), this.#complete.selectedId);
 		try { this.#onRenderTap?.(transcript, this.#trigger, this.#busy); } catch { /* tracing never affects the UI */ }
 	}
 
@@ -1799,6 +2112,7 @@ export class PiTernBridge {
 	// Tab: next question tab in the ask dialog; otherwise pi-tui's editor Tab (apply the selected completion,
 	// or open the slash list / path completion).
 	tab(): Promise<void> {
+		if (this.#treePickerOpen && !this.#closed) { this.#setTreeFilter(nextFilter(this.#treeFilter, 1, this.#treeModel)); return Promise.resolve(); }
 		if (this.#closed || this.#ui.active || this.#modelPickerOpen || this.#treePickerOpen) return Promise.resolve();
 		if (this.#dialog?.active) {
 			this.#dialog.moveTab(1);
@@ -1811,9 +2125,10 @@ export class PiTernBridge {
 	movePicker(delta: number): void {
 		if (this.#closed) return;
 		if (this.#treePickerOpen) {
-			if (!this.#treePickerItems.length) return;
-			const index = this.#treePickerItems.findIndex((item) => item.id === this.#treePickerSelected);
-			this.#treePickerSelected = this.#treePickerItems[(index + delta + this.#treePickerItems.length) % this.#treePickerItems.length]?.id;
+			const rows = this.#treeVisible;
+			if (!rows.length) return;
+			const index = rows.findIndex((row) => row.id === this.#treePickerSelected);
+			this.#treePickerSelected = rows[Math.max(0, Math.min(rows.length - 1, index + delta))]?.id;
 			this.#render();
 			return;
 		}
@@ -1833,7 +2148,11 @@ export class PiTernBridge {
 	}
 
 	appendDraft(text: string): void {
-		if (this.#treePickerOpen) return;
+		if (this.#treePickerOpen) {
+			this.#treeQuery += text.replace(/[\r\n]/g, "");
+			this.#render();
+			return;
+		}
 		if (this.#modelPickerOpen) {
 			this.#modelQuery += text.replace(/[\r\n]/g, "");
 			this.#modelSelected = undefined;
@@ -1852,8 +2171,111 @@ export class PiTernBridge {
 		this.#editDraft(() => this.#editor.insert(text), { kind: "type", text });
 	}
 
+	// The git sheet is modal in Tern (an overlay never takes the keyboard), so run.ts asks it first. Every key
+	// is consumed while it is open: the commit fields edit their own text, the rest are OMP's git bindings.
+	applyGitKey(effect: KeyEffect): boolean {
+		if (!this.#gitView) return false;
+		if (this.#gitHelp) {
+			if (effect.kind === "escape" || (effect.kind === "text" && effect.text === "?")) {
+				this.#gitHelp = false;
+				this.#render();
+			}
+			return true;
+		}
+		if (this.#gitFocus) {
+			const editor = this.#gitFocus === "summary" ? this.#gitSummary : this.#gitBody;
+			switch (effect.kind) {
+				case "text":
+					editor.insert(effect.text);
+					break;
+				case "backspace":
+					editor.backspace();
+					break;
+				case "deleteWord":
+					editor.deleteWordBackward();
+					break;
+				case "deleteForward":
+					editor.deleteForward({ word: effect.word });
+					break;
+				case "deleteToEdge":
+					editor.deleteToEdge(effect.direction);
+					break;
+				case "cursor":
+					editor.move(effect.direction, { word: effect.word, extend: effect.extend, line: effect.line });
+					break;
+				case "selectAll":
+					editor.selectAll();
+					break;
+				case "undo":
+					editor.undo();
+					break;
+				case "submit":
+					if (this.#gitFocus === "summary") this.#gitFocus = "body";
+					else editor.insert("\n");
+					break;
+				case "newline":
+					editor.insert("\n");
+					break;
+				case "tab":
+					this.#gitFocus = this.#gitFocus === "summary" ? "body" : "summary";
+					break;
+				case "escape":
+					this.#gitFocus = undefined;
+					break;
+				default:
+					return true;
+			}
+			this.#render();
+			return true;
+		}
+		if (effect.kind === "escape") {
+			this.escape();
+			return true;
+		}
+		if (effect.kind === "interrupt") {
+			this.#gitRequest++;
+			this.#gitView = undefined;
+			this.#gitStatus = undefined;
+			this.#render();
+			return true;
+		}
+		if (effect.kind === "text") {
+			const key = effect.text;
+			if (key === "j") this.#gitMoveSelection(1);
+			else if (key === "k") this.#gitMoveSelection(-1);
+			else if (key === "]") this.#gitMoveSelection(1);
+			else if (key === "[") this.#gitMoveSelection(-1);
+			else if (key === "v") this.#gitDiffMode = this.#gitDiffMode === "split" ? "unified" : "split";
+			else if (key === "s") void this.#gitAct("git.stage");
+			else if (key === "u") void this.#gitAct("git.unstage");
+			else if (key === "x") void this.#gitAct("git.discard");
+			else if (key === "a") void this.#gitAct("git.stageAll");
+			else if (key === "c") this.#gitFocus = "summary";
+			else if (key === "r") this.#loadRepo();
+			else if (key === "?") this.#gitHelp = true;
+			this.#render();
+			return true;
+		}
+		if (effect.kind === "up" || effect.kind === "down") {
+			this.#gitMoveSelection(effect.kind === "down" ? 1 : -1);
+			return true;
+		}
+		return true;
+	}
+
+	// A bracketed paste while the git sheet is open goes to the commit field that owns the keys.
+	applyGitPaste(text: string): boolean {
+		if (!this.#gitView || this.#gitFocus === undefined) return false;
+		const editor = this.#gitFocus === "summary" ? this.#gitSummary : this.#gitBody;
+		if (isLargePaste(text)) editor.insertPaste(text);
+		else editor.insert(text);
+		this.#render();
+		return true;
+	}
+
 	// Left/right (and Shift+Tab) move the ask-dialog tab when a dialog is open; otherwise they move the caret.
 	moveTabOrCursor(delta: number): void {
+		if (this.#treePickerOpen && !this.#closed) return this.#setTreeFilter(nextFilter(this.#treeFilter, delta < 0 ? -1 : 1, this.#treeModel));
 		if (this.#dialog?.active) return this.moveDialogTab(delta);
 		this.moveCursor(delta < 0 ? -1 : 1, false, false);
 	}
@@ -2011,7 +2433,11 @@ export class PiTernBridge {
 	}
 
 	backspaceDraft(): void {
-		if (this.#treePickerOpen) return;
+		if (this.#treePickerOpen) {
+			this.#treeQuery = [...this.#treeQuery].slice(0, -1).join("");
+			this.#render();
+			return;
+		}
 		if (this.#modelPickerOpen) {
 			this.#modelQuery = [...this.#modelQuery].slice(0, -1).join("");
 			this.#render();
@@ -2040,15 +2466,34 @@ export class PiTernBridge {
 			return false;
 		}
 		if (this.#gitView) {
+			if (this.#gitHelp) {
+				this.#gitHelp = false;
+				this.#render();
+				return false;
+			}
+			if (this.#gitFocus) {
+				this.#gitFocus = undefined;
+				this.#render();
+				return false;
+			}
 			this.#gitRequest++;
 			this.#gitView = this.#gitView.mode === "diff" ? { mode: "list" } : undefined;
+			this.#gitStatus = undefined;
+			this.#gitPendingDiscard = undefined;
+			this.#lastEligibleEscapeAt = 0;
+			this.#render();
+			return false;
+		}
+		if (this.#contextView) {
+			this.#contextView = false;
 			this.#lastEligibleEscapeAt = 0;
 			this.#render();
 			return false;
 		}
 		if (this.#treePickerOpen) {
-			this.#treePickerOpen = false;
-			this.#treePickerSelected = undefined;
+			// Esc clears a search first, like the model picker, then closes.
+			if (this.#treeQuery) this.#treeQuery = "";
+			else this.#closeSessionTree();
 			this.#lastEligibleEscapeAt = 0;
 			this.#render();
 			return false;
@@ -2079,6 +2524,17 @@ export class PiTernBridge {
 		if (this.#complete.active) {
 			this.#lastEligibleEscapeAt = 0;
 			this.#complete.close();
+			return false;
+		}
+		if (this.#editing) {
+			this.#lastEligibleEscapeAt = 0;
+			this.#cancelEdit();
+			return false;
+		}
+		if (this.#messageFocus) {
+			this.#lastEligibleEscapeAt = 0;
+			this.#messageFocus = undefined;
+			this.#render();
 			return false;
 		}
 		if (this.#busy) {
@@ -2113,6 +2569,11 @@ export class PiTernBridge {
 	// Routes one parsed TSP message. Returns the promise of any submitted prompt, for tests.
 	handle(msg: TspMessage): Promise<void> | undefined {
 		if (this.#closed) return undefined;
+		// The context card is a peek, not a modal: the composer keeps the keys, so the first thing typed (or a
+		// paste) closes the card and edits the draft as before.
+		if (this.#contextView && msg.verb === "e" && (msg.body.ev === "edit" || msg.body.ev === "key" || msg.body.ev === "paste")) {
+			this.#closeContextView();
+		}
 		// Native editing (hello features edit/undo/send) on the composer and an extension prompt's text field,
 		// the two editor/input fields Pi draws. Each event goes to the field it names.
 		if (msg.verb === "e" && msg.body.id === UI_PROMPT_INPUT_ID) {
@@ -2132,8 +2593,7 @@ export class PiTernBridge {
 				if (this.#ui.active || this.#dialog?.active || this.#btw?.active || this.#closed) return undefined;
 				if (this.#modelPickerOpen || this.#treePickerOpen) {
 					this.#modelPickerOpen = false;
-					this.#treePickerOpen = false;
-					this.#treePickerSelected = undefined;
+					if (this.#treePickerOpen) this.#closeSessionTree();
 				}
 				this.#render();
 				return undefined;
@@ -2146,26 +2606,100 @@ export class PiTernBridge {
 			this.#render();
 			return undefined;
 		}
-		if (msg.verb === "e" && msg.body.ev === "resize" && typeof msg.body.cols === "number" && msg.body.cols > 0) { this.#columns = msg.body.cols; if (this.#dialog?.active) this.#render(); }
+		if (msg.verb === "e" && msg.body.ev === "resize" && typeof msg.body.cols === "number" && msg.body.cols > 0) {
+			this.#columns = msg.body.cols;
+			if (this.#dialog?.active || this.#gitView || this.#contextView || this.#workViewId !== undefined) this.#render();
+		}
+		if (msg.verb === "e" && msg.body.ev === "action" && msg.body.id === UI_PROMPT_LIST_ID) {
+			this.#ui.action(msg.body.act);
+			return undefined;
+		}
 		if (msg.verb === "e" && (msg.body.ev === "select" || msg.body.ev === "activate") && msg.body.id === UI_PROMPT_LIST_ID) {
 			this.#ui.pick(msg.body.item, msg.body.ev === "activate");
 			return undefined;
 		}
 		if (msg.verb === "e" && this.#treePickerOpen && msg.body.id === "session-tree-picker") {
-			if ((msg.body.ev === "select" || msg.body.ev === "activate") && typeof msg.body.item === "string" && this.#treePickerItems.some((item) => item.id === msg.body.item)) {
+			if ((msg.body.ev === "select" || msg.body.ev === "activate") && typeof msg.body.item === "string" && this.#treeVisible.some((row) => row.id === msg.body.item)) {
 				this.#treePickerSelected = msg.body.item;
 				if (msg.body.ev === "activate") return this.#navigateSessionTree();
 			}
 			if (msg.body.ev === "action") {
 				if (msg.body.act === "navigate") return this.#navigateSessionTree();
-				if (msg.body.act === "close") { this.#treePickerOpen = false; this.#treePickerSelected = undefined; }
+				if (msg.body.act === "close") this.#closeSessionTree();
+				if (msg.body.act === "filter") this.#treeFilter = nextFilter(this.#treeFilter, 1, this.#treeModel);
+				if (msg.body.act === "tab" && TREE_FILTERS.some((f) => f.id === msg.body.value)) this.#treeFilter = msg.body.value as TreeFilter;
+				if (msg.body.act === "clear") this.#treeQuery = "";
 			}
 			this.#render();
 			return undefined;
 		}
-		if (msg.verb === "e" && msg.body.ev === "key" && (this.#gitView || this.#workViewId !== undefined) && msg.body.key === "escape") {
+		if (msg.verb === "e" && msg.body.ev === "key" && (this.#gitView || this.#contextView || this.#workViewId !== undefined) && msg.body.key === "escape") {
 			this.escape();
 			return undefined;
+		}
+		if (this.#gitView && msg.verb === "e" && (msg.body.ev === "select" || msg.body.ev === "activate") && typeof msg.body.id === "string") {
+			const item = typeof msg.body.item === "string" ? msg.body.item : "";
+			if (msg.body.id === "git-diff-mode" && (item === "unified" || item === "split")) this.#gitDiffMode = item;
+			else if (msg.body.id === "git-side-style" && (item === "path" || item === "tree")) this.#gitStyle = item;
+			this.#render();
+			return undefined;
+		}
+		if (this.#gitView && msg.verb === "e" && typeof msg.body.id === "string" && (msg.body.id === "git-summary" || msg.body.id === "git-body-field")) {
+			const editor = msg.body.id === "git-summary" ? this.#gitSummary : this.#gitBody;
+			if (msg.body.ev === "edit") {
+				if (editor.applyHostEdit(msg.body as unknown as HostEdit)) this.#render();
+				return undefined;
+			}
+			if (msg.body.ev === "undo") {
+				editor.undo();
+				this.#render();
+				return undefined;
+			}
+			if (msg.body.ev === "focus") {
+				this.#gitFocus = msg.body.id === "git-summary" ? "summary" : "body";
+				this.#render();
+				return undefined;
+			}
+		}
+		if (this.#gitView && msg.verb === "e" && (msg.body.ev === "key" || msg.body.ev === "paste") && this.#gitFocus !== undefined) {
+			const editor = this.#gitFocus === "summary" ? this.#gitSummary : this.#gitBody;
+			const key = typeof msg.body.key === "string" ? msg.body.key : "";
+			const text = msg.body.ev === "paste" && typeof msg.body.text === "string" ? msg.body.text : undefined;
+			const mods = typeof msg.body.mods === "string" ? msg.body.mods : "";
+			if (msg.body.ev === "paste" && text) {
+				if (isLargePaste(text)) editor.insertPaste(text);
+				else editor.insert(text);
+			}
+			else if (key === "escape") this.#gitFocus = undefined;
+			else if (key === "tab") this.#gitFocus = this.#gitFocus === "summary" ? "body" : "summary";
+			else if (key === "backspace") editor.backspace();
+			else if (key === "delete") editor.deleteForward();
+			else if (key === "left") editor.move(-1);
+			else if (key === "right") editor.move(1);
+			else if (key === "home" || (key === "left" && mods.includes("meta"))) editor.move(-1, { line: true });
+			else if (key === "end" || (key === "right" && mods.includes("meta"))) editor.move(1, { line: true });
+			else if (key === "enter") {
+				if (this.#gitFocus === "summary") this.#gitFocus = "body";
+				else editor.insert("\n");
+			} else if (key && !key.startsWith("\x1b") && !mods.includes("ctrl") && !mods.includes("meta") && key.length <= 2) editor.insert(key);
+			else return undefined;
+			this.#render();
+			return undefined;
+		}
+		if (this.#gitView && msg.verb === "e" && msg.body.ev === "key" && this.#gitFocus === undefined) {
+			const key = typeof msg.body.key === "string" ? msg.body.key : "";
+			if (key === "j" || key === "down") return this.#gitMoveSelection(1);
+			if (key === "k" || key === "up") return this.#gitMoveSelection(-1);
+			if (key === "]") return this.#gitMoveSelection(1);
+			if (key === "[") return this.#gitMoveSelection(-1);
+			if (key === "v") { this.#gitDiffMode = this.#gitDiffMode === "split" ? "unified" : "split"; this.#render(); return undefined; }
+			if (key === "s") return this.#gitAct("git.stage");
+			if (key === "u") return this.#gitAct("git.unstage");
+			if (key === "x") return this.#gitAct("git.discard");
+			if (key === "a") return this.#gitAct("git.stageAll");
+			if (key === "c") { this.#gitFocus = "summary"; this.#render(); return undefined; }
+			if (key === "r") { this.#loadRepo(); return undefined; }
+			if (key === "?") { this.#gitHelp = !this.#gitHelp; this.#render(); return undefined; }
 		}
 		if (msg.verb === "e" && msg.body.ev === "key" && this.#treePickerOpen) {
 			const key = typeof msg.body.key === "string" ? msg.body.key : "";
@@ -2173,6 +2707,8 @@ export class PiTernBridge {
 			else if (key === "down") this.movePicker(1);
 			else if (key === "enter") return this.#navigateSessionTree();
 			else if (key === "escape") this.escape();
+			else if (key === "tab") this.#treeFilter = nextFilter(this.#treeFilter, 1, this.#treeModel);
+			else if (key === "shift+tab") this.#treeFilter = nextFilter(this.#treeFilter, -1, this.#treeModel);
 			this.#render();
 			return undefined;
 		}
@@ -2227,6 +2763,20 @@ export class PiTernBridge {
 			return undefined;
 		}
 		if (act === "submit.followUp") return this.submitFollowUp(submittedText(msg.body));
+		if (act === MESSAGE_FOCUS || act === MESSAGE_EDIT || act === MESSAGE_RESEND) {
+			const item = messageItemFromNode(msg.body.id);
+			if (!item) return undefined;
+			if (act === MESSAGE_FOCUS) {
+				this.#messageFocus = this.#messageFocus === item ? undefined : item;
+				this.#render();
+				return undefined;
+			}
+			return act === MESSAGE_EDIT ? this.editMessage(item) : this.resendMessage(item);
+		}
+		if (act === MESSAGE_EDIT_CANCEL) {
+			this.#cancelEdit();
+			return undefined;
+		}
 		if (act === "queue.edit") {
 			this.restoreQueuedMessages();
 			return undefined;
@@ -2253,17 +2803,15 @@ export class PiTernBridge {
 			this.#render();
 		}
 		if (act === "git.open") { this.#openGitView(); return undefined; }
+		if (typeof act === "string" && act.startsWith("git.")) return this.#gitAct(act, typeof msg.body.value === "string" ? msg.body.value : undefined);
 		if (act === "bg.open" && typeof msg.body.value === "string") { this.#openWorkView(msg.body.value); return undefined; }
 		if (act === "bg.close") { this.#closeWorkView(); return undefined; }
 		if (act === "bg.stop" && typeof msg.body.value === "string") { this.#stopWork(msg.body.value); return undefined; }
 		// The composer's Background button: the same dispatch the ctrl+b key reaches in run.ts.
 		if (act === "bg.background") { this.backgroundForegroundWork(); return undefined; }
-		if (act === "git.file" && typeof msg.body.value === "string") {
-			const ref = this.#gitRefs[Number(msg.body.value)];
-			return ref ? this.#showGitDiff(ref.section, ref.entry.path) : undefined;
-		}
-		if (act === "git.back") { this.#gitRequest++; this.#gitView = { mode: "list" }; this.#render(); return undefined; }
-		if (act === "git.close") { this.#gitRequest++; this.#gitView = undefined; this.#render(); return undefined; }
+		if (act === "context.close") { this.#closeContextView(); return undefined; }
+		// OMP's composer meter opens the context card on click; the same card is `/context` in the composer.
+		if (act === "status.context") { this.#openContextView(); return undefined; }
 		if (act === "tasks.collapse" || act === "tasks.expand") {
 			this.#taskQuestionsCollapsed = act === "tasks.collapse";
 			this.#render();
@@ -2451,6 +2999,13 @@ export class PiTernBridge {
 			return Promise.resolve();
 		}
 		const route = routeSubmission(prompt, catalog, this.#busy);
+		if (route.kind === "bridge") {
+			// A bridge command is a local view: it runs here, clears the composer and never reaches the model.
+			this.#draft = "";
+			if (route.name === "context") this.#openContextView();
+			else this.#render();
+			return Promise.resolve();
+		}
 		if (route.kind === "builtin") {
 			this.#draft = "";
 			return this.#runBuiltin(route.name, route.args);
@@ -2482,9 +3037,97 @@ export class PiTernBridge {
 		return this.#sendPrompt(prompt);
 	}
 
+	// The Pi entry behind a transcript bubble, or a notice saying why there is none.
+	#userEntryFor(itemId: string): UserEntry | undefined {
+		const branch = this.#session.sessionManager?.getBranch?.();
+		const entry = resolveUserEntry(itemId, this.#projector.userItemIds(), userEntriesOf(Array.isArray(branch) ? branch : []));
+		if (!entry) {
+			this.#projector.add("system", "Could not match this message to the session; open /tree to branch from it");
+			this.#render();
+		}
+		return entry;
+	}
+
+	#refuseBranchWhileBusy(verb: string): boolean {
+		if (!this.#busy && this.#session.navigateTree) return false;
+		this.#projector.add("system", this.#session.navigateTree ? `Wait for the current turn to finish (Esc stops it) before you ${verb} a message` : "Branching is unavailable in this Pi session");
+		this.#render();
+		return true;
+	}
+
+	// Edit: the message's text and images go to the composer; the session is untouched until you send.
+	editMessage(itemId: string): Promise<void> {
+		if (this.#closed || this.#refuseBranchWhileBusy("edit")) return Promise.resolve();
+		const entry = this.#userEntryFor(itemId);
+		if (!entry) return Promise.resolve();
+		const before = this.#editing ? { draftBefore: this.#editing.draftBefore, attachmentsBefore: this.#editing.attachmentsBefore } : { draftBefore: this.#draft, attachmentsBefore: this.#attachments };
+		this.#editing = { itemId, entry, ...before };
+		this.#messageFocus = undefined;
+		const images = imageAttachments(entry.images, this.#attachmentSeq + 1);
+		this.#attachmentSeq += images.length;
+		for (const a of images) for (const chunk of encodeTspBlob(a.blob!.id, a.blob!.mime, a.blob!.base64)) this.#write(chunk);
+		this.#attachments = images;
+		this.setDraft(entry.text);
+		return Promise.resolve();
+	}
+
+	#cancelEdit(): void {
+		const edit = this.#editing;
+		if (!edit) return;
+		this.#editing = undefined;
+		this.#attachments = edit.attachmentsBefore;
+		this.setDraft(edit.draftBefore);
+	}
+
+	// Moves Pi's leaf to the message's parent (AgentSession.navigateTree on a user entry). The transcript reseeds from
+	// the branch on Pi's session_tree event, so the old message and its replies leave the screen but stay in /tree.
+	async #branchBefore(entry: UserEntry): Promise<boolean> {
+		try {
+			const result = await this.#session.navigateTree!(entry.id);
+			if (!result.cancelled) return true;
+			this.#projector.add("system", "Branching was cancelled");
+		} catch (error) {
+			this.#projector.add("system", `Could not branch: ${error instanceof Error ? error.message : String(error)}`);
+		}
+		this.#render();
+		return false;
+	}
+
+	// Resend: the same text and images again from the same point, as a new branch.
+	async resendMessage(itemId: string): Promise<void> {
+		if (this.#closed || this.#refuseBranchWhileBusy("resend")) return;
+		const entry = this.#userEntryFor(itemId);
+		if (!entry) return;
+		this.#messageFocus = undefined;
+		if (this.#editing?.itemId === itemId) this.#cancelEdit();
+		if (!(await this.#branchBefore(entry))) return;
+		this.#projector.add("user", entry.text);
+		this.#busy = true;
+		this.#render();
+		const images = entry.images;
+		return (images.length ? this.#session.prompt(entry.text, { images }) : this.#session.prompt(entry.text)).catch((error: unknown) => {
+			this.#busy = false;
+			this.#projector.add("system", `error: ${error instanceof Error ? error.message : String(error)}`);
+			this.#render();
+		});
+	}
+
+	// Sending an edit: branch first, then the normal send path with the composer's text and attachments.
+	async #sendEdited(prompt: string): Promise<void> {
+		const edit = this.#editing!;
+		if (this.#refuseBranchWhileBusy("send an edited")) return;
+		this.#editing = undefined;
+		if (!(await this.#branchBefore(edit.entry))) {
+			this.#editing = edit;
+			return;
+		}
+		return this.#sendPrompt(prompt);
+	}
+
 	// A plain prompt with the composer's attachments: queued as a follow-up during a turn (Pi's native
 	// queued-message path for plain Enter), otherwise sent now.
 	#sendPrompt(prompt: string): Promise<void> {
+		if (this.#editing) return this.#sendEdited(prompt);
 		if (this.#busy) return this.submitFollowUp(prompt);
 		const { text: sent, images } = this.#takeAttachments(this.#withMentions(prompt), prompt);
 		this.#draft = "";
@@ -2583,6 +3226,7 @@ export class PiTernBridge {
 			if (name === "model") return await this.#modelCommand(args);
 			if (name === "quit") return void this.close();
 			if (this.#busy && name !== "name") return say(`busy: /${name} runs when the current turn finishes or is cancelled`);
+			if (name === "tree") return this.#openSessionTree();
 			// Pi replaces the session through its runtime, which rebinds this bridge: the transcript is
 			// reseeded from the new (empty) session, so the pane starts over here exactly as /new does.
 			if (name === "new") {

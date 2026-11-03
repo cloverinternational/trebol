@@ -1,5 +1,6 @@
 // Process-wide, read-only view of the MCP servers connected by the active Pi session.
-// mcp-fallback publishes it; the Tern startup card reads it. No slot means unavailable, an empty list means none connected.
+// Pi's built-in MCP publishes it through .pi/lib/tern/pi-builtins.ts (mcp-fallback only where Pi's MCP is
+// absent); the Tern startup card reads it. No slot means unavailable, an empty list means none connected.
 const KEY = Symbol.for("pi-swarm-mcp-status");
 const LISTENERS = Symbol.for("pi-swarm-mcp-status-listeners");
 

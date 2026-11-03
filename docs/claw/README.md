@@ -75,9 +75,12 @@ continuing on NOT_MET; nothing in Claw limits the number of turns.
   command's 4000-character limit). It is written to `run.goal` at spawn — before any side effect, so it is auditable even
   when the launch fails — and to `runs/<run>.goal.json` when the task file is written. A task with no objective derives
   nothing and the run is recorded `unavailable` instead of guessing.
-- **Established after launch, never through the prompt.** The launch prompt stays
-  `Read and execute your Claw task file in full: …`. A positional prompt beginning with `/` is dispatched by Pi as a
-  command, not as a turn, so the goal never rides it. The worker extension reads the spec and establishes it on the goal
+- **Established after launch, never through the prompt.** The launch prompt is the `/upgrade` template wrapped around
+  `Read and execute your Claw task file in full: …` (`launchPrompt` in `spawn.ts`), byte-identical to what a user typing
+  `/upgrade <that line>` sends, so the worker first deepens its task and then runs it. It is built from the shared template
+  (`.pi/lib/claw/upgrade-prompt.ts`), not sent as `/upgrade`: a positional prompt beginning with `/` is dispatched by Pi as
+  a command, not as a turn, and the goal never rides it. `upgrade: false` on `claw_spawn`/`Agent` (persisted on the run)
+  sends the plain line; a resume sends no prompt at all. The worker extension reads the spec and establishes it on the goal
   host at `before_agent_start`, in the worker's own process. Pi gives every extension its own API object *and* its own
   module instance (measured), so the host is published on a process-global symbol keyed by session id
   (`Symbol.for("pi-swarm-goal-hosts")`), not in module state.

@@ -66,7 +66,8 @@
       "extensions/swarm-btw/index.ts",
       "extensions/swarm-image-paste/index.ts",
       "extensions/green-chat-input/index.ts",
-      "extensions/swarm-program-status/index.ts"
+      "extensions/swarm-program-status/index.ts",
+      "extensions/voice/index.ts"
     ],
     "themes": [
       ".pi/themes"
@@ -91,9 +92,13 @@
     "packages/*/*"
   ],
   "dependencies": {
+    "@handy-computer/recorder": "0.2.1",
+    "@huggingface/hub": "2.15.0",
     "@types/node": "^22.0.0",
     "mermaid": "^11.12.3",
+    "opencc-js": "^1.4.1",
     "re2-wasm": "1.0.2",
+    "transcribe-cpp": "0.4.0",
     "typescript": "^5.9.0"
   },
   "devDependencies": {

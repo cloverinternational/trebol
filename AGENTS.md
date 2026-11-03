@@ -222,9 +222,49 @@ When changing discovery, preserve these invariants:
 | `30-tools` | `annoyed/`, `control-task-tools`, `history-search`, `ask-user/`, `hoja-mode`, `claw`, `paseo`, `project-context`, `research-tools`, `swarm-goal`, `swarm-agent-tools`, `swarm-background-bash`, `swarm-bash`, `swarm-fs-tools`, `swarm-history-vault-tools`, `taskmanage`, `vault` |
 | `40-state` | `memory-history`, `task-candidate-capture`, `knowledge-enrichment`, `candidate-memory-review`, `jev-knowledge-audit`, `memory-maintenance`, `swarm-conversation-metadata` |
 | `50-ui` | `control-panel`, `supervisor`, `conversation-metrics`, `swarm-themes`, `swarm-tools-status`, `swarm-btw`, `swarm-image-paste`, `swarm-program-status` (through `.trebol-guards/` wrappers) |
+| feature (tail) | `voice` |
 
 The list in each layer's `package.json` is authoritative; this table mirrors
 it. Adding an extension means adding the file *and* its manifest entry.
+
+### Voice (dictation) builtin
+
+`extensions/voice/` is the MIT-licensed Pi Voice extension carried as first-party
+source: no `.git`, no `repository`/`homepage`/`bugs`/`publishConfig` fields, no
+upstream CI or `package-lock.json`, and its legacy Git-install notice module is
+removed. `LICENSE` is preserved verbatim; provenance lives here, not in code.
+Its entry is appended last in the root manifest, so it loads outside the `50-ui`
+Trebol guards.
+
+It registers the `transcribe_file` tool, `/voice` (toggle capture),
+`/voice-settings` (+ `/transcribe` alias), an optional `/voice-onboarding` under
+`PI_VOICE_DEBUG=1`, and one configurable shortcut (`Ctrl+Space` by default from
+`src/default-shortcut.ts`). Settings are `<agent dir>/pi-voice.json`, the log
+`<agent dir>/pi-voice.log`; model weights and the VAD gguf are downloaded into
+the agent directory on first setup, so audio never leaves the machine.
+
+Runtime dependencies (`@handy-computer/recorder`, `transcribe-cpp`,
+`@huggingface/hub`, `opencc-js`) are declared both in
+`extensions/voice/package.json` and in the root manifest, which is what actually
+installs them. `transcribe-cpp` is imported as `import type` only and the real
+native loads are dynamic (`src/vad.ts`, `src/audio.ts`), so a missing native dep
+degrades at first recording rather than at extension load. FFmpeg is required
+only for `transcribe_file` (`PI_VOICE_FFMPEG_PATH` overrides the lookup).
+
+Validation: `cd extensions/voice && npm run check && npm test`
+(`tsc --noEmit`, then 131 `node --test` cases through `scripts/run-tests.mjs`,
+which resolves `typescript` via Node resolution because the monorepo hoists it),
+and `npm run check:install -- --extension extensions/voice/index.ts` at the root.
+`tools/install/extension-inventory.mjs` currently aborts before scanning because
+`pi-host.mjs` resolves the **global** Pi (1.1.0) whose nested `pi-codemode` lacks
+`MCP_TYPESCRIPT_PREAMBLE`; that skew predates this extension and is unrelated to
+its entry.
+
+In a Tern pane the recording meter and status lines work because
+`.pi/lib/tern/ext-ui.ts` accepts the plain-text widgets this extension paints;
+its `ctx.ui.custom` panels (settings, onboarding, model and microphone pickers,
+shortcut recorder, try-it) are refused with a "needs Pi's terminal UI" notice.
+
 
 An extension is an adapter, not a second agent runtime. Prefer Pi native
 capabilities and shared policy over duplicate tools or parallel global state.
@@ -262,6 +302,7 @@ belongs in `packages/policy/policy`, and rendering belongs in the extension/rend
 | Final Mermaid response repair and follow-up | `extensions/mermaid-response/extension.ts` | `.pi/lib/context/mermaid-response.ts` and `mermaid-followup.ts`; `message_end` replaces only successful finalized assistant text before persistence/final redraw. The streaming preview may already have shown the original. Mermaid fences are processed independently (up to 16); only one narrowly recognized flowchart arrow or sequence-message colon per diagram is changed after successful revalidation. Other syntax and validator failures preserve the original. For conceptual/explicit-diagram user requests, `turn_end` queues one model-visible `followUp` if a substantial final explanation lacks a Mermaid fence; it does not replace the previous response, and a second omission does not loop. The follow-up text tells the model to stay on the original request and names the hook's own source files only when the prompt is about the Mermaid hook; it is never sent in subagents (`PI_SWARM_SUBAGENT=1`), whose final text is the deliverable (#299; e2e `node tools/e2e/mermaid-followup-stays-on-task.mjs`). Pi's terminal Markdown renderer displays Mermaid as code, not SVG connectors; connector color belongs in the actual diagram-rendering client. |
 | `Skill`, `SkillManage` | skill/autogen integration via `extensions/swarm-skills/extension.ts`, `extensions/autogenskills/extension.ts` | `packages/context/autogenskills/src/index.ts`; mutate skills only through the vault/revision API. |
 | `web_fetch`, `deepwiki`, `browser_get_page` | `extensions/research-tools/extension.ts` | Extension-local bounded evidence fetcher; provenance and network policy are coupled requirements. |
+| `transcribe_file`, `/voice`, `/voice-settings` | `extensions/voice/index.ts` | Vendored Pi Voice sources (MIT; `LICENSE` beside them, origin recorded under **Voice (dictation) builtin**). `src/index.ts` registers the tool, commands and shortcut and loads `src/runtime.ts` lazily on first press; capture/transcription live in `dictation-controller.ts`, `transcription-service.ts` and `vad.ts` (dynamic native imports), the recording meter in `visualizer.ts` paints plain-text widget lines. Model setup is explicit and local; the agent must ask before any package-manager command. |
 | `tern` | `extensions/tern-browser/extension.ts`; model-visible via `swarmSurfaceFor` in `.pi/lib/runtime/swarm-tool-gating.ts` | `.pi/lib/tern/browser.ts`: one agent tool for Tern browsers, panes and tabs, scoped to the caller pane's tab plus tabs this process created with `new_tab`. Browsers are regular signed-in ones (`open` focuses the target pane, runs `tern ctl browser open`, and tracks the one new block only if it lands in the target's tab; two new blocks at once is rejected). Ops: `list`; `new_tab` (optional absolute `cwd`, no command); `rename_tab` (only tabs it created); `open` (optional `block` target pane, default this pane); `blocks`, `goto`, `snapshot`, `act`, `capture` (browser blocks in scope); `split`; `focus`; `close` (only blocks it created: never this pane, never a user block). Ownership is in-process memory: after `/reload` agent-created blocks are readable but not closable. No session, cookie or profile operations, no arbitrary commands, no pane move. Subprocesses take the cancellation signal and report bounded errors. Unit: `npx vitest run .pi/test/tern/browser.test.ts .pi/test/tern/browser-handler.test.ts`; live: `npx vite-node tools/e2e/tern-browser-harness.mjs` (needs `TERN_PANE`). |
 | `enter_plan_mode`, `exit_plan_mode` | `extensions/swarm-plan-mode/extension.ts` | `.pi/lib/context/swarm-plan-mode.ts`; plan approval is separate from implementation. |
 | `/auto on|off|status` | `extensions/swarm-auto/extension.ts` | Opt-in session-local autonomous continuation. Contributes `auto:on/off` through the existing `pi-swarm-footer-segments` registry; it never replaces the footer slot. Ask-user now uses the replacement interactive questionnaire; the former ask tool’s automatic consultation is not supported. `before_agent_start` supplies bounded branch and tracked-worktree context; settled `agent_end` follows an explicit progress marker only while idle. No global provider limits or policy gates are changed. |
@@ -272,7 +313,7 @@ belongs in `packages/policy/policy`, and rendering belongs in the extension/rend
 | `scheduler`, `/goal`, `/loop` | `extensions/swarm-goal/extension.ts` | `.pi/lib/tools/swarm-goal.ts`; session-local scheduling and evidence-based goal continuation without a turn cap. Replaces the separate CronCreate/List/Delete and ScheduleWakeup TUI tools. It also exposes a `GoalHost` control surface (`establish`/`widen`/`clear`/`status`/`observe`) that Claw drives for every worker's always-on completion goal: Pi gives each extension its own API object *and* its own module instance (measured), so the host is published on `globalThis[Symbol.for("pi-swarm-goal-hosts")]` keyed by session id (`goalHostForSession`) — a module-level WeakMap is not visible across extensions. Establishing before the goal extension registers does not queue: the worker reports the goal `unavailable` instead. See `docs/claw/README.md`. |
 | `/upgrade`, `/upgradegoal` | `extensions/upgrade-prompt/extension.ts` | `.pi/lib/tools/swarm-goal.ts` via the same session-keyed `goalHostForSession`/`establishGoal` surface Claw uses, so `/upgradegoal` needs the `swarm-goal` extension loaded in the same process. The `/upgrade` wrapper is both the goal condition and the submitted turn — one template, no drift — and the goal is established before the turn is sent. Empty input, a condition over the 4000-character goal limit, an already-active goal, and a missing host each refuse with a warning and send nothing, because degrading to a plain upgrade would leave the user believing a goal is running. Unit: `.pi/test/tools/upgrade-prompt.test.ts` (the goal host there is the real `registerSwarmGoal`). |
 | Session wake-up delivery | `.pi/lib/runtime/session-wakeup.ts` | Background-agent completion and swarm-goal share custom-message delivery with triggerTurn, generation guards, and shutdown invalidation. No runtime imports from vendor. |
-| `/claw`, `claw_spawn`, `claw_list`, `claw_read`, `claw_send`, `claw_cancel`, `claw_trigger`, `claw_set_keep`, `claw_close`, `claw_resume`; worker `claw_finish`, `claw_goal` | `extensions/claw/extension.ts` (orchestrator tools and `/claw`; worker gate plus `claw_finish`/`claw_goal` when `PI_CLAW_RUN` is set) | `.pi/lib/claw/`: `store.ts` (file state; runs, triggers and inbox items carry the owning orchestrator session and its Tern pane, and each session has its own inbox cursor under `.swarm/claw/sessions/`, so several Claw sessions share one workspace and daemon without receiving each other's runs), `inbox.ts` (per-session delivery), `spawn.ts` (launch phases, task file, derived goal), `goal.ts` (always-on completion goal state, brakes, resume generations), `resume.ts` (keep-open reachability and relaunch on the recorded session), `daemon.ts` (singleton reconciler, goal events, one long-run warning), `launcher.ts` (Tern, `--session` for a resume), `preflight.ts` (launch gate), `supervisor.ts` (the single tab-close point, which honours `keepOpen`), `child.ts` (worker events). A worker's goal is derived from its task and established after launch in its own process, never in the launch prompt; it has no cap or deadline and ends only on MET, IMPOSSIBLE, `claw_finish` (cleared before the report), a question, cancellation or a terminal state, and a `claw_resume` arms the next generation of it. Docs: `docs/claw/README.md`; live: `node tools/e2e/claw-goal-always.mjs`; two sessions as two processes: `node --experimental-strip-types tools/e2e/claw-two-orchestrators.mjs`; mutations: `node tools/claw/mutation-check.mjs`. |
+| `/claw`, `claw_spawn`, `claw_list`, `claw_read`, `claw_send`, `claw_cancel`, `claw_trigger`, `claw_set_keep`, `claw_close`, `claw_resume`; worker `claw_finish`, `claw_goal` | `extensions/claw/extension.ts` (orchestrator tools and `/claw`; worker gate plus `claw_finish`/`claw_goal` when `PI_CLAW_RUN` is set) | `.pi/lib/claw/`: `store.ts` (file state; runs, triggers and inbox items carry the owning orchestrator session and its Tern pane, and each session has its own inbox cursor under `.swarm/claw/sessions/`, so several Claw sessions share one workspace and daemon without receiving each other's runs), `inbox.ts` (per-session delivery), `spawn.ts` (launch phases, task file, derived goal, `launchPrompt`), `upgrade-prompt.ts` (the `/upgrade` template, shared with `extensions/upgrade-prompt`; a fresh worker's first turn is that template around its task-file line unless the run has `upgrade: false`), `goal.ts` (always-on completion goal state, brakes, resume generations), `resume.ts` (keep-open reachability and relaunch on the recorded session), `daemon.ts` (singleton reconciler, goal events, one long-run warning), `launcher.ts` (Tern, `--session` for a resume), `preflight.ts` (launch gate), `supervisor.ts` (the single tab-close point, which honours `keepOpen`), `child.ts` (worker events). A worker's goal is derived from its task and established after launch in its own process, never in the launch prompt; it has no cap or deadline and ends only on MET, IMPOSSIBLE, `claw_finish` (cleared before the report), a question, cancellation or a terminal state, and a `claw_resume` arms the next generation of it. Docs: `docs/claw/README.md`; live: `node tools/e2e/claw-goal-always.mjs`; two sessions as two processes: `node --experimental-strip-types tools/e2e/claw-two-orchestrators.mjs`; mutations: `node tools/claw/mutation-check.mjs`. |
 | `vault_add`, `vault_approve`, `vault_exec`, `vault_list`, `vault_two_person_status` | `extensions/swarm-history-vault-tools/extension.ts` | `.pi/lib/tools/swarm-vault-tools.ts`; never expose secret values. |
 | `vault` | `extensions/vault/extension.ts` | `.pi/lib/tools/swarm-vault-tools.ts`; transparent global credential storage, with explicit user-risk warning. |
 | `mcp__<server>__<tool>` | `extensions/mcp-fallback/extension.ts`, `extensions/swarm-websearch/extension.ts` / `packages/tools/mcp/src/index.ts` | Provider-neutral declared MCP bridge; manifests, allowlists, transport, and auth are the seam. |
@@ -437,7 +478,7 @@ the Pi adapter only for registration/presentation concerns.
 | Hook group / concern | Registration | Implementation / events |
 | --- | --- | --- |
 | Central hook state and ordering | `.pi/lib/runtime/hook-state.ts` | Registration, enablement, persistence, and visibility. |
-| Same-session hook correction | `.pi/lib/runtime/hook-correction.ts` | Authoritative tool_call denial with same-step feedback and bounded repeat escalation. No speculative abort or settlement wake. |
+| Same-session hook correction | `.pi/lib/runtime/hook-correction.ts` | Authoritative tool_call denial with same-step feedback; repeats only change the guidance text. A block result must never set `terminate` (Pi ends the run on it); guarded by `.pi/test/tools/hook-block-never-stops.test.ts`. No speculative abort or settlement wake. |
 | Prompt hook `packages/context/prompt` | `extensions/swarm-prompt/extension.ts` | `before_agent_start`; prompt/context assembly in `packages/context/prompt/src/index.ts` and `.pi/lib/context/swarm-context.ts`. Default base prompt is **Modes Agent** (`prompts/modes-system-prompt.md`, byte-identical to the benchmarked `artifacts/prompt-bench/arms/M.md`; `{{workspace}}` rendered per cwd, sudo section removed); it beat Forge in the sealed confirmatory run (M−F +0.227 [+0.107, +0.360], `artifacts/prompt-bench/confirm/FINDINGS.md`). `/system-prompt` still selects Forge Swarm Agent, Pi base, or saved prompts; a stored `activePrompt` wins. Footer explanation guidance is Forge-only. E2E: `node tools/e2e/modes-default-prompt.mjs`. |
 | Disk hooks `disk-hooks` | `extensions/swarm-disk-hooks/extension.ts` | Loads project/user hook config, executes bounded commands; maps tool/session/prompt/compact events. |
 | Structure guard `structure-guard` | `extensions/project-init/extension.ts` | `tool_call`; denies `write`/`edit`/`apply_patch` *creations* that violate `.project/structure.json` before the tool runs. Policy and classification in `.pi/lib/policy/project-structure.ts`, tool-argument extraction in `structure-guard.ts`. Existing paths are never blocked; `PI_SWARM_NO_STRUCTURE_GUARD=1` disables it like `PI_SWARM_NO_HOOKS`. |
@@ -556,6 +597,13 @@ hand-drawn table. Tern 0.9.5 draws and *clocks* the parts that change every seco
   `shimmer` "Preparing next action"; the chips (`Activity` / `All steps` / `Collapse work`) live in **one**
   `row` (`tern.work-controls`), styled by `.pi/lib/tern/work-style.ts` — keep every selector inside Tern's
   subset (no `:has()`, no `~`, no leading region element).
+- Text in program sheets follows the terminal font: write sizes as `calc(var(--sf-fs, 13px) * N / 13)`, never
+  plain `px`. Tern documents a 13px design zoomed by `font / 13`, but the Tern 0.9.5 Linux desktop view sets
+  `--sf-fs` to the raw font with no zoom, so plain px (ours and Tern's own composer rules) froze there while
+  headless `tern serve` zoomed correctly. `composer-style.ts` therefore restates the composer's text sizes;
+  the `[data-scope]` prefix adds no specificity, so each override matches the chat skin's specificity through
+  role ancestors (`omp.composer.bar`, `omp.composer.line`). `dock.test.ts` pins this. Verify font changes in
+  the desktop window, not only headless, with `tern ctl dump <selector>` at two `tern ctl font` sizes.
 - Markdown callouts are theme-neutral: `.pi/lib/tern/markdown-style.ts` (sheet `markdown`) replaces Tern's
   `--accent` fill with a `--l3` hairline and quiet icon; only warning/caution keep `--warn` on rule and icon.
   Mermaid figures are one opaque `svg`, so diagram look is steered through the `mermaid` prompt section
@@ -574,12 +622,110 @@ Visual check without a model: `node tools/e2e/tern-live-work-demo.mjs` renders o
 `target/shots/tern/live/<name>.png` to look at. Behaviour is asserted by
 `.pi/test/tern/work-table.test.ts`, `turn-work.test.ts`, `turn-groups.test.ts` and `tsp.test.ts`.
 
+### Git panel contract
+
+The composer's git segment opens a full Tern sheet (`overlay size: "full"`) built in
+`.pi/lib/tern/git-panel.ts`. It follows OMP's **native** git app (`GitTuiComponent.describe()` in
+`packages/tui/src/apps/git/git-tui.ts` and `Sidebar.describe()` in `sidebar.ts`, v18.12.6), not the ANSI
+`omp git` screen or the pinned `vendor/oh-my-pi` 18.1.14 submodule (which has no Tern frontend):
+
+- The bar carries the selected path (`dim dir` + `strong base`), its `+a −d`, a scope badge, previous/next
+  change, Unified/Split tabs, Stage/Unstage file, Discard, `?` and close. The body is Tern's `diff`; the side
+  sheet has `N changes on main`, Path/Tree, Unstaged/Staged sections with Stage all/Unstage all, file rows
+  (status letter, path, stats) and the commit composer (summary, description, Amend, Commit). A clean tree
+  replaces the change sheet with the HEAD commit (subject, body, author, authored, parents, file list).
+- Tern's `diff` supports `unified` and `split` only. OMP's File/Inline/Hunks views, per-hunk and selected-line
+  staging, binary/media compare and AI staging are **not** reproduced, because Tern/Pi has no node or source
+  for them; do not draw a button that cannot act.
+- Reads go through `.pi/lib/tern/git-status.ts` with `--no-optional-locks`; only explicit panel actions
+  (`stagePaths`, `unstagePaths`, `discardPaths`, `commitIndex`) may take git's locks. `readHeadCommit` uses
+  `diff-tree --root`, or a repository's first commit lists no files.
+- A Tern overlay never takes the keyboard, so raw keys still reach the composer path. `PiTernBridge.applyGitKey`
+  runs before `applyEditKey` in `.pi/lib/tern/run.ts`; it owns the commit fields and OMP's `j/k`, `[/]`, `s/u`,
+  `x`, `a`, `c`, `r`, `?` bindings, and `applyGitPaste` routes bracketed paste. Focus is sent with the frame's
+  `focus` op; clicking the summary/description text swaps in the live `input`/`editor` and focuses it.
+- A path with both staged and unstaged edits appears in both areas, as OMP does; untracked and conflicted files
+  live under Unstaged. A resize re-renders the sheet, and below 100 columns the sheet stacks under the diff.
+
+Tests: `.pi/test/tern/git-panel.test.ts` (node shape), `git-panel-actions.test.ts` (bridge actions and keys),
+`git-panel-git.test.ts` (real git as the oracle for stage/unstage/discard/commit/HEAD). Visual:
+`TERN_GIT_DEMO=1 GIT_DEMO_CWD=<repo> node tools/e2e/tern-git-panel-demo.mjs` in a pane, then
+`tern ctl shot git-panel`; `HELP=1` opens the key sheet and `UNIFIED=1` starts unified.
+
+### Session tree picker
+
+`/tree` (a Tern builtin) and double Escape open `.pi/lib/tern/session-tree.ts`. It works from Pi's
+`SessionManager.getTree()`, follows Pi's `tree-selector.js` semantics (filter ids, active branch first, indent
+only at a fork) and hides hook bookkeeping, because hook `custom` entries are ~90% of a real session and the
+leaf is almost always one. "You are here" is the last visible entry on the active branch. The primary action's
+wording follows `AgentSession.navigateTree`: a prompt or custom message reopens in the composer, and anything else
+becomes the leaf. Picker `items` must be an array; a map renders no rows. Tests:
+`.pi/test/tern/session-tree.test.ts`. Visual: `TERN_LIVE_DEMO=1 SESSION=<file.jsonl> node
+--experimental-strip-types tools/e2e/tern-tree-demo.mjs` in a pane, then `tern ctl shot` (shots land under the
+Tern process's cwd, `~/target/shots/tern/live/`).
+
+### Edit and Resend on your messages
+
+A click on a user bubble (`card` role `pi.user`, action `message.focus`) shows `Edit · Resend · Copy`
+under it. A right-click offers the same items (`edit-message`, `resend-message`, `copy`; the event's node id
+names the message, as with `remove-attachment`). `.pi/lib/tern/message-actions.ts` resolves a bubble to its
+Pi entry: a restored bubble's id is the entry id, and a live one (`m12`, `n3`) is matched by position against
+`getBranch()` user entries, refusing when the counts differ. Both actions go through
+`AgentSession.navigateTree(userEntry)` (leaf → parent), so nothing is deleted: the original and its replies
+stay in `/tree` as a branch. Edit does not touch the session until send. The composer holds the text plus the
+message's images as chips, a banner sits in the composer's `above` slot, and Esc restores the earlier draft
+and attachments. Resend branches and re-prompts with the same text and images. Both refuse while a turn runs
+(Pi's navigateTree throws while streaming). Tests: `.pi/test/tern/message-actions.test.ts`, run on a real
+file-backed `SessionManager`. Live: `OPEN=chat` on `tools/e2e/tern-tree-demo.mjs` (it works on a temp copy
+of the session) plus `tern ctl click '[data-id$="msg-<entry>.edit"]'`.
+
 Measured check without a model: `npm run lint:tern` (`tools/tern/style-lint.mjs`) replays the recorded
 fixtures through the real bridge into a headless Tern at four widths and reports spilled boxes, clipped
 lines, off-scale type, sheet parse errors and deleted-then-re-added stateful nodes; Tern's own sheet bleed is
 the only accepted measurement (`tools/tern/style-lint.baseline`). `npm run lint:tern:self-test` seeds each
 defect and fails if a rule stays silent, so keep a green run honest by running it after changes to the
 sheets or to the node shapes in `bridge.ts`.
+
+### Extension keys and widgets in a pane
+
+Tern owns the terminal, so Pi's own `interactive-mode.ts` never sees a key and
+never builds an extension `ExtensionContext`. Two seams close that gap:
+
+- `.pi/lib/tern/ext-shortcuts.ts` dispatches `pi.registerShortcut` chords. `run.ts` calls it
+  **before** `keyEffect(sequence)`, so a registered chord is consumed and an unregistered one
+  still edits the draft; typing never does both. It reads
+  `extensionRunner.getShortcuts(getKeybindings().getResolvedBindings())` on every press, so
+  `/reload` and session replacement take effect without restarting the pane, ignores kitty key
+  releases (a release parses as its press and would run the handler twice), and reports a
+  throwing handler as a transcript notice instead of losing the key loop. Chords Pi already
+  binds are not in that map (the runner drops builtin conflicts), so Tern's own Escape/Enter
+  handling is unaffected. `bridge.notice()` is the transcript line it reports through.
+- `.pi/lib/tern/ext-ui.ts` `setWidget` accepts the plain-text form extensions use
+  (`string[]`), sanitises it (ANSI stripped) and renders it as one `text` node with role
+  `pi.widget` above the composer (`widgetNodes("aboveEditor")` in the dock frame). Component
+  factories cannot render without a pi-tui owner and are refused with a notice naming
+  `pi -nt`; a flow that answers itself still resolves.
+- Exception: `ctx.ui.custom` panels built **only** from Pi dialog primitives (containers,
+  `Text`, `Spacer`, rule-only borders, `SelectList`, `Input`, `AuthUrlComponent`; a view that
+  swaps screens via a top-level `content` is walked) are projected by `.pi/lib/tern/tui-panel.ts`
+  into a modal `overlay` (role `pi.panel`). The factory receives Pi's real `getKeybindings()`;
+  Tern only draws, and every key/click is forwarded to the component's own `handleInput`, so the
+  panel's logic runs unchanged. This is how the host `/mcp` manager (server list, enable/disable,
+  project override, reconnect, tools, exposure, sign-in + redirect URL) works natively in a pane
+  with no MCP state re-implemented here. List rows are tinted from the leading status word
+  (`failed`/`needs`/`connected`/`disabled`/`connecting`). The panel reuses the prompt list/input
+  ids, so the bridge's select/activate/edit routing reaches it; prompts it raises stack above it;
+  pane close releases it. Anything else in the tree keeps the refusal notice. Verified against the
+  real host extension by `.pi/test/tern/mcp-panel.test.ts`.
+
+That is what makes `extensions/voice` usable in a pane: `Ctrl+Space` now toggles capture, the
+recording meter (`█` bands, elapsed time, model state) paints above the editor as it ticks, and
+`/voice` works because the slash palette lists extension commands. Its `ctx.ui.custom` panels —
+`/voice-settings`, onboarding, the model/microphone/recommendation pickers, the shortcut
+recorder and the try-it pane — are exactly the refused case, so configure voice with `pi -nt`
+or by writing `pi-voice.json`. Verified by `.pi/test/tern/ext-shortcuts.test.ts` (6 cases) and
+`.pi/test/tern/voice-surface.test.ts` (meter node, escapes stripped, in-place update, removal,
+refusal); the full Tern suite is 39 files / 514 tests.
 
 ### Session durability in a pane
 
@@ -975,6 +1121,28 @@ writes them through the canonical store and checks production recall. This does 
 bulk-clean existing candidates, enable supervisor, or certify unrelated records.
 
 ## Installed MCP adapter ownership
+
+Pi's built-in MCP extension (`builtin:mcp`, registers `/mcp`) is the MCP stack. It reads
+`~/.pi/agent/mcp.json` and the trusted project's `.pi/mcp.json`, owns connections, OAuth sign-in,
+exposure and the `/mcp` manager, and registers tools as `mcp__<server>__<tool>`. The Tern runner
+(`.pi/lib/tern/run.ts`) must pass Pi's `builtInExtensions` as `extensionFactories` the way Pi's CLI
+does (`.pi/lib/tern/pi-builtins.ts` reads the installed list); without them a pane has no `/mcp`,
+codemode or tool_search. That module also observes the MCP extension's `registerTool` calls and
+publishes servers with reachable tools to `.pi/lib/tools/mcp-status.ts`, which the startup card
+reads. `extensions/mcp-fallback` stands down (no discovery, `/swarm-mcp` points to `/mcp`) whenever
+`/mcp` or `/pi-mcp` is registered; it only connects in hosts that load neither.
+
+Adding servers never bypasses Pi. `/mcp-add` (registered by `extensions/mcp-fallback`, logic in
+`.pi/lib/tools/mcp-add.ts`) turns a pasted README snippet (`{"mcpServers": …}`, VS Code `{"servers": …}`, a
+bare map or a `"name": {…}` fragment), a URL, or `pi mcp add` arguments into Pi's own `runMcpCommand(["add",
+…])` (loaded through `.pi/lib/tools/pi-dist.ts`), which validates and writes `mcp.json`; then it reloads so
+Pi's MCP connects the server. Literal secrets in headers/env need confirmation (prefer `${VAR}`/`!command`).
+The Tern plugin `tern-plugins/mcp` (`tern plugin link tern-plugins/mcp`) adds palette commands **Add MCP
+server** / **MCP servers** and an `mcp.servers` block outside Pi's TUI: it lists with `pi mcp list --json`,
+adds with `pi mcp add`, signs in with `pi mcp login`, removes with `pi mcp remove` (argv, no shell), and
+mirrors the same converter in Luau. Running Pi sessions see plugin-added servers after `/reload`. Tests:
+`.pi/test/tools/mcp-add.test.ts`; the plugin's runtime behaviour has no automated test (offscreen
+`tern shot` does not load plugins).
 
 When `pi-mcp-adapter` is installed (its `/pi-mcp` command is present), it owns
 `/mcp`, MCP connection negotiation, resources, and prompts. Pi-Swarm skips its

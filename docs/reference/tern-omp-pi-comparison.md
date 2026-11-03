@@ -171,3 +171,19 @@ hand-built row table, and the reference for what Tern draws is now the current O
 - Visual check without a model: `tools/e2e/tern-live-work-demo.mjs` renders one scripted turn in its own Tern
   tab (`TERN_LIVE_DEMO=1`, optional `EXPAND=1`/`SPEED=n`); `tern ctl shot <name>` writes
   `target/shots/tern/live/<name>.png`. Behaviour is asserted in `.pi/test/tern/{work-table,turn-work,turn-groups,tsp,dock}.test.ts`.
+
+## Update: git panel after the OMP-parity pass
+
+The composer's git segment no longer opens a read-only section list. `.pi/lib/tern/git-panel.ts` follows the
+native projection in OMP's `packages/tui/src/apps/git` (v18.12.6): a full sheet with the path/stats/scope bar,
+Unified/Split tabs, change navigation, Stage/Unstage file and Discard; a changes sheet with
+`N changes on main`, Path/Tree, Unstaged/Staged, Stage all/Unstage all and the commit composer; and the HEAD
+commit view when the tree is clean. Staging, unstaging, discarding and committing run real git commands in
+`.pi/lib/tern/git-status.ts`; the panel refreshes through the existing repository watcher.
+
+Tern's `diff` has unified and split modes only, so OMP's File/Inline/Hunks views, per-hunk and line staging,
+binary/media comparison and AI staging have no honest Tern/Pi source here and are not drawn. Raw keys reach
+the composer path in Tern, so `PiTernBridge.applyGitKey` runs first in `run.ts`; the commit fields are real
+`input`/`editor` nodes focused through the frame's `focus` op. Evidence: `.pi/test/tern/git-panel.test.ts`,
+`git-panel-actions.test.ts`, `git-panel-git.test.ts` (real git as the oracle) and
+`tools/e2e/tern-git-panel-demo.mjs` with `tern ctl shot` in a live pane.

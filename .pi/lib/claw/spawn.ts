@@ -17,6 +17,7 @@ import { goalSpecOf, startGoal } from "./goal.ts";
 import { describeSource, preflightLaunch, snapshotSource, type Preflight } from "./preflight.ts";
 import { recordAttempt, remedyKey } from "./remedy.ts";
 import { TERMINAL, type ClawStore, type Run, type SpawnInput, type OutboxOp } from "./store.ts";
+import { buildUpgradePrompt } from "./upgrade-prompt.ts";
 
 export const MAX_INTENT_ATTEMPTS = 5;
 export const RECONCILE_MS = 15_000;
@@ -110,6 +111,14 @@ Ending a turn without calling \`claw_finish\` is reported to the orchestrator as
 `;
 }
 
+/** A worker's first user turn. By default it is byte-identical to what `/upgrade <instruction>` sends, built from the
+ *  same template rather than the slash command: a positional prompt starting with "/" is dispatched as a command, which
+ *  only works when the worker happened to load the upgrade extension. `upgrade: false` on the run sends the plain line. */
+export function launchPrompt(run: Pick<Run, "upgrade">, taskPath: string): string {
+	const instruction = `Read and execute your Claw task file in full: ${taskPath}`;
+	return run.upgrade === false ? instruction : buildUpgradePrompt(instruction)!;
+}
+
 export function issueDescription(run: Run, mark: string): string {
 	return `Created by Claw run \`${run.id}\`${run.trigger ? ` (trigger \`${run.trigger}\`)` : ""}.\n\n**Working directory:** \`${run.cwd}\`\n\n## Task\n\n${run.task}\n\n${mark}`;
 }
@@ -194,6 +203,7 @@ export async function startRun(input: SpawnInput, deps: LaunchDeps, key: { reque
 	// Always on: the goal is derived and recorded before any side effect, so it is auditable even if the launch fails.
 	run.goal = startGoal(id, task, at);
 	if (keepOpen) run.keepOpen = true;
+	if (input.upgrade === false) run.upgrade = false;
 	// The orchestrator session that asked for this run: its inbox items and worker tabs stay with that session.
 	if (typeof input.owner === "string" && input.owner) run.owner = input.owner;
 	if (Number.isInteger(input.pane)) run.pane = input.pane;
@@ -366,7 +376,7 @@ export async function continueRun(run: Run, deps: LaunchDeps): Promise<Run> {
 			// A configured package and a cwd-local package that name the same repository load every extension twice
 			// and pi exits on the tool conflicts. The plan keeps one copy, preferring this worker's own checkout.
 			const plan = deps.planLaunch?.(run.cwd) ?? { mode: "discovery" as const };
-			const prompt = `Read and execute your Claw task file in full: ${store.taskPath(run.id)}`;
+			const prompt = launchPrompt(run, store.taskPath(run.id));
 			const { tab, block, named } = await launchTab(tern, {
 				session, cwd: run.cwd, label: tabNameFor(run), runId: run.id, clawDir: store.dir, prompt, provider: run.provider, model: run.model,
 				plan, logPath: store.workerLogPath(run.id),

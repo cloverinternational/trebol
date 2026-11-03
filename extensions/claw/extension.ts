@@ -38,6 +38,7 @@ export const CLAW_AGENT_PARAMETERS = { type: "object", required: ["task", "proje
 	model: { type: "string", description: "Pi model for this worker, for example claude-opus-5-5 or provider/id. Default: pi's configured model." },
 	cwd: { type: "string", description: "Working directory for the worker; defaults to this workspace." },
 	keepOpen: { type: "boolean", description: "Keep the worker tab open when the run ends, so the human can keep working in it. Default false (closed on a terminal state); release later with claw_close." },
+	upgrade: { type: "boolean", description: "Launch the worker with the /upgrade prompt (deepen the task, then run it). Default true; pass false for a plain launch." },
 } } as const;
 export const CLAW_AGENT_DESCRIPTION = "Start a visible worker tab that runs pi on the task, with a Hoja issue in the project's team. This is the only way to delegate work while Claw is on. Completion is reported to you by the inbox after the worker calls claw_finish. Pass keepOpen for a long task whose conversation a human will keep using: the tab then survives the run's end, and claw_resume brings any finished run back on its own session.";
 
@@ -284,7 +285,7 @@ export function registerOrchestrator(pi: any, options: OrchestratorOptions = {})
 		setClawMode(true, saved ?? current);
 		const available: string[] = (pi.getAllTools?.() ?? []).map((tool: any) => tool.name);
 		pi.setActiveTools?.(clawRoutedTools(current, available));
-		setClawAgentRoute(async (input: any) => call({ kind: "spawn", input: { task: str(input?.task, "task"), project: str(input?.project, "project"), assignee: input?.assignee, label: input?.label, cwd: input?.cwd, provider: input?.provider, model: input?.model, keepOpen: input?.keepOpen === true } }));
+		setClawAgentRoute(async (input: any) => call({ kind: "spawn", input: { task: str(input?.task, "task"), project: str(input?.project, "project"), assignee: input?.assignee, label: input?.label, cwd: input?.cwd, provider: input?.provider, model: input?.model, keepOpen: input?.keepOpen === true, ...(input?.upgrade === false ? { upgrade: false } : {}) } }));
 	};
 	const deactivate = () => {
 		if (!clawModeOn()) return;
@@ -313,8 +314,9 @@ export function registerOrchestrator(pi: any, options: OrchestratorOptions = {})
 				provider: { type: "string", description: "Pi provider for this worker, for example anthropic. Needs model. Default: pi's configured provider." },
 				model: { type: "string", description: "Pi model for this worker, for example claude-opus-5-5 or provider/id. Default: pi's configured model." },
 				keepOpen: { type: "boolean", description: "Keep the worker tab open after the run ends, so the human can keep working in it. Default false; release it with claw_close." },
+				upgrade: { type: "boolean", description: "Launch the worker with the /upgrade prompt (deepen the task, then run it). Default true; pass false for a plain launch." },
 			} },
-			execute: async (_id: string, p: any) => text(await call({ kind: "spawn", input: { task: str(p.task, "task"), project: str(p.project, "project"), assignee: p.assignee, label: p.label, cwd: p.cwd, provider: p.provider, model: p.model, keepOpen: p.keepOpen === true } })),
+			execute: async (_id: string, p: any) => text(await call({ kind: "spawn", input: { task: str(p.task, "task"), project: str(p.project, "project"), assignee: p.assignee, label: p.label, cwd: p.cwd, provider: p.provider, model: p.model, keepOpen: p.keepOpen === true, ...(p.upgrade === false ? { upgrade: false } : {}) } })),
 		},
 		{
 			name: "claw_list",

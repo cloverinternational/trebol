@@ -257,7 +257,11 @@ const toolIds = (items: readonly ItemView[]) => items.filter((i) => i.role === "
 // a developer machine, and past the 5 s default on a shared 4-vCPU runner (CI
 // run 39993516486 logged 11.4 s for one of them). The budget is CPU time for a
 // fixed scenario count, not slack for a wait; no assertion is relaxed.
-const PROPERTY_BUDGET_MS = 30_000;
+// A later pass logged the same property at 30.6 s on CI (runs 41629303703 and
+// 41629991921, both timing out at exactly 30 s) while it stayed at ~700 ms here
+// even under a full 249-file suite on 2 workers. Hold the budget well above the
+// worst CI measurement so the guard tracks the code, not the runner.
+const PROPERTY_BUDGET_MS = 90_000;
 
 describe("turn-work properties", () => {
 	it("every tool call appears in exactly one group (corpus and generated, every intermediate state)", () => {

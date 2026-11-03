@@ -366,6 +366,21 @@ describe("Tern regions and dock structure", () => {
 		}
 	});
 
+	it("sizes text from the terminal font, so it follows Tern's font setting with or without region zoom", () => {
+		// Tern 0.9.5's Linux desktop view sets --sf-fs to the terminal font without the documented font/13 zoom,
+		// so a plain px size never changes there; calc(var(--sf-fs, 13px) * N / 13) is N px under the zoom.
+		for (const css of [PI_COMPOSER_CSS, TERN_WORK_CSS, TERN_MARKDOWN_CSS]) {
+			const sizes = css.replaceAll("var(--sf-fs, 13px)", "var(--sf-fs)");
+			expect(sizes).not.toMatch(/font(-size)?\s*:[^;}]*\d(\.\d+)?px/);
+			expect(sizes).not.toMatch(/line-height\s*:\s*\d(\.\d+)?px/);
+		}
+		// The composer's own text is Tern's plain-px rule, so the sheet restates it against the terminal font.
+		// Program sheets get no specificity from their [data-scope] prefix, so the rule must match the chat skin's
+		// `.sf-chat-reader .sf-col[data-role^='omp.editor'] .sf-editor` (0,4,0) and win by sheet order.
+		expect(PI_COMPOSER_CSS).toMatch(/\.sf-col\[data-role\^='omp\.editor'\] \[data-role='omp\.composer\.line'\] > \.sf-editor \{[^}]*font-size: calc\(var\(--sf-fs, 13px\) \* 14 \/ 13\)/);
+		expect(PI_COMPOSER_CSS).not.toContain("${");
+	});
+
 	it("clicking a task references it in the draft without sending a prompt", () => {
 		const session = fakeSession({ entries: [taskEntry()] });
 		let prompted = 0;

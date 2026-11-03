@@ -23,6 +23,8 @@ import { sessionCommandSource, type CommandSessionLike } from "./commands.ts";
 import { PiTernBridge, type PiSessionLike } from "./bridge.ts";
 import { createUiTrace } from "./ui-trace.ts";
 import { keyEffect } from "./keys.ts";
+import { createShortcutDispatcher, type ShortcutSession } from "./ext-shortcuts.ts";
+import { piBuiltinExtensions } from "./pi-builtins.ts";
 import { detectTern, helloQuery, PI_TSP_FEATURES, shouldProbe, splitInput } from "./tsp.ts";
 import { bootGeneration, clearPaneRecord, openStartupSession, paneKey, pidAlive, readPaneBook, recordPaneSession } from "./startup-session.ts";
 
@@ -70,6 +72,8 @@ function startTsp(): void {
 	let pendingTimer: ReturnType<typeof setTimeout> | undefined;
 	const ESC_FLUSH_MS = 50;
 	let bridge: PiTernBridge | null = null;
+	// Extension shortcuts dispatch before the composer key map (see ext-shortcuts.ts).
+	let shortcuts: ((sequence: string) => boolean) | undefined;
 	let restored = false;
 	let connecting = false;
 	let probeTimer: NodeJS.Timeout | undefined;
@@ -96,8 +100,12 @@ function startTsp(): void {
 	// The bridge owns the draft; keys only edit it through the bridge.
 	const keyBuffer = new StdinBuffer();
 	keyBuffer.on("data", (sequence: string) => {
+		// An extension's registered chord is consumed here, before the composer's own
+		// map: voice's Ctrl+Space must not also be looked up as text.
+		if (bridge && shortcuts?.(sequence)) return;
 		const effect = keyEffect(sequence);
 		if (!bridge || !effect) return;
+		if (bridge.applyGitKey(effect)) return;
 		if (bridge.applyEditKey(effect)) return;
 		if (effect.kind === "interrupt") {
 			const now = Date.now();
@@ -135,7 +143,10 @@ function startTsp(): void {
 		} else if (effect.kind === "text") bridge.appendDraft(effect.text);
 	});
 	// Pasted text stays in the draft; embedded newlines do not submit.
-	keyBuffer.on("paste", (text: string) => bridge?.pasteText(text));
+	keyBuffer.on("paste", (text: string) => {
+		if (bridge?.applyGitPaste(text)) return;
+		bridge?.pasteText(text);
+	});
 
 	const onData = (chunk: Buffer): void => {
 		const text = chunk.toString("utf8");
@@ -262,6 +273,14 @@ function startTsp(): void {
 			newSession: async () => runtime.newSession(),
 		});
 		bridge.start("pi");
+	// `/reload` and session replacement swap the extension runner, so the dispatcher
+	// reads the live runtime session on every press instead of caching a map.
+	shortcuts = createShortcutDispatcher(runtime.session as unknown as ShortcutSession, {
+		ui: () => bridge!.uiContext(),
+		cwd: () => runtime.session.sessionManager?.getCwd?.() ?? process.cwd(),
+		isIdle: () => !bridge!.busy,
+		notify: (message) => bridge?.notice(message),
+	});
 		// Command-context actions route to the runtime, which performs the real session replacement.
 		const commandContextActions = {
 			waitForIdle: () => runtime.session.waitForIdle(),
@@ -310,10 +329,12 @@ function startTsp(): void {
 	}, PROBE_MS);
 }
 
-// Builds services with Tern's event bus and the session for each runtime replacement, mirroring Pi's main.js.
+// Builds services with Tern's event bus and the session for each runtime replacement, mirroring Pi's main.js,
+// including Pi's built-in extensions (MCP, codemode, tool_search), which an SDK caller must pass itself.
 function createRuntime(events: ReturnType<typeof createEventBus>) {
 	return async ({ cwd, agentDir, sessionManager, sessionStartEvent }: { cwd: string; agentDir: string; sessionManager: SessionManager; sessionStartEvent?: unknown }) => {
-		const services = await createAgentSessionServices({ cwd, agentDir, resourceLoaderOptions: { eventBus: events } });
+		const extensionFactories = (await piBuiltinExtensions()) as never;
+		const services = await createAgentSessionServices({ cwd, agentDir, resourceLoaderOptions: { eventBus: events, extensionFactories } });
 		const created = await createAgentSessionFromServices({ services, sessionManager, sessionStartEvent: sessionStartEvent as never });
 		return { ...created, services, diagnostics: services.diagnostics };
 	};

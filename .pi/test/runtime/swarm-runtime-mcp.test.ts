@@ -28,3 +28,32 @@ it("leaves /mcp and discovery to the installed adapter", async () => {
   expect(commands).not.toContain("mcp");
   expect(state.mcp).toBeUndefined();
 });
+
+it("leaves servers to Pi's built-in MCP when /mcp is registered", async () => {
+  const handlers = new Map<string, any>(); const notices: string[] = [];
+  const commands = new Map<string, any>();
+  const pi: any = {
+    mcpManifests: [{ id: "would-connect", type: "stdio", command: "true" }],
+    on: (n: string, fn: any) => handlers.set(n, fn), registerTool: vi.fn(),
+    registerCommand: (n: string, spec: any) => commands.set(n, spec),
+    getCommands: () => [{ name: "mcp" }],
+  };
+  const state = registerMcpFallback(pi);
+  await handlers.get("session_start")({}, {});
+  expect(state.mcp).toBeUndefined();
+  await commands.get("swarm-mcp").handler("", { ui: { notify: (m: string) => notices.push(m), select: vi.fn() } });
+  expect(state.mcp).toBeUndefined();
+  expect(notices.join("\n")).toContain("/mcp");
+});
+
+it("still runs when neither Pi's /mcp nor an adapter is present", async () => {
+  const handlers = new Map<string, any>();
+  const pi: any = {
+    mcpManifests: [], on: (n: string, fn: any) => handlers.set(n, fn), registerTool: vi.fn(), registerCommand: vi.fn(),
+    getCommands: () => [{ name: "swarm-mcp" }], getActiveTools: () => [], getAllTools: () => [], setActiveTools: vi.fn(),
+  };
+  const state = registerMcpFallback(pi);
+  await handlers.get("session_start")({}, {});
+  expect(state.mcp).toBeDefined();
+  await state.mcp?.close();
+});

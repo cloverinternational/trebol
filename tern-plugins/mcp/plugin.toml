@@ -1,0 +1,13 @@
+schema = 1
+id = "mcp"
+name = "MCP servers"
+version = "0.1.0"
+description = "See, add, sign in to and remove Pi's MCP servers from a Tern block, through Pi's own `pi mcp` CLI."
+icon = "extension"
+host = "host.luau"
+window = "window.luau"
+
+[[blocks]]
+id = "servers"
+title = "MCP servers"
+icon = "extension"
