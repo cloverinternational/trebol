@@ -106,6 +106,9 @@ export const runName = (run: Run) => `${run.hoja?.identifier ?? run.id}${run.lab
 export type SuperviseDeps = LaunchDeps & {
 	now: () => Date;
 	alive: (pid: number) => boolean;
+	/** When this host booted (epoch ms), when the caller knows. A worker that reported before it was killed by the
+	 *  reboot, and the run is brought back with claw_resume instead of being relaunched with its original prompt. */
+	bootedAt?: number;
 	slo?: Partial<SloConfig>;
 	/** Proves that no Tern block carries this run id, so a failed launch can be retried without duplicating a tab. */
 	noTabCarries?: (runId: string) => Promise<boolean>;
@@ -212,14 +215,18 @@ export function recoveryReason(run: Run, nowMs: number): { reason: string; expir
 	if (run.finish) return undefined;              // a reported result is final
 	if (run.settles > 0) return undefined;         // the worker produced a turn; a retry could duplicate its work
 	if (run.ask) return undefined;                 // it interacted with a human: that is a decision, not a retry
-	const expired = run.deadline !== undefined && nowMs > Date.parse(run.deadline);
 	// A launch step failed before any tab existed: nothing was executed, so the tab step is safe to redo.
 	if (run.status === "failed" && run.failureClass === "launch" && run.phase === "issue_created") {
-		return { reason: "the launch failed before any worker tab existed", expired };
+		// The dispatch deadline is meaningful here: this run never reached a worker, so "do not start one after the
+		// request expired" still holds.
+		return { reason: "the launch failed before any worker tab existed", expired: run.deadline !== undefined && nowMs > Date.parse(run.deadline) };
 	}
 	// The worker died after its tab opened but before a single settled turn: its events prove no turn completed.
 	if (run.status === "lost" && run.settles === 0 && run.phase === "tab_open") {
-		return { reason: "the worker stopped before its first settled turn", expired };
+		// Never expired: the request was dispatched, so its expiry bounded the hand-off, not the life of a run that
+		// already had a worker. Treating it as expired is what made a daemon restart (or a host reboot) spend the
+		// relaunch budget and refuse to recover a run whose session was intact (TREBOL-388).
+		return { reason: "the worker stopped before its first settled turn", expired: false };
 	}
 	return undefined;
 }
@@ -230,6 +237,10 @@ export function recoveryReason(run: Run, nowMs: number): { reason: string; expir
 async function superviseRecovery(run: Run, deps: SuperviseDeps, nowMs: number, slo: SloConfig): Promise<void> {
 	const candidate = recoveryReason(run, nowMs);
 	if (!candidate) return;
+	// A host reboot is not a worker crash: the process was killed by the machine going down, its session file is the
+	// valuable artifact, and the human continues it with claw_resume. Relaunching the original task would start a
+	// second, fresh conversation and overwrite the recorded session file (TREBOL-388). Budget untouched.
+	if (run.status === "lost" && deps.bootedAt !== undefined && run.launchStartedAt !== undefined && deps.bootedAt > Date.parse(run.launchStartedAt)) return;
 	const key = remedyKey("relaunch", "once");
 	if (!remedyDue(run, key, nowMs)) return;
 	// A run stuck past its own deadline is not restarted: no worker may start after the request expired. It is failed
@@ -257,9 +268,12 @@ async function superviseRecovery(run: Run, deps: SuperviseDeps, nowMs: number, s
 /** A spent budget is a record, not a retry: one item naming the act, the reason and what a human can do. Deduped by act,
  *  so a run that keeps being evaluated never repeats it. */
 function recordBudgetSpent(deps: SuperviseDeps, run: Run, action: string, reason: string): void {
+	const next = run.sessionFile
+		? `Its conversation is intact: bring it back with claw_resume ${run.id}.`
+		: "Next step is a human decision, not another retry.";
 	deps.store.appendInbox({
 		kind: "run_budget_spent", runId: run.id, key: `budget:${action}:${run.id}`,
-		text: `${runName(run)}: automatic ${action} stopped after its retry budget; ${reason}. The run stays ${run.status}${run.block !== undefined ? ` with tab ${run.block}` : ""}${run.sessionFile ? `; session ${run.sessionFile}` : ""}. Next step is a human decision, not another retry.`,
+		text: `${runName(run)}: automatic ${action} stopped after its retry budget; ${reason}. The run stays ${run.status}${run.block !== undefined ? ` with tab ${run.block}` : ""}${run.sessionFile ? `; session ${run.sessionFile}` : ""}. ${next}`,
 	});
 }
 

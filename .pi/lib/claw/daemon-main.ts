@@ -5,6 +5,7 @@ import { ternExec } from "./launcher.ts";
 import { workerLaunchPlan } from "./launch-plan.ts";
 import { ClawStore } from "./store.ts";
 import { claimLock, pidAlive, releaseLock, runDaemon } from "./daemon.ts";
+import { bootedAtMs, readProcessIdentity } from "./process.ts";
 
 const workspace = process.argv[2];
 if (!workspace) throw new Error("usage: daemon-main.ts <workspace>");
@@ -31,6 +32,10 @@ runDaemon({
 	workspace,
 	now: () => new Date(),
 	alive: pidAlive,
+	// Liveness after a reboot is decided by process identity and the boot instant, never by PID existence alone
+	// (TREBOL-388): a worker recorded before this boot cannot be running, and a live number may be somebody else's.
+	identity: readProcessIdentity,
+	bootedAt: bootedAtMs(),
 	signal: (pid, sig) => process.kill(pid, sig),
 	planLaunch: (cwd) => workerLaunchPlan(cwd),
 }, { log, codeKey: () => computeClawFingerprint()?.key }).then((reason) => { log(`claw daemon exiting (${reason})`); process.exit(0); });
