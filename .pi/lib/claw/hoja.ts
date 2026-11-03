@@ -9,6 +9,9 @@ export class HojaRequestError extends Error {
 	readonly ambiguous: boolean;
 	constructor(message: string, ambiguous = false) { super(message); this.ambiguous = ambiguous; }
 }
+/** The named project (or its team) could not be resolved. Distinct from an assignee problem so a caller can fall
+ *  back to another configured project name without masking a real membership error. */
+export class HojaProjectError extends Error {}
 export type Resolved = {
 	teamId: string; teamKey: string; projectId: string; project: string; assigneeId: string; assignee: string;
 	states: Record<string, string>;
@@ -78,6 +81,8 @@ export class HojaClient {
 		}
 	}
 
+	invalidateCatalog(): void { this.catalog = undefined; }
+
 	private load(): Promise<Catalog> {
 		this.catalog ??= this.gql<any>(`{ viewer { id name email }
 			projects(first: 200) { nodes { id name teams { nodes { id key } } } }
@@ -91,10 +96,10 @@ export class HojaClient {
 	async resolve(project: string, assignee?: string): Promise<Resolved> {
 		const c = await this.load();
 		const p = c.projects.find((x) => x.name.toLowerCase() === project.trim().toLowerCase());
-		if (!p) throw new Error(`Hoja project "${project}" not found. Projects: ${c.projects.map((x) => x.name).join(", ")}`);
-		if (p.teams.nodes.length !== 1) throw new Error(`Hoja project "${p.name}" belongs to ${p.teams.nodes.length} teams; expected exactly 1`);
+		if (!p) throw new HojaProjectError(`Hoja project "${project}" not found. Projects: ${c.projects.map((x) => x.name).join(", ")}`);
+		if (p.teams.nodes.length !== 1) throw new HojaProjectError(`Hoja project "${p.name}" belongs to ${p.teams.nodes.length} teams; expected exactly 1`);
 		const team = c.teams.find((t) => t.id === p.teams.nodes[0].id);
-		if (!team) throw new Error(`team of project "${p.name}" is not visible to this token`);
+		if (!team) throw new HojaProjectError(`team of project "${p.name}" is not visible to this token`);
 		const members = team.members.nodes;
 		let who: Member | undefined;
 		const want = (assignee ?? "me").trim().toLowerCase();
@@ -168,10 +173,17 @@ export class HojaClient {
 		if (!d.commentCreate?.success) throw new Error("Hoja commentCreate did not succeed");
 	}
 
-	async setState(r: Pick<Resolved, "states" | "teamKey">, issueId: string, state: string): Promise<void> {
-		const d = await this.gql<any>(`mutation($id: String!, $input: IssueUpdateInput!) { issueUpdate(id: $id, input: $input) { success } }`, {
-			id: issueId, input: { stateId: this.stateId(r as Resolved, state) },
-		});
+	private async updateIssue(issueId: string, input: Record<string, unknown>): Promise<void> {
+		const d = await this.gql<any>(`mutation($id: String!, $input: IssueUpdateInput!) { issueUpdate(id: $id, input: $input) { success } }`, { id: issueId, input });
 		if (!d.issueUpdate?.success) throw new Error("Hoja issueUpdate did not succeed");
+	}
+
+	async setState(r: Pick<Resolved, "states" | "teamKey">, issueId: string, state: string): Promise<void> {
+		await this.updateIssue(issueId, { stateId: this.stateId(r as Resolved, state) });
+	}
+
+	/** Writes the whole description. Callers merge the managed block themselves, so human text is never dropped. */
+	async setDescription(issueId: string, description: string): Promise<void> {
+		await this.updateIssue(issueId, { description });
 	}
 }

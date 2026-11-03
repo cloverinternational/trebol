@@ -1,9 +1,13 @@
-/** Coarse Hoja publication for TaskManage.
+/** Coarse Hoja publication and lifecycle sync for TaskManage.
  *
  * A session's major work becomes one Hoja issue per top-level task; implementation steps stay local unless the
- * agent marks them. Everything here is additive: publication creates or adopts an issue, reads it back, and records
- * the association in the session journal. It never moves, closes or comments on an issue, so a reused or shared
- * issue cannot be changed by a session that only linked to it.
+ * agent marks them. Publication creates or adopts an issue, reads it back, and records the association in the
+ * session journal. Once linked, `lifecycle.ts` keeps that issue truthful: current questions and progress in one
+ * bounded description block, one evidence comment on accepted completion, then Done.
+ *
+ * Only an issue this session provably owns (its description carries `hoja-task:<session>:<task>`) is ever written to.
+ * A reused or shared issue is never moved, closed or commented on: the session's work becomes a sub-issue beneath it,
+ * so linking to someone else's umbrella can never rewrite it.
  *
  * Retry safety has two halves and both are required:
  *   1. Intent before write. The `reconciling` record (marker, project, expected parent) is journaled *before* the
@@ -12,7 +16,11 @@
  *      (server-side description filter) and validating the read-back. A marker miss is still ambiguous, not proof
  *      that nothing was created, so the task stays `reconciling` until a human resolves it by naming an issue.
  */
-import { HojaRequestError, type HojaClient, type IssueRef, type IssueView, type Resolved } from "../../.pi/lib/claw/hoja.ts";
+import { HojaProjectError, HojaRequestError, type HojaClient, type IssueRef, type IssueView, type Resolved } from "../../.pi/lib/claw/hoja.ts";
+import {
+	hasLinkMarker, lifecycleWriterOf, managedSection, syncTask, taskFacts,
+	type LifecycleState, type TaskFacts,
+} from "./lifecycle.ts";
 
 /** Custom session entry type holding one association/attempt record per TaskManage task. */
 export const HOJA_TASK_ENTRY = "hoja-task-link";
@@ -37,8 +45,13 @@ export type HojaTaskRecord = {
 	projectId?: string;
 	parentIdentifier?: string;
 	expectedParentIssueId?: string;
+	/** Set when the project a caller named could not be resolved and the repository's configured project was used
+	 *  instead, so the model learns the issue landed somewhere other than where it asked. */
+	substitutedFrom?: string;
 	marker?: string;
 	reason?: string;
+	/** Proof of what this session may write to, plus the outcome of its last lifecycle pass. */
+	lifecycle?: LifecycleState;
 };
 export type HojaRecords = Record<string, HojaTaskRecord>;
 
@@ -51,6 +64,11 @@ export interface PublishContext {
 	sessionKey: string;
 	/** Project used when a task names none (`HOJA_PROJECT`). */
 	project?: string;
+	/** Repository-declared project (`.pi/config/hoja.json`). Tried after an explicit `metadata.hojaProject` and before
+	 *  `project`, so an agent that never names a project — every delegated task — still registers its work. */
+	fallbackProject?: string;
+	/** Repository-declared assignee; `metadata.hojaAssignee`, else this, else the token's user. */
+	fallbackAssignee?: string;
 	writer?: HojaWriter;
 	records: HojaRecords;
 	now?: () => string;
@@ -80,6 +98,9 @@ export type PublishCandidate = {
 	parentTaskId?: string;
 	status: string;
 	op: any;
+	/** `sync` means "already linked, keep it current"; it never creates or re-adopts an issue. */
+	kind: "publish" | "sync";
+	facts: TaskFacts;
 };
 
 const isObject = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
@@ -91,12 +112,13 @@ export function taskMarker(sessionKey: string, taskId: string): string {
 	return `hoja-task:${session}:${task}`;
 }
 
-export function issueDescription(input: { description?: string; taskId: string; sessionKey: string; marker: string }): string {
+export function issueDescription(input: { description?: string; taskId: string; sessionKey: string; marker: string; managed?: string }): string {
 	const body = (input.description ?? "").trim();
 	return [
 		body,
 		`Tracked by TaskManage task #${input.taskId} in session ${input.sessionKey.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 8)}.`,
 		`Link marker: ${input.marker}`,
+		input.managed ?? "",
 	].filter(Boolean).join("\n\n");
 }
 
@@ -118,7 +140,7 @@ function metadataOf(op: any): Record<string, unknown> | undefined {
 	return isObject(op?.metadata) ? op.metadata as Record<string, unknown> : undefined;
 }
 
-function candidateFor(result: any, op: any, task: any): { candidate?: PublishCandidate; rejected?: string } {
+function candidateFor(result: any, op: any, task: any, records: HojaRecords): { candidate?: PublishCandidate; rejected?: string } {
 	const metadata = metadataOf(op);
 	// TaskManage deletes a metadata key when its value is null, so null means "not set", never an invalid value.
 	const flag = metadata?.hoja ?? undefined;
@@ -131,7 +153,23 @@ function candidateFor(result: any, op: any, task: any): { candidate?: PublishCan
 	// Any Hoja metadata on an update is a deliberate instruction (typically a corrected project after a skip), so it
 	// is the only way an update retries without re-creating the task.
 	const touchesHoja = !!metadata && ["hoja", "hojaIssue", "hojaProject", "hojaAssignee"].some((key) => metadata[key] != null);
-	if (result.op === "update" && !touchesHoja) return {};
+	if (result.op === "update" && !touchesHoja) {
+		// A plain update publishes nothing, but a task this chat already linked still owes its issue the current
+		// questions, progress and completion. Without this, TREBOL-577 stayed Todo after its task completed.
+		const existing = records[String(task.id)];
+		if (existing?.state === "linked" && existing.issueId) return {
+			candidate: {
+				taskId: String(task.id),
+				subject: String(task.subject ?? op.subject ?? "").trim(),
+				parentTaskId: typeof task.parent_id === "string" && task.parent_id ? task.parent_id : undefined,
+				status: String(task.status ?? "pending"),
+				op,
+				kind: "sync",
+				facts: taskFacts(task),
+			},
+		};
+		return {};
+	}
 	const parentTaskId = typeof task.parent_id === "string" && task.parent_id ? task.parent_id : undefined;
 	// Coarse by default: top-level work publishes; child steps stay local unless promoted explicitly.
 	// An update reaches this point only when it carries Hoja metadata, so an unmarked top-level update is deliberate.
@@ -145,6 +183,8 @@ function candidateFor(result: any, op: any, task: any): { candidate?: PublishCan
 			parentTaskId,
 			status: String(task.status ?? "pending"),
 			op,
+			kind: "publish",
+			facts: taskFacts(task),
 		},
 	};
 }
@@ -153,7 +193,7 @@ function candidateFor(result: any, op: any, task: any): { candidate?: PublishCan
  *
  * Only `create` and `update` results may publish. `get` and `list` return `data.task`/`data.tasks` too, and treating
  * a read as a new piece of work would publish issues for tasks the agent merely looked at. */
-export function publishCandidates(params: unknown, batch: unknown): { candidates: PublishCandidate[]; rejected: { taskId: string; reason: string }[] } {
+export function publishCandidates(params: unknown, batch: unknown, records: HojaRecords = {}): { candidates: PublishCandidate[]; rejected: { taskId: string; reason: string }[] } {
 	const results = isObject(batch) && Array.isArray(batch.results) ? batch.results : [];
 	const operations = isObject(params) && Array.isArray(params.operations) ? params.operations : [];
 	const byKey = new Map<string, any>();
@@ -166,7 +206,7 @@ export function publishCandidates(params: unknown, batch: unknown): { candidates
 		const task = (result.data as any).task;
 		if (!isObject(task) || typeof task.id !== "string" || !task.id) continue;
 		const op = byKey.get(String(result.key)) ?? { key: result.key, op: result.op, metadata: undefined };
-		const { candidate, rejected: reason } = candidateFor(result, op, task);
+		const { candidate, rejected: reason } = candidateFor(result, op, task, records);
 		if (reason) rejected.push({ taskId: task.id, reason });
 		else if (candidate) candidates.push(candidate);
 	}
@@ -176,10 +216,12 @@ export function publishCandidates(params: unknown, batch: unknown): { candidates
 const record = (taskId: string, state: HojaTaskState, at: string, extra: Partial<HojaTaskRecord> = {}): HojaTaskRecord =>
 	({ taskId, state, at, ...extra });
 
-function linkRecord(candidate: PublishCandidate, issue: IssueRef, project: string, at: string, parentIdentifier?: string): HojaTaskRecord {
+function linkRecord(candidate: PublishCandidate, issue: IssueRef, project: string, at: string, parentIdentifier?: string, substitutedFrom?: string, scope: "owned" | "adopted" = "owned"): HojaTaskRecord {
 	return record(candidate.taskId, "linked", at, {
 		issueId: issue.id, identifier: issue.identifier, project,
 		...(parentIdentifier ? { parentIdentifier } : {}),
+		...(substitutedFrom ? { substitutedFrom } : {}),
+		lifecycle: { scope },
 	});
 }
 
@@ -187,7 +229,8 @@ function linkRecord(candidate: PublishCandidate, issue: IssueRef, project: strin
  *  issue happens to contain, a different project, or a different parent all mean "not ours": the record stays
  *  `reconciling` and no second issue is created. */
 export function readbackMismatch(view: IssueView, expected: { marker: string; projectId?: string; parentIssueId?: string }): string | undefined {
-	if (!view.description.includes(expected.marker)) return "marker_missing";
+	// Exact `Link marker:` line, so task #1 can never adopt task #10's issue (`…:1` is a prefix of `…:10`).
+	if (!hasLinkMarker(view.description, expected.marker)) return "marker_missing";
 	if (expected.projectId && view.projectId !== expected.projectId) return "project_mismatch";
 	if ((expected.parentIssueId || undefined) !== (view.parentId || undefined)) return "parent_mismatch";
 	return undefined;
@@ -207,8 +250,19 @@ export async function publishBatch(params: unknown, batch: unknown, context: Pub
 	const active = () => context.isActive?.() !== false;
 	const stopped = (): PublishOutcome => ({ records: changed, applied, blocked, stopped: true });
 	const set = (next: HojaTaskRecord) => { applied[next.taskId] = next; changed.push(next); context.journal?.(next); };
+	// Lifecycle writes journal their own pre-write intent, so their result is committed without a second journal write.
+	const commit = (next: HojaTaskRecord) => { applied[next.taskId] = next; changed.push(next); };
 	const block = (previous: HojaTaskRecord) => { if (!blocked.some(entry => entry.taskId === previous.taskId)) blocked.push(previous); };
 	if (!active()) return stopped();
+	const live = lifecycleWriterOf(writer);
+	// One idempotent lifecycle pass over a linked issue. `stopped` means the chat went away mid-pass.
+	const sync = async (linked: HojaTaskRecord, facts: TaskFacts) => live
+		? syncTask({
+			writer: live, record: linked, facts, marker: taskMarker(context.sessionKey, facts.taskId),
+			sessionKey: context.sessionKey, project: linked.project ?? context.project,
+			active, journal: (entry) => context.journal?.(entry), at,
+		})
+		: undefined;
 
 	// 1. Resolve writes whose outcome is unknown before considering anything new. Only a validated read-back proves
 	//    the earlier write landed; a marker miss stays ambiguous, because absence in a filtered search is not proof
@@ -246,17 +300,35 @@ export async function publishBatch(params: unknown, batch: unknown, context: Pub
 		}));
 	}
 
-	const { candidates, rejected } = publishCandidates(params, batch);
+	const { candidates, rejected } = publishCandidates(params, batch, applied);
 	if (!active()) return stopped();
 	for (const entry of rejected) set(record(entry.taskId, "skipped", at(), { reason: entry.reason }));
 
 	for (const candidate of candidates) {
 		if (!active()) return stopped();
 		const previous = applied[candidate.taskId];
-		if (previous?.state === "linked") continue;
+		// 1b. An already-linked task keeps its issue current. This is the only path a plain update takes; it can
+		//     never create or adopt an issue.
+		if (candidate.kind === "sync") {
+			if (previous?.state !== "linked" || !previous.issueId) continue;
+			const synced = await sync(previous, candidate.facts);
+			if (synced?.stopped) return stopped();
+			// Only a pass that actually wrote something is reported; a sync with nothing to do must not look like a
+			// fresh link in the summary or the model-facing note.
+			if (synced && synced.record !== previous) commit(synced.record);
+			continue;
+		}
+		// Already linked: a later operation (including a metadata-bearing retry, the normal backfill of an issue whose
+		// lifecycle never ran) syncs the existing issue instead of creating another one.
+		if (previous?.state === "linked") {
+			const synced = await sync(previous, candidate.facts);
+			if (synced?.stopped) return stopped();
+			if (synced && synced.record !== previous) commit(synced.record);
+			continue;
+		}
 		const metadata = metadataOf(candidate.op) ?? {};
 
-		// 2. Adopt a named issue. Reuse is read-only: no state, assignee or comment is ever written.
+		// 2. Adopt a named issue. The issue itself is never written to: lifecycle sync goes to a session sub-issue.
 		if (metadata.hojaIssue != null) {
 			const wanted = String(metadata.hojaIssue).trim().toUpperCase();
 			if (!IDENTIFIER_PATTERN.test(wanted)) {
@@ -279,7 +351,16 @@ export async function publishBatch(params: unknown, batch: unknown, context: Pub
 				set(record(candidate.taskId, "failed", at(), { reason: "identifier_mismatch", identifier: wanted }));
 				continue;
 			}
-			set(record(candidate.taskId, "linked", at(), { issueId: hit.id, identifier: hit.identifier, project: typeof metadata.hojaProject === "string" ? metadata.hojaProject : undefined }));
+			// The linked record remembers that this issue belongs to someone else, so no later pass can write to it.
+			const adopted = record(candidate.taskId, "linked", at(), {
+				issueId: hit.id, identifier: hit.identifier,
+				project: typeof metadata.hojaProject === "string" ? metadata.hojaProject : undefined,
+				lifecycle: { scope: "adopted" },
+			});
+			set(adopted);
+			const syncedAdopted = await sync(adopted, candidate.facts);
+			if (syncedAdopted?.stopped) return stopped();
+			if (syncedAdopted) commit(syncedAdopted.record);
 			continue;
 		}
 		// An unconfirmed write is never repeated for the same task: creating again could duplicate the issue. The only
@@ -289,20 +370,41 @@ export async function publishBatch(params: unknown, batch: unknown, context: Pub
 			continue;
 		}
 
-		// 3. Create. Project and workflow state come from configuration/team data, never from a guess.
-		const project = typeof metadata.hojaProject === "string" && metadata.hojaProject.trim() ? metadata.hojaProject.trim() : context.project;
-		if (!project) {
+		// 3. Create. Every project name here was declared by someone — the agent for this task, the repository, or the
+		//    environment — and the server decides whether it exists. Names are never derived from the workspace path:
+		//    a directory called "trebol" is not a project, and publishing into a guess is worse than not publishing.
+		const named = typeof metadata.hojaProject === "string" && metadata.hojaProject.trim() ? metadata.hojaProject.trim() : undefined;
+		// The chat's own target first (a project the user picked, or the environment), then the repository default: an
+		// explicit per-chat choice must beat the checkout's declaration.
+		const projects = [...new Set([named, context.project, context.fallbackProject]
+			.map(value => value?.trim())
+			.filter((value): value is string => !!value))];
+		if (!projects.length) {
 			set(record(candidate.taskId, "skipped", at(), { reason: "no_project" }));
 			continue;
 		}
-		const assignee = typeof metadata.hojaAssignee === "string" && metadata.hojaAssignee.trim() ? metadata.hojaAssignee.trim() : "me";
-		let resolved: Resolved;
-		try {
-			resolved = await writer.resolve(project, assignee);
-		} catch {
-			set(record(candidate.taskId, "failed", at(), { reason: "project_unresolved", project }));
+		const assignee = typeof metadata.hojaAssignee === "string" && metadata.hojaAssignee.trim()
+			? metadata.hojaAssignee.trim()
+			: context.fallbackAssignee;
+		let resolved: Resolved | undefined;
+		for (const project of projects) {
+			try {
+				resolved = await writer.resolve(project, assignee);
+				break;
+			} catch (error) {
+				// Only an unresolvable *project* falls through to the next declared name. An assignee that is not a team
+				// member is a real configuration error and must not be hidden by publishing to another project.
+				if (!(error instanceof HojaProjectError)) break;
+				if (!active()) return stopped();
+			}
+		}
+		if (!resolved) {
+			set(record(candidate.taskId, "failed", at(), { reason: "project_unresolved", project: projects[0], ...(named && projects[1] ? { substitutedFrom: named } : {}) }));
 			continue;
 		}
+		// The agent named a project that does not exist and the repository's project was used: say so in the record and
+		// in the model-facing note, so a wrong name never passes silently.
+		const substitutedFrom = named && resolved.project.trim().toLowerCase() !== named.toLowerCase() ? named : undefined;
 		const state = candidate.status === "in_progress" ? DEFAULT_STATE_ACTIVE : DEFAULT_STATE_PENDING;
 		if (!resolved.states[state.toLowerCase()]) {
 			set(record(candidate.taskId, "skipped", at(), { reason: "state_unavailable", project: resolved.project }));
@@ -317,7 +419,12 @@ export async function publishBatch(params: unknown, batch: unknown, context: Pub
 		}
 		const parentIssueId = parent?.state === "linked" ? parent.issueId : undefined;
 		const marker = taskMarker(context.sessionKey, candidate.taskId);
-		const description = issueDescription({ description: candidate.description, taskId: candidate.taskId, sessionKey: context.sessionKey, marker });
+		// The managed block is part of the create: acceptance questions are visible from the first read, with no
+		// extra write and no separate issue per question.
+		const description = issueDescription({
+			description: candidate.description, taskId: candidate.taskId, sessionKey: context.sessionKey, marker,
+			managed: managedSection(candidate.facts),
+		});
 		// Durable intent before the request leaves the process. A crash here leaves `reconciling` with everything
 		// reconciliation needs (marker, project, expected parent), so the next run adopts instead of re-creating.
 		set(record(candidate.taskId, "reconciling", at(), {
@@ -361,7 +468,13 @@ export async function publishBatch(params: unknown, batch: unknown, context: Pub
 			}));
 			continue;
 		}
-		set(linkRecord(candidate, view, resolved.project, at(), view.parentIdentifier ?? parent?.identifier));
+		const linked = linkRecord(candidate, view, resolved.project, at(), view.parentIdentifier ?? parent?.identifier, substitutedFrom);
+		set(linked);
+		// First pass: completes the description from the authoritative task when it differs, and closes an issue whose
+		// task was already completed before it was linked.
+		const synced = await sync(linked, candidate.facts);
+		if (synced?.stopped) return stopped();
+		if (synced && synced.record !== linked) commit(synced.record);
 	}
 	return { records: changed, applied, blocked, stopped: false };
 }
@@ -377,10 +490,12 @@ function finalRecords(records: readonly HojaTaskRecord[]): HojaTaskRecord[] {
 export function publicationSummary(outcome: Pick<PublishOutcome, "records" | "blocked">): string | undefined {
 	const records = finalRecords(outcome.records);
 	const linked = records.filter(r => r.state === "linked" && r.identifier);
+	const closed = linked.filter(r => r.lifecycle?.closed);
 	const failed = records.filter(r => r.state === "failed" || r.state === "reconciling");
 	const skipped = records.filter(r => r.state === "skipped");
 	const parts: string[] = [];
 	if (linked.length) parts.push(`Hoja: ${linked.map(r => `${r.identifier} for task #${r.taskId}`).join(", ")}`);
+	if (closed.length) parts.push(`Hoja closed ${closed.map(r => r.identifier).join(", ")}`);
 	if (failed.length) parts.push(`Hoja not confirmed for task(s) ${failed.map(r => `#${r.taskId}`).join(", ")}`);
 	// Configuration problems would otherwise be silent: nothing is published and nobody learns why.
 	if (skipped.length) parts.push(`Hoja skipped task(s) ${skipped.map(r => `#${r.taskId} (${r.reason})`).join(", ")}`);
@@ -393,9 +508,9 @@ export function publicationSummary(outcome: Pick<PublishOutcome, "records" | "bl
  *  outcome from the tool result it just received: a UI notification is invisible to it. */
 const REASON_GUIDANCE: Record<string, string> = {
 	no_project:
-		'no Hoja project is configured, so nothing was created. Confirm the exact name with hoja_list (project filter) and set metadata {"hojaProject":"<project name>"} on a later TaskManage update of this task to publish it.',
+		'no Hoja project is configured for this repository, so nothing was created. Add .pi/config/hoja.json with {"project":"<exact name>"} so every chat in this checkout files there, or call hoja_project action=list, then ask_user_question where to file the work; offer to create a project if none matches. Use hoja_project action=select or action=create for the user-chosen destination, then retry this task with metadata.hojaProject. The work is not blocked: bounded discovery already ran and its note lists the existing projects.',
 	project_unresolved:
-		'the Hoja project could not be resolved (not found, hidden from this token, or its team/assignee did not resolve). Check the name with hoja_list; a later TaskManage batch retries.',
+		'no declared Hoja project could be resolved (not found, hidden from this token, or its team did not resolve). Fix .pi/config/hoja.json, or call hoja_project action=list (hoja_list only lists issues), then ask_user_question where to file the work and offer a new project. Select/create the user-chosen destination and retry this same task with metadata.hojaProject. The work is not blocked; discovery ran and reports the existing projects.',
 	state_unavailable:
 		"the project's team has no Todo/In Progress workflow state, so nothing was created. Publication is skipped for this team.",
 	invalid_hoja_metadata: 'metadata.hoja must be "publish" or "local".',
@@ -413,6 +528,36 @@ const UNCONFIRMED_REASONS = new Set(["write_in_flight", "ambiguous_write", "read
 const UNCONFIRMED =
 	"an earlier Hoja create for this task is unconfirmed, so no second issue was created. Find it with hoja_list/hoja_get and link it explicitly with metadata {\"hojaIssue\":\"TEAM-123\"}; publication stays blocked on this task until then.";
 
+/** Lifecycle failures the model must act on. A write it cannot confirm is never repeated automatically, so the
+ *  guidance always names the read that resolves it. */
+const LIFECYCLE_GUIDANCE: Record<string, string> = {
+	sync_read_failed: "the linked issue could not be read back, so its questions, progress and status were not synchronized. A later TaskManage batch retries.",
+	description_failed: "Hoja rejected the questions/progress update; the issue keeps its previous description. A later batch retries.",
+	description_ambiguous: "the questions/progress update was ambiguous; it is idempotent (the managed block is recomputed from the live description), so a later batch safely retries it.",
+	description_unverified: "the questions/progress write could not be proved by read-back (block missing, or human text changed), so nothing further was written. Check the issue with hoja_get.",
+	completion_unaccepted: "the task is marked completed but at least one acceptance question has no answer, so the issue was NOT closed. Answer the question with evidence on the task, then complete it again.",
+	comment_failed: "Hoja rejected the completion comment, so the issue was left open. A later batch retries it.",
+	comment_ambiguous: "the completion comment may or may not have been posted. The issue was left open and the comment is never repeated automatically; check it with hoja_get.",
+	comment_unverified: "the completion comment could not be read back after writing, so the issue was left open. Check it with hoja_get; the next batch reconciles by marker.",
+	comment_unconfirmed: "an earlier completion comment is unconfirmed. No second comment was posted and the issue stays open; read its comments with hoja_get before deciding.",
+	comment_pending: "an earlier completion comment was journaled but its outcome is unknown (the chat stopped mid-write). No second comment was posted; read the issue's comments with hoja_get before deciding.",
+	state_failed: "Hoja rejected the workflow transition; the issue keeps its current state. A later batch retries.",
+	state_ambiguous: "the workflow transition was ambiguous. Check the issue's state with hoja_get before retrying.",
+	state_unverified: "the workflow transition could not be verified by read-back. Check the issue's state with hoja_get.",
+	state_project_unknown: "the issue has no project to resolve workflow states from, so its state was left unchanged.",
+	state_unresolved: "the project or team workflow states could not be resolved, so the issue's state was left unchanged.",
+	state_target_mismatch: "the resolved project/team is not the issue's own team and project, so no state id was written.",
+	shared_unowned:
+		"this issue was not proven to belong to this task (its description lacks this session's marker), so nothing was written to it. Set metadata.hojaProject and let publication create a session issue, or link an issue this session owns.",
+	shared_target_mismatch: "the shared issue's team differs from the resolved project's team, so no session sub-issue was created and nothing was written.",
+	shared_project_unresolved: "a session sub-issue under the shared issue could not be created because the project did not resolve; the shared issue was left untouched.",
+	subissue_failed: "the session sub-issue under the shared issue was rejected, so no lifecycle write was made to either issue.",
+	subissue_ambiguous: "a session sub-issue under the shared issue may have been created but is unconfirmed; it is never repeated automatically. Find it with hoja_list and link it explicitly with metadata.hojaIssue.",
+	subissue_unverified: "the session sub-issue could not be read back, so the shared issue was left untouched and no lifecycle write continues from here.",
+	subissue_unconfirmed: "an earlier session sub-issue creation is unconfirmed; nothing was written to the shared issue and no second sub-issue was created. Find it with hoja_list and link it explicitly.",
+	subissue_pending: "an earlier session sub-issue creation was journaled but its outcome is unknown (the chat stopped mid-write), so it is treated as ambiguous and never retried. Find it with hoja_list; do not expect an automatic retry.",
+};
+
 /** The model-facing outcome of one publication attempt, appended to the TaskManage result.
  *
  * The extension cannot rely on a notification: only tool result content reaches the model, and a silent skip is how
@@ -423,6 +568,24 @@ export function publicationNote(outcome: Pick<PublishOutcome, "records" | "block
 	const lines: string[] = [];
 	if (linked.length)
 		lines.push(`Hoja publication: linked ${linked.map(r => `${r.identifier} (task #${r.taskId}${r.parentIdentifier ? `, child of ${r.parentIdentifier}` : ""})`).join(", ")}.`);
+	// The agent named a project that does not exist and the repository's project was used instead: say so, so a wrong
+	// name never passes as if it had been honoured.
+	for (const record of linked) {
+		if (record.substitutedFrom)
+			lines.push(`Hoja publication: ${record.identifier} was filed in project "${record.project}" because "${record.substitutedFrom}" does not exist; the repository project was used (.pi/config/hoja.json).`);
+	}
+	// Lifecycle outcomes are only visible here: the model cannot see a notification, and "linked" alone does not say
+	// whether the issue was kept current, commented on or closed.
+	for (const record of records) {
+		const reason = record.lifecycle?.error;
+		if (!reason) continue;
+		const where = record.identifier ? `${record.identifier} (task #${record.taskId})` : `task #${record.taskId}`;
+		lines.push(`Hoja lifecycle: ${where} — ${LIFECYCLE_GUIDANCE[reason] ?? `reason: ${reason}.`}`);
+	}
+	for (const record of linked) {
+		if (!record.lifecycle?.closed) continue;
+		lines.push(`Hoja lifecycle: ${record.identifier} is Done — questions, progress and the evidence comment are written.`);
+	}
 	for (const record of records) {
 		if (record.state === "linked") continue;
 		if (UNCONFIRMED_REASONS.has(record.reason ?? "")) {

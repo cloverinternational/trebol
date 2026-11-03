@@ -1,5 +1,5 @@
 import { describe as group, expect, it } from "vitest";
-import { HojaClient, HojaRequestError, type IssueView } from "../../lib/claw/hoja.ts";
+import { HojaClient, HojaProjectError, HojaRequestError, type IssueView } from "../../lib/claw/hoja.ts";
 import {
 	HOJA_TASK_ENTRY, publicationNote, publishBatch, replayHojaRecords, taskMarker,
 	type HojaRecords, type HojaTaskRecord, type HojaWriter,
@@ -11,7 +11,7 @@ const SESSION = "session-abc";
 type Created = IssueView & { parentId?: string };
 
 /** In-memory Hoja: the same five calls the real client exposes, recording every write. */
-function fakeHoja(options: { issues?: Created[]; ambiguousCreate?: "commit" | "lose" } = {}) {
+function fakeHoja(options: { issues?: Created[]; ambiguousCreate?: "commit" | "lose"; projects?: string[] } = {}) {
 	const issues = new Map<string, Created>();
 	for (const issue of options.issues ?? []) issues.set(issue.id, issue);
 	const calls = { resolve: [] as unknown[], create: [] as { title: string; description: string; state: string; parentId?: string }[], lookup: [] as string[], markers: [] as string[], stateWrites: 0 };
@@ -20,6 +20,9 @@ function fakeHoja(options: { issues?: Created[]; ambiguousCreate?: "commit" | "l
 	const writer: HojaWriter = {
 		async resolve(project: string) {
 			calls.resolve.push(project);
+			// A writer whose board only has the named projects, so a guessed name fails exactly like the real client.
+			if (options.projects && !options.projects.some(name => name.toLowerCase() === project.trim().toLowerCase()))
+				throw new HojaProjectError(`Hoja project "${project}" not found.`);
 			return {
 				teamId: "team", teamKey: "TREBOL", projectId: "proj", project, assigneeId: "me", assignee: "Luis",
 				states: { todo: "state-todo", "in progress": "state-active" },
@@ -340,7 +343,7 @@ group("retry and resume safety", () => {
 });
 
 group("extension wiring", () => {
-	function instance(options: { fake?: Harness; client?: any; entries?: any[]; project?: string } = {}) {
+	function instance(options: { fake?: Harness; client?: any; entries?: any[]; project?: string; config?: () => { project?: string; assignee?: string } } = {}) {
 		const entries = options.entries ?? [];
 		const handlers: Record<string, Function[]> = {};
 		let command: any;
@@ -353,7 +356,8 @@ group("extension wiring", () => {
 			on: (name: string, handler: Function) => { (handlers[name] ??= []).push(handler); },
 			appendEntry: (customType: string, data: unknown) => entries.push({ type: "custom", customType, data }),
 		};
-		registerHojaMode(pi, client as any, { project: options.project ?? "Trebol" });
+		// The default is an empty repository config: the checkout running these tests has its own .pi/config/hoja.json.
+		registerHojaMode(pi, client as any, { project: options.project ?? "Trebol", config: options.config ?? (() => ({})) });
 		const ctx = {
 			sessionManager: { getSessionId: () => SESSION, getBranch: () => entries },
 			ui: { notify: (message: string) => notices.push(message) },
@@ -370,7 +374,8 @@ group("extension wiring", () => {
 		const commandRun = async (args: string) => command.handler(args, ctx);
 		const journals = () => entries.filter(e => e.customType === HOJA_TASK_ENTRY).map(e => e.data);
 		const textOf = (patch: any) => (patch?.content ?? []).map((block: any) => block.text).join("\n");
-		return { entries, notices, hoja, start, shutdown, toolResult, toolResultNamed, rule, commandRun, journals, textOf };
+		const call = (toolName: string, input: unknown) => handlers.tool_call?.[0]?.({ toolName, input }, ctx);
+		return { entries, notices, hoja, start, shutdown, toolResult, toolResultNamed, rule, commandRun, journals, textOf, call };
 	}
 
 	it("publishes on a TaskManage result, journals intent then link, and appends the outcome for the model", async () => {
@@ -383,7 +388,7 @@ group("extension wiring", () => {
 		expect(inst.textOf(patch)).toContain("TREBOL-1");
 		expect(inst.rule()).toContain(HOJA_RULE);
 		// The pre-start check stays on the existing read tools; publication adds no schema scope.
-		expect(HOJA_RULE).toContain("run hoja_list with the project name");
+		expect(HOJA_RULE).toContain("check whether an issue already exists (hoja_list)");
 		expect(HOJA_RULE).toContain("read its outcome in the TaskManage result");
 	});
 
@@ -395,8 +400,32 @@ group("extension wiring", () => {
 		const text = inst.textOf(patch);
 		expect(text).toContain("no Hoja project");
 		expect(text).toContain("hojaProject");
-		expect(text).toContain("hoja_list");
+		expect(text).toContain("hoja_project");
+		expect(text).toContain("ask_user_question");
 		expect(inst.notices.at(-1)).toContain("no_project");
+		// Missing filing is recovery, not a gate: no tool is blocked, including read-only inspection and completion.
+		expect(inst.call("apply_patch", {})).toBeUndefined();
+		expect(inst.call("Bash", { command: "cat report.txt | grep launchd" })).toBeUndefined();
+		expect(inst.call("hoja_project", { action: "list" })).toBeUndefined();
+		expect(inst.call("ask_user_question", {})).toBeUndefined();
+		expect(inst.call("TaskManage", { operations: [{ op: "update", taskId: "1", status: "completed" }] })).toBeUndefined();
+		await inst.commandRun("off");
+		expect(inst.call("apply_patch", {})).toBeUndefined();
+	});
+
+	it("publishes an ordinary task that names no project, because the repository declares one", async () => {
+		// The reproduced failure: a delegated agent starts a root task and never mentions a project.
+		const hoja = fakeHoja({ projects: ["Hoja"] });
+		const inst = instance({ fake: hoja, project: "", config: () => ({ project: "Hoja" }) });
+		await inst.start();
+		const patch = await inst.toolResult(params({ key: "a", op: "create", subject: "Tern Git UI", questions: [] }), { batch: batch(created("a", task("1"))) });
+
+		expect(hoja.calls.resolve).toEqual(["Hoja"]);
+		expect(hoja.calls.create).toHaveLength(1);
+		expect(inst.journals().map((r: any) => [r.state, r.reason])).toEqual([["reconciling", "write_in_flight"], ["linked", undefined]]);
+		expect(inst.journals().at(-1)).toMatchObject({ project: "Hoja" });
+		expect(inst.textOf(patch)).toContain("TREBOL-1");
+		expect(inst.call("apply_patch", {})).toBeUndefined();
 	});
 
 	it("serializes batches so a concurrent call cannot publish the same task twice", async () => {
@@ -511,5 +540,72 @@ group("HojaClient write surface", () => {
 			team: { id: "t" }, project: { id: "p" }, assignee: { id: "a" }, parent: { id: "i1", identifier: "TREBOL-1" }, comments: { nodes: [] } } });
 		expect(await read.client.readIssue("i2")).toMatchObject({ parentId: "i1", parentIdentifier: "TREBOL-1" });
 		expect(read.calls[0].query).toContain("parent { id identifier }");
+	});
+});
+
+group("project resolution", () => {
+	const create = (metadata?: Record<string, unknown>) =>
+		params({ key: "a", op: "create", subject: "Ship board", ...(metadata ? { metadata } : {}) });
+
+	it("uses the repository project when the task names none", async () => {
+		const hoja = fakeHoja({ projects: ["Hoja"] });
+		const outcome = await publishBatch(create(), batch(created("a", task("1"))), {
+			enabled: true, sessionKey: SESSION, fallbackProject: "Hoja", writer: hoja.writer, records: {},
+		});
+
+		expect(hoja.calls.resolve).toEqual(["Hoja"]);
+		expect(outcome.applied["1"]).toMatchObject({ state: "linked", project: "Hoja" });
+		expect(outcome.applied["1"].substitutedFrom).toBeUndefined();
+		expect(publicationNote(outcome)).toContain("TREBOL-1");
+	});
+
+	it("falls back to the repository project when the agent guesses a workspace name", async () => {
+		// Reproduced live: a delegated agent named the checkout directory "trebol", which is not a project.
+		const hoja = fakeHoja({ projects: ["Hoja"] });
+		const outcome = await publishBatch(create({ hoja: "publish", hojaProject: "trebol" }), batch(created("a", task("1"))), {
+			enabled: true, sessionKey: SESSION, fallbackProject: "Hoja", writer: hoja.writer, records: {},
+		});
+
+		expect(hoja.calls.resolve).toEqual(["trebol", "Hoja"]);
+		expect(outcome.applied["1"]).toMatchObject({ state: "linked", project: "Hoja", substitutedFrom: "trebol" });
+		expect(publicationNote(outcome)).toContain('"trebol" does not exist');
+	});
+
+	it("honours an explicit project that exists without touching the repository default", async () => {
+		const hoja = fakeHoja({ projects: ["Hoja", "Clover Infrastructure"] });
+		const outcome = await publishBatch(create({ hojaProject: "Clover Infrastructure" }), batch(created("a", task("1"))), {
+			enabled: true, sessionKey: SESSION, fallbackProject: "Hoja", writer: hoja.writer, records: {},
+		});
+
+		expect(hoja.calls.resolve).toEqual(["Clover Infrastructure"]);
+		expect(outcome.applied["1"]).toMatchObject({ state: "linked", project: "Clover Infrastructure" });
+		expect(outcome.applied["1"].substitutedFrom).toBeUndefined();
+	});
+
+	it("does not reach for another project when the failure is not about the project", async () => {
+		const hoja = fakeHoja();
+		const rejecting: HojaWriter = {
+			...hoja.writer,
+			async resolve() { throw new Error('assignee "me" is not a member of team TREBOL'); },
+		};
+		const outcome = await publishBatch(create({ hojaProject: "Hoja" }), batch(created("a", task("1"))), {
+			enabled: true, sessionKey: SESSION, fallbackProject: "Hoja", writer: rejecting, records: {},
+		});
+
+		expect(statesOf(outcome.records)).toEqual([["failed", "project_unresolved"]]);
+		expect(hoja.calls.create).toHaveLength(0);
+	});
+
+	it("still skips honestly, and tells the model how to configure a project, when nothing declares one", async () => {
+		const hoja = fakeHoja();
+		const outcome = await publishBatch(create(), batch(created("a", task("1"))), {
+			enabled: true, sessionKey: SESSION, writer: hoja.writer, records: {},
+		});
+
+		expect(statesOf(outcome.records)).toEqual([["skipped", "no_project"]]);
+		expect(hoja.calls.resolve).toEqual([]);
+		const note = publicationNote(outcome) ?? "";
+		expect(note).toContain("no Hoja project is configured");
+		expect(note).toContain(".pi/config/hoja.json");
 	});
 });

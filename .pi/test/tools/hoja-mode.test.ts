@@ -250,7 +250,7 @@ describe("hoja-mode registration", () => {
 		};
 		const { client } = fakeClient({ issues: { nodes: [] } });
 		registerHojaMode(pi, client);
-		expect(registered).toEqual(["hoja_list", "hoja_get"]);
+		expect(registered).toEqual(["hoja_list", "hoja_get", "hoja_project"]);
 		expect(registered.some(n => /update|create|set|delete/.test(n))).toBe(false);
 		const out = hook!({ systemPrompt: "base" });
 		expect(out.systemPrompt.startsWith("base\n")).toBe(true);
