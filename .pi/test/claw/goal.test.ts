@@ -13,7 +13,7 @@ import { applyEvent, endRunGoal, isActive, tick, warnLongGoal, type DaemonDeps }
 import { ClawStore, TERMINAL, type ClawEvent, type Request, type Run } from "../../lib/claw/store.ts";
 import { recordFinish } from "../../lib/claw/child.ts";
 import { GOAL_LONG_MS, applyGoalEvent, deriveGoal, endGoal, goalRow, isGoalActive, startGoal } from "../../lib/claw/goal.ts";
-import { taskFile, type ClawHoja } from "../../lib/claw/spawn.ts";
+import { launchPrompt, taskFile, type ClawHoja } from "../../lib/claw/spawn.ts";
 import { runListing, statusSummary } from "../../lib/claw/orchestrator.ts";
 import { goalHost, registerSwarmGoal } from "../../lib/tools/swarm-goal.ts";
 import type { IssueView } from "../../lib/claw/hoja.ts";
@@ -198,7 +198,8 @@ describe("claw completion goal: spawn records it, launch never carries it", () =
 		// The launch prompt stays the plain instruction: a leading slash would be dispatched as a command, not a turn.
 		const launched = fakeTern().calls;
 		expect(launched).toEqual([]);
-		expect(`Read and execute your Claw task file in full: ${store.taskPath(run.id)}`).not.toMatch(/^\//);
+		expect(launchPrompt(run, store.taskPath(run.id))).not.toMatch(/^\//);
+		expect(launchPrompt(run, store.taskPath(run.id))).not.toContain(run.goal!.condition);
 	});
 
 	it("a task with no derivable goal launches anyway, records unavailable, and writes no spec", async () => {

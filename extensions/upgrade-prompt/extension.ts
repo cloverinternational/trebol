@@ -1,22 +1,10 @@
 /** /upgrade <prompt>: wraps the typed prompt in the upgrade template and submits it as a follow-up user turn. */
 
+import { buildUpgradePrompt } from "../../.pi/lib/claw/upgrade-prompt.ts";
 import { establishGoal, goalHostForSession } from "../../.pi/lib/tools/swarm-goal.ts";
-
-export const UPGRADE_TEMPLATE = `I want a deeper version of this task, not a bigger one. Before rewriting the prompt below:
-(1) Say what a top professional in this field would do here that the prompt does not ask for.
-(2) Name the rawest material they would start from instead of what has already been digested for me (primary sources, raw logs, data, code, original documents).
-(3) Name the specific methods and tools they would use.
-(4) Say what, other than you or me, would show the result is right (an independent check, test, measurement, or outside source).
-Then rewrite the prompt to ask for exactly that, keep its original scope, and run the rewritten prompt.`;
 
 /** A goal condition is persisted and judged whole, and the goal host rejects anything longer. */
 export const GOAL_CONDITION_LIMIT = 4000;
-
-export function buildUpgradePrompt(input: string): string | undefined {
-	const prompt = input.trim();
-	if (!prompt) return undefined;
-	return `${UPGRADE_TEMPLATE}\n\n<prompt>\n${prompt}\n</prompt>`;
-}
 
 export function registerUpgradePrompt(pi: any) {
 	pi.registerCommand?.("upgrade", {
