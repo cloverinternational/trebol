@@ -5,7 +5,8 @@ Code: `.pi/lib/claw/` (store, spawn lifecycle, daemon, Hoja client, Tern launche
 `extensions/claw/` (orchestrator tools + `/claw`; worker gate + `claw_finish` when `PI_CLAW_RUN` is set).
 Tests: `.pi/test/claw/claw.test.ts` (lifecycle, daemon, Hoja, Tern, worker) and
 `.pi/test/claw/clarification.test.ts` (worker-local questions), `.pi/test/claw/keep-open-resume.test.ts` (keep-open and
-resume, including the goal generation a resume restores).
+resume, including the goal generation a resume restores), `.pi/test/claw/liveness-reboot.test.ts` (identity-checked
+liveness, `claw_list`/`claw_resume` agreement, and a reboot that must not spend the relaunch budget).
 
 ## Commands and tools
 
@@ -162,8 +163,9 @@ Same run, same Hoja issue, same conversation: no second issue, no duplicate run,
 - **Works for** a dead worker (`lost`), a tab already closed (`tabClosedAt`), a completed run, and after a daemon
   restart: the whole resume is derived from the persisted run record, and it clears the stale `pid` before the tab opens
   so the supervisor cannot read the fresh tab as a corpse.
-- **Refused, with the next step in the message:** a run whose worker is alive (pid or live block — use `claw_send`),
-  an active run whose worker cannot be *proven* gone (an unreadable Tern snapshot is not evidence of death), a resume
+- **Refused, with the next step in the message:** a run whose worker is alive (identity-checked — use `claw_send`);
+  an active run whose worker cannot be *proven* gone (an unreadable start time or an unreadable Tern snapshot is not
+  evidence of death), a resume
   already in flight (`resumingAt` within 120 s), a missing `sessionFile` or missing file on disk (relaunch with
   `claw_spawn` and the same task), a run whose Hoja issue no longer exists, and a run whose resume budget is spent.
 - **Budgeted.** Every failed resume records one attempt in the same remedy ledger as every other bounded act
@@ -174,6 +176,34 @@ Same run, same Hoja issue, same conversation: no second issue, no duplicate run,
   `lastResumeAt` are on the record, and a Hoja comment says the tab was resumed.
 - **A failed resume changes nothing else.** The run goes back to its prior status with `resumeError` set; the close,
   the Hoja outbox and the goal are left exactly as they were.
+
+### Liveness after a host reboot (2026-11-03)
+
+`claw_list` and `claw_resume` used to answer "is this worker running?" from `process.kill(pid, 0)` — PID existence
+alone — and from different facts: the row had no Tern snapshot, the resume did. After a reboot that produced rows
+saying `resumable: true` while `claw_resume` refused the same run as "still running (pid 2915896)", and the runs whose
+session files were intact became unreachable. Three rules now hold (`.pi/lib/claw/process.ts`,
+`.pi/lib/claw/resume.ts` `runLiveness`):
+
+1. **Identity, not the number.** At `started` the worker writes its own kernel start token and argv hash with the event
+   (`recordStarted`); the daemon records them on the run (`run.worker`) and never re-reads them later, because by then
+   the process may be gone or the number reused. A live pid whose start token or argv differs is a *different* process:
+   the run is dead and resumable. When the host booted after the worker's `started` instant, the worker is provably gone
+   without any probe — that also covers records written before identity was stored, which keeps older runs resumable.
+2. **One verdict.** `runLiveness` is the only decision, and `resumeRefusal`, `claw_list` rows, `/claw status` and the
+   daemon's resume handler all call it with the same facts (alive, identity, boot instant, Tern snapshot). `claw_list`
+   now takes the Tern snapshot itself, so a pid-less run is judged by the same tab evidence the resume would use. When
+   they cannot agree the answer is `unknown`, and `unknown` is never "dead".
+3. **A reboot is a resume, not a relaunch.** The spawn request's expiry bounds the hand-off to a worker; it no longer
+   refuses recovery of a run that already had one, so a daemon that was down when the deadline passed spends no
+   relaunch budget. A lost worker discovered after the host booted is reported once (`run_lost` names the boot instant
+   and `claw_resume <id>`) and left resumable instead of being relaunched with the original prompt, which would start a
+   second, fresh conversation and overwrite the recorded session file. A worker that dies inside one boot is still
+   relaunched once, exactly as before (SLO S6).
+
+The near miss is unchanged: a live worker whose start token and argv match is refused with "still running (pid N)" so
+two workers never share one session, and a cancel only ever signals a process whose identity matched — a reused number
+after a reboot cannot receive the worker's `SIGTERM`.
 
 ### Interaction with the always-on goal
 

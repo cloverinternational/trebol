@@ -1,12 +1,13 @@
 /** Orchestrator-side client: every mutation is a request file the daemon answers. Reads go straight to the store. */
 import { existsSync } from "node:fs";
 import { ClawStore, readJson, TERMINAL, type DaemonLock, type Request, type RequestBody, type Response, type Run } from "./store.ts";
-import { LAUNCH_TIMEOUT_MS, pidAlive, startDaemonProcess } from "./daemon.ts";
+import { LAUNCH_TIMEOUT_MS, startDaemonProcess } from "./daemon.ts";
 import { compareFingerprint, computeClawFingerprint, needsReplacement, type ClawFingerprint } from "./fingerprint.ts";
 import { DAEMON_MAIN, refreshDaemon, type RefreshOptions, type RefreshOutcome } from "./lifecycle.ts";
 import { runIdFor } from "./spawn.ts";
 import { goalRow } from "./goal.ts";
 import { reachability } from "./resume.ts";
+import { bootedAtMs, pidAlive, readProcessIdentity, type ProcessIdentity } from "./process.ts";
 
 export { DAEMON_MAIN };
 export const REQUEST_TIMEOUT_MS = 90_000;
@@ -26,15 +27,23 @@ export type RequestOptions = {
 };
 
 export function daemonPid(store: ClawStore): number | undefined {
-	const pid = readJson<{ pid: number }>(store.lockPath)?.pid;
-	return pid !== undefined && pidAlive(pid) ? pid : undefined;
+	const lock = readJson<DaemonLock>(store.lockPath);
+	return lock && lockOwnerAlive(lock) ? lock.pid : undefined;
+}
+
+/** Is the process named by a daemon lock still that daemon? A lock from before start tokens were stamped can only be
+ *  trusted by pid, but a stamped one whose number was reused after a reboot is a stale lock, not a live singleton. */
+export function lockOwnerAlive(lock: DaemonLock, identity: (pid: number) => ProcessIdentity | undefined = readProcessIdentity): boolean {
+	if (!Number.isInteger(lock.pid) || lock.pid <= 1 || !pidAlive(lock.pid)) return false;
+	if (lock.processStart === undefined) return true;
+	return identity(lock.pid)?.start === lock.processStart;
 }
 
 /** The live daemon's pid when it is running the code on disk; otherwise starts one, unless the live one is stale — then
  *  it must be replaced first (`refreshDaemon`), and starting a second process would only fight for the singleton. */
 export function ensureDaemon(store: ClawStore, workspace: string, fingerprint?: ClawFingerprint): number | undefined {
 	const lock = readJson<DaemonLock>(store.lockPath);
-	if (lock?.pid !== undefined && pidAlive(lock.pid)) {
+	if (lock && lockOwnerAlive(lock)) {
 		const comparison = compareFingerprint(lock.fingerprint, (fingerprint ?? computeClawFingerprint())?.key);
 		return needsReplacement(comparison) ? undefined : lock.pid;
 	}
@@ -72,7 +81,7 @@ export async function request(store: ClawStore, workspace: string, body: Request
 	// queued. Every other case queues immediately: the request file is the caller's only durable handle, and a check
 	// that is not needed must not delay it.
 	const lock = readJson<DaemonLock>(store.lockPath);
-	const staleLive = lock?.pid !== undefined && Number.isInteger(lock.pid) && lock.pid > 1 && pidAlive(lock.pid)
+	const staleLive = lock !== undefined && lockOwnerAlive(lock)
 		&& needsReplacement(compareFingerprint(lock.fingerprint, computeClawFingerprint()?.key));
 	if (staleLive) {
 		const freshness = await (options.refresh ?? refreshDaemon)(store, workspace).catch((error) => ({
@@ -106,12 +115,12 @@ export async function request(store: ClawStore, workspace: string, body: Request
 	throw new Error(r.error ?? "claw daemon refused the request");
 }
 
-export function statusSummary(store: ClawStore, nowMs = Date.now()) {
+export function statusSummary(store: ClawStore, nowMs = Date.now(), options: { live?: Set<number> } = {}) {
 	const runs = store.listRuns();
-	const facts = { alive: pidAlive, sessionExists: existsSync, nowMs: Date.now() };
+	const facts = { alive: pidAlive, identity: readProcessIdentity, bootedAt: bootedAtMs(), live: options.live, sessionExists: existsSync, nowMs };
 	const lock = readJson<DaemonLock>(store.lockPath);
 	const comparison = compareFingerprint(lock?.fingerprint, computeClawFingerprint()?.key);
-	const live = lock?.pid !== undefined && pidAlive(lock.pid);
+	const live = lock !== undefined && lockOwnerAlive(lock);
 	const counts: Record<string, number> = {};
 	for (const r of runs) counts[r.status] = (counts[r.status] ?? 0) + 1;
 	return {
@@ -143,13 +152,26 @@ export function statusSummary(store: ClawStore, nowMs = Date.now()) {
  *  times out, counted from the current launch or resume attempt. `keepOpen` and `resumable` say how the run can still be
  *  reached: a kept run's tab is never auto-closed, and a resumable one reopens on its own session file with claw_resume.
  *  `reachability` is the reason when it cannot be resumed. */
-export function runListing(runs: Run[], nowMs: number, options: { alive?: (pid: number) => boolean; live?: Set<number> } = {}) {
-	const alive = options.alive ?? pidAlive;
+export function runListing(
+	runs: Run[],
+	nowMs: number,
+	options: { alive?: (pid: number) => boolean; identity?: (pid: number) => ProcessIdentity | undefined; bootedAt?: number; live?: Set<number> } = {},
+) {
+	// The same three inputs `claw_resume` uses (alive, identity, boot) plus the same Tern snapshot, so a row and the
+	// decision about that row can never disagree about whether a worker is running.
+	const facts = {
+		alive: options.alive ?? pidAlive,
+		identity: options.identity ?? readProcessIdentity,
+		bootedAt: options.bootedAt ?? bootedAtMs(),
+		live: options.live,
+		sessionExists: existsSync,
+		nowMs,
+	};
 	return runs.map((r) => {
 		const launchAge = Math.max(0, Math.round((nowMs - Date.parse(r.launchStartedAt ?? r.createdAt)) / 1000));
 		const ageSeconds = Math.max(0, Math.round((nowMs - Date.parse(r.createdAt)) / 1000));
 		const launchTimeoutInSeconds = r.status === "launching" ? Math.max(0, Math.round(LAUNCH_TIMEOUT_MS / 1000) - launchAge) : undefined;
-		const reach = reachability(r, { alive, live: options.live, sessionExists: existsSync, nowMs });
+		const reach = reachability(r, facts);
 		const waiting = r.ask?.state === "open" ? { questions: r.ask.questionIds, since: r.ask.openedAt, tab: r.block } : undefined;
 		return {
 			id: r.id, label: r.label, status: r.status, phase: r.phase, identifier: r.hoja?.identifier, ageSeconds, launchTimeoutInSeconds,

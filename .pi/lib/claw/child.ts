@@ -2,6 +2,7 @@
 import { randomBytes } from "node:crypto";
 import type { ClawStore, ClawEvent, Finish } from "./store.ts";
 import type { GoalEvent } from "./goal.ts";
+import { readProcessIdentity } from "./process.ts";
 
 /** Tools a worker may never call: it is a depth-1 worker and must not create workers, schedules or triggers. */
 export const WORKER_BLOCKED_TOOLS: readonly string[] = [
@@ -21,7 +22,14 @@ export function workerIdentity(env: Record<string, string | undefined> = process
 const eid = () => `evt-${Date.now().toString(36)}-${randomBytes(4).toString("hex")}`;
 
 export function recordStarted(store: ClawStore, runId: string, pid: number, sessionFile?: string): void {
-	store.appendEvent({ eid: eid(), type: "started", at: new Date().toISOString(), runId, pid, sessionFile });
+	// The worker records its own identity while it is certainly alive: the daemon may apply this event much later (it
+	// was down, or the host rebooted), and by then the number can belong to another process. See .pi/lib/claw/process.ts.
+	const identity = readProcessIdentity(pid);
+	store.appendEvent({
+		eid: eid(), type: "started", at: new Date().toISOString(), runId, pid, sessionFile,
+		...(identity?.start ? { pidStart: identity.start } : {}),
+		...(identity?.commandHash ? { pidCommandHash: identity.commandHash } : {}),
+	});
 }
 
 /** Text and stop reason of the last assistant message in an agent_end event. */

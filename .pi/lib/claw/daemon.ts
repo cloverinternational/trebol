@@ -13,7 +13,8 @@ import { validateFinish } from "./child.ts";
 import { ENDED_GOAL, GOAL_LONG_MS, applyGoalEvent, endGoal, goalRow, type ClawGoalEndReason } from "./goal.ts";
 import { compareFingerprint } from "./fingerprint.ts";
 import { CLOSE_ON_END, DEFAULT_SLO, closeRunTab, flushDigest, sloFrom, superviseRun, supervisionPending, type SloConfig } from "./supervisor.ts";
-import { resumeRun, resumeRefusal } from "./resume.ts";
+import { resumeRun, resumeRefusal, runLiveness } from "./resume.ts";
+import { pidAlive, readProcessIdentity, systemProcessProbe, type ProcessIdentity, type ProcessProbe } from "./process.ts";
 
 export const TICK_MS = 1000;
 export const IDLE_EXIT_MS = 120_000;
@@ -32,14 +33,34 @@ export const CODE_CHECK_MS = 10_000;
 export type DaemonDeps = LaunchDeps & {
 	now: () => Date;
 	alive: (pid: number) => boolean;
+	/** Identity of a pid (start token and argv). Defaults to the real process table; tests inject their own. */
+	identity?: (pid: number) => ProcessIdentity | undefined;
+	/** When this host booted (epoch ms). Defaults to the real boot; tests pin it to their clock. */
+	bootedAt?: number;
 	signal: (pid: number, sig: "SIGTERM") => void;
 	cancelVerifyMs?: number;
 	/** Supervisor SLO overrides; tests use small bounds, a workspace may tighten them in control.json `supervise`. */
 	slo?: Partial<SloConfig>;
 };
 
-export function pidAlive(pid: number): boolean {
-	try { process.kill(pid, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code === "EPERM"; }
+/** Re-exported from ./process.ts: liveness is identity-checked there, and every existing importer keeps working. */
+export { pidAlive };
+
+/** The facts one liveness decision needs, from the daemon's own configuration. `identity`/`bootedAt` are not defaulted
+ *  here: a caller that supplies neither gets the pid check it always had, and the production daemon wires both. */
+function livenessFacts(deps: DaemonDeps, live: Set<number> | undefined) {
+	return {
+		alive: deps.alive,
+		identity: deps.identity,
+		bootedAt: deps.bootedAt,
+		live,
+		nowMs: deps.now().getTime(),
+	};
+}
+
+/** Is this run's own worker process alive? Never "some process holds this pid": see `.pi/lib/claw/process.ts`. */
+function workerAlive(run: Run, deps: DaemonDeps, live?: Set<number>): boolean {
+	return run.pid !== undefined && runLiveness(run, livenessFacts(deps, live)).state === "alive";
 }
 
 /** A cancel is verified only when the worker process and its tab are both confirmed gone. Anything else is unverified,
@@ -47,8 +68,8 @@ export function pidAlive(pid: number): boolean {
 export async function verifyCancelled(run: Run, deps: DaemonDeps): Promise<boolean> {
 	if (run.pid !== undefined) {
 		const deadline = Date.now() + (deps.cancelVerifyMs ?? CANCEL_VERIFY_MS);
-		while (deps.alive(run.pid) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 200));
-		if (deps.alive(run.pid)) return false;
+		while (workerAlive(run, deps) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 200));
+		if (workerAlive(run, deps)) return false;
 	}
 	if (run.block !== undefined) {
 		const live = await liveBlocks(deps.tern).catch(() => undefined);
@@ -59,15 +80,26 @@ export async function verifyCancelled(run: Run, deps: DaemonDeps): Promise<boole
 
 /** Singleton claim. A live owner blocks; a dead owner's lock is reclaimed; the write is re-read to confirm ownership.
  *  `fingerprint` is the code key this daemon runs, stamped so any later reader can tell whether this process is stale. */
-export function claimLock(store: ClawStore, alive: (pid: number) => boolean = pidAlive, fingerprint?: string): boolean {
+export function claimLock(
+	store: ClawStore,
+	alive: (pid: number) => boolean = pidAlive,
+	fingerprint?: string,
+	identity: (pid: number) => ProcessIdentity | undefined = readProcessIdentity,
+): boolean {
 	for (let attempt = 0; attempt < 2; attempt++) {
 		try {
-			const lock: DaemonLock = { pid: process.pid, startedAt: new Date().toISOString(), heartbeat: Date.now() };
+			const processStart = identity(process.pid)?.start;
+			const lock: DaemonLock = { pid: process.pid, startedAt: new Date().toISOString(), heartbeat: Date.now(), ...(processStart ? { processStart } : {}) };
 			if (fingerprint) lock.fingerprint = fingerprint;
 			writeFileSync(store.lockPath, JSON.stringify(lock), { flag: "wx" });
 		} catch {
 			const current = readJson<DaemonLock>(store.lockPath);
-			if (current && current.pid !== process.pid && alive(current.pid)) return false;
+			// A stamped lock whose number now belongs to another process is stale, not a live singleton: after a reboot
+			// the pid can be reused, and refusing here would leave the daemon permanently unable to start.
+			const liveStart = current?.processStart !== undefined ? identity(current.pid)?.start : undefined;
+			const ownedByAnother = current !== undefined && current.pid !== process.pid && alive(current.pid)
+				&& (current.processStart === undefined || liveStart === undefined || liveStart === current.processStart);
+			if (ownedByAnother) return false;
 			rmSync(store.lockPath, { force: true });
 			continue;
 		}
@@ -81,6 +113,8 @@ export function heartbeat(store: ClawStore, fingerprint?: string): boolean {
 	const current = readJson<DaemonLock>(store.lockPath);
 	if (current?.pid !== process.pid) return false;
 	const lock: DaemonLock = { pid: process.pid, startedAt: current.startedAt, heartbeat: Date.now() };
+	// Keep the start token: dropping it would leave only the pid, which a reboot can hand to another process.
+	if (current.processStart) lock.processStart = current.processStart;
 	const code = current.fingerprint ?? fingerprint;
 	if (code) lock.fingerprint = code;
 	writeFileSync(store.lockPath, JSON.stringify(lock));
@@ -162,7 +196,8 @@ export async function handleRequest(req: Request, deps: DaemonDeps): Promise<unk
 			const run = store.getRun(req.runId);
 			if (!run) throw new Error(`no run ${req.runId}`);
 			if (TERMINAL.includes(run.status)) return summary(run);
-			if (run.pid && deps.alive(run.pid)) deps.signal(run.pid, "SIGTERM");
+			// Identity, not PID existence: a reused number after a reboot must never receive a SIGTERM meant for a worker.
+			if (run.pid && workerAlive(run, deps)) deps.signal(run.pid, "SIGTERM");
 			await closeRunTab(run, tern).catch((e) => { run.error = `tab close failed: ${(e as Error).message}`.slice(0, 300); });
 			const verified = await verifyCancelled(run, deps);
 			run.status = "cancelled";
@@ -227,7 +262,8 @@ export async function handleRequest(req: Request, deps: DaemonDeps): Promise<unk
 			if (!run.hoja) throw new Error(`run ${run.id} has no Hoja issue, so a resume would have nowhere to report; spawn a new run with claw_spawn`);
 			let live: Set<number> | undefined;
 			try { live = await liveBlocks(tern); } catch { live = undefined; }
-			const refusal = resumeRefusal(run, { alive: deps.alive, live, sessionExists: existsSync, nowMs: deps.now().getTime() });
+			// The same facts the listing uses: a resume must never reach a different verdict than the row it was called on.
+			const refusal = resumeRefusal(run, { ...livenessFacts(deps, live), sessionExists: existsSync });
 			if (refusal) throw new Error(refusal);
 			// The same snapshot goes in: a run whose tab is gone but whose pid is not recorded is resumable only because
 			// this set proves the block is missing, and the resume must reach the same verdict the refusal did.
@@ -315,7 +351,12 @@ function failStartup(run: Run, deps: DaemonDeps): void {
 	deps.store.appendInbox({ kind: "run_failed", runId: run.id, text: `${run.label} failed: ${run.error}`, key: `fail:${run.id}` });
 }
 
-export function applyEvent(run: Run, ev: ClawEvent, store: ClawStore): void {
+/** How long after its `started` event a worker's identity may still be read from the live process table. A daemon that
+ *  replays an older event (it was down, or it crashed before saving the offset) must not record the identity of
+ *  whatever process holds that number now: the boot check (see resume.ts) is the evidence it can trust instead. */
+export const IDENTITY_FRESH_MS = 120_000;
+
+export function applyEvent(run: Run, ev: ClawEvent, store: ClawStore, probe: ProcessProbe = systemProcessProbe): void {
 	if (run.seen.includes(ev.eid)) return;
 	run.seen = [...run.seen, ev.eid].slice(-500);
 	const key = `ev:${ev.eid}`;
@@ -337,8 +378,26 @@ export function applyEvent(run: Run, ev: ClawEvent, store: ClawStore): void {
 		return;
 	}
 	if (ev.type === "started") {
-		run.pid = ev.pid;
+		// A `started` event without a pid names no worker: nothing to record, and no identity to check later.
+		if (ev.pid === undefined) return;
+		const pid = ev.pid;
+		run.pid = pid;
 		run.sessionFile = ev.sessionFile;
+		// Record who this pid is, not only its number: a stale `pid` is what refused every resume after a host reboot.
+		// The worker writes its own identity with the event when it can; a daemon that applies it promptly may read it.
+		const fresh = Math.abs(probe.now() - Date.parse(ev.at)) <= IDENTITY_FRESH_MS;
+		const live = fresh ? probe.identity(pid) : undefined;
+		const start = ev.pidStart ?? live?.start;
+		const commandHash = ev.pidCommandHash ?? live?.commandHash;
+		run.worker = {
+			pid,
+			...(start ? { start } : {}),
+			...(live?.command ? { command: live.command } : {}),
+			...(commandHash ? { commandHash } : {}),
+			seenAt: ev.at,
+		};
+		// The request has been handed off: its dispatch deadline can no longer refuse anything about this run (S6).
+		run.deadline = undefined;
 		if (!TERMINAL.includes(run.status) && run.status !== "awaiting_user") run.status = "running";
 		// A started worker is working: its stall clock and stall report belong to the previous episode.
 		run.idleSince = undefined;
@@ -518,11 +577,13 @@ export async function reconcileRun(run: Run, deps: DaemonDeps, live: Set<number>
 	if (TERMINAL.includes(run.status)) endRunGoal(run, store, "terminal", deps.now().toISOString());
 
 	if (isActive(run)) {
-		let dead = false;
-		if (run.pid !== undefined) dead = !deps.alive(run.pid);
-		// The grace runs from this launch attempt, not from creation: a resumed run is judged on its new tab, not on a
-		// record written hours ago.
-		else if (run.block !== undefined && live && !live.has(run.block) && deps.now().getTime() - Date.parse(run.launchStartedAt ?? run.createdAt) > LOST_GRACE_MS) dead = true;
+		// Identity decides, not PID existence: after a reboot the number may belong to an unrelated process, and the
+		// boot instant proves a worker that reported before it is gone (see .pi/lib/claw/resume.ts runLiveness).
+		const liveness = runLiveness(run, livenessFacts(deps, live));
+		let dead = liveness.state === "dead";
+		// A run with no pid is only declared lost after the grace window: its tab call may still be opening. The grace
+		// runs from this launch attempt, not from creation, so a resumed run is judged on its new tab.
+		if (dead && run.pid === undefined && deps.now().getTime() - Date.parse(run.launchStartedAt ?? run.createdAt) <= LOST_GRACE_MS) dead = false;
 		if (dead) {
 			// A worker may have written its last event just before exiting; re-read before declaring it lost.
 			const again = store.readEvents(run.id, run.eventsOffset);
@@ -533,12 +594,22 @@ export async function reconcileRun(run: Run, deps: DaemonDeps, live: Set<number>
 			if (isActive(run) && neverStarted(run)) failStartup(run, deps);
 			else if (isActive(run)) {
 				run.status = "lost";
+				// Name the cause when the machine itself explains it: a reboot is not a worker crash, and the recorded
+				// session is what the human continues (claw_resume), so the notice says so instead of implying a dead end.
+				const lastSeen = run.worker?.seenAt ?? run.launchStartedAt ?? run.createdAt;
+				const rebooted = deps.bootedAt !== undefined && deps.bootedAt > Date.parse(lastSeen);
+				const why = rebooted
+					? `the host rebooted at ${new Date(deps.bootedAt!).toISOString()} after its worker last reported (${lastSeen})`
+					: "process or tab gone";
 				run.error = run.ask?.state === "open"
-					? "worker stopped without claw_finish while its own question modal was still open (process or tab gone); the decision was never answered"
-					: "worker stopped without claw_finish (process or tab gone)";
+					? `worker stopped without claw_finish while its own question modal was still open (${why}); the decision was never answered`
+					: `worker stopped without claw_finish (${why})`;
 				if (run.ask?.state === "open") run.ask = { ...run.ask, state: "unresolved", closedAt: deps.now().toISOString() };
 				queueComment(run, `Claw: ${run.error}. No completion is implied.`);
-				store.appendInbox({ kind: "run_lost", runId: run.id, text: `${run.label} lost: ${run.error}`, key: `lost:${run.id}` });
+				store.appendInbox({
+					kind: "run_lost", runId: run.id, key: `lost:${run.id}`,
+					text: `${run.label} lost: ${run.error}.${rebooted && run.sessionFile ? ` Its session is intact: claw_resume ${run.id} reopens it in a new worker tab.` : ""}`,
+				});
 			}
 		}
 	}
@@ -566,6 +637,7 @@ export async function reconcileRun(run: Run, deps: DaemonDeps, live: Set<number>
 	// the Tern snapshot even when it is undefined (a failed snapshot must not silently cancel the close).
 	await superviseRun(run, {
 		store, hoja: deps.hoja, tern: deps.tern, workspace: deps.workspace, now: () => deps.now(), alive: deps.alive,
+		bootedAt: deps.bootedAt,
 		slo: deps.slo ?? store.readControl().supervise,
 		noTabCarries: async (runId) => (await findRunBlock(deps.tern, runId)) === undefined,
 		relaunch: (r, reason) => relaunchLaunch(r, deps, reason),

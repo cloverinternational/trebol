@@ -112,7 +112,9 @@ export function registerSwarmBackgroundBash(inputPi: Pi): void {
   }));
   // Ctrl+B moves the foreground Bash call into the background. The editor
   // consumes any matched extension shortcut, so this key no longer reaches
-  // cursor-left while Pi is focused.
+  // cursor-left while Pi is focused. `tui.editor.cursorLeft` therefore keeps
+  // only `left` in ~/.pi/agent/keybindings.json: releasing the dead `ctrl+b`
+  // alias is what stops Pi reporting an extension/built-in shortcut conflict.
   pi.registerShortcut?.("ctrl+b", {
     description: "Move the running Bash command or agent wait to the background",
     handler: (ctx: any) => {

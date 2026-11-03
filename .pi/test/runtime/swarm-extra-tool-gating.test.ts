@@ -104,3 +104,25 @@ it("retains selected registered MCP tools without enabling deselected tools", ()
   expect(gateActiveTools(["mcp", "plexus_management_status", "unlisted_local"], environment, {})).toEqual(["mcp", "plexus_management_status"]);
   expect(gateActiveTools(["Bash"], environment, {}, ["Bash", "mcp"])).toBeUndefined();
 });
+
+describe("MCP discovery surfaces", () => {
+  // Pi's built-in MCP extension reaches servers with `exposure: "deferred"` through
+  // tool_search and activates it for those servers; `codemode` covers the rest.
+  // Gating tool_search out (while codemode stayed whitelisted) made every deferred
+  // server — the user-scope ones — invisible to the model in a live session.
+  const tern = { interactive: false, remoteAsk: true, home: "/nonexistent", env: {} };
+
+  it("keeps tool_search on the surface so deferred MCP servers stay reachable", () => {
+    expect(swarmSurfaceFor(tern).has("tool_search")).toBe(true);
+    expect(gateActiveTools(["tool_search"], tern, {})).toBeUndefined();
+  });
+
+  it("keeps tool_search symmetric with codemode, which was already whitelisted", () => {
+    expect(swarmSurfaceFor(tern).has("codemode")).toBe(true);
+    expect(gateActiveTools(["codemode", "tool_search"], tern, {})).toBeUndefined();
+  });
+
+  it("still hides a tool the harness does not know", () => {
+    expect(gateActiveTools(["tool_search", "unlisted_local"], tern, {})).toEqual(["tool_search"]);
+  });
+});

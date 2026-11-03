@@ -126,6 +126,23 @@ function pathSpans(path: string): Array<{ t: string; s?: string }> {
 	return slash < 0 ? [{ t: path }] : [{ t: path.slice(0, slash + 1), s: "dim" }, { t: path.slice(slash + 1) }];
 }
 
+// The size of the pending work at a glance. Distinct paths: a file staged and then edited again is two rows but one
+// file. Line counts are already on the rows, so this only sums them; binary and untracked rows carry none, and `known`
+// says whether a +/− pair is worth showing.
+function panelTotals(refs: readonly GitPanelRef[]): { files: number; add: number; del: number; known: boolean } {
+	let add = 0;
+	let del = 0;
+	let known = false;
+	for (const ref of refs) {
+		const stat = ref.stat;
+		if (!stat || stat.add === null || stat.del === null) continue;
+		known = true;
+		add += stat.add;
+		del += stat.del;
+	}
+	return { files: new Set(refs.map((ref) => ref.entry.path)).size, add, del, known };
+}
+
 /** Additions and deletions in a unified diff, ignoring file headers. */
 export function diffStat(text: string): { add: number; del: number } {
 	let add = 0;
@@ -603,6 +620,7 @@ function headView(repo: Extract<RepoStatus, { git: true }>, view: GitPanelState,
 /** The whole panel: OMP's bar, diff body and changes sheet, as one full Tern sheet. */
 export function gitPanelNodes(repo: Extract<RepoStatus, { git: true }>, view: GitPanelState, columns = 120): TspNode {
 	const refs = gitPanelRefs(repo);
+	const totals = panelTotals(refs);
 	const selected = view.selected ? refs.findIndex((ref) => ref.section === view.selected!.section && ref.entry.path === view.selected!.entry.path) : -1;
 	const selectedId = selected >= 0 ? `git-file-${selected}` : undefined;
 	const clean = repo.snapshot.entries.length === 0;
@@ -632,6 +650,8 @@ export function gitPanelNodes(repo: Extract<RepoStatus, { git: true }>, view: Gi
 										{ t: `${unstagedCount + stagedCount} change${unstagedCount + stagedCount === 1 ? "" : "s"}`, s: "strong" },
 										{ t: " on " },
 										{ t: repo.snapshot.detached ? `detached ${repo.snapshot.oid.slice(0, 7)}` : repo.snapshot.branch, s: "mono" },
+										...(totals.files ? [{ t: ` · ${totals.files} ${totals.files === 1 ? "file" : "files"}` }] : []),
+										...(totals.known ? [{ t: " · " }, { t: `+${totals.add}`, s: "success" }, { t: " " }, { t: `−${totals.del}`, s: "error" }] : []),
 									],
 								},
 							},

@@ -59,6 +59,6 @@ describe("hoja-mode persistence per chat", () => {
 		const inst = instance(s);
 		await inst.start("resume");
 		expect(await inst.rule()).toBe("");
-		expect(inst.tools).toEqual(["hoja_list", "hoja_get"]);
+		expect(inst.tools).toEqual(["hoja_list", "hoja_get", "hoja_project"]);
 	});
 });

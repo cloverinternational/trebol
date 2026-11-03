@@ -8,7 +8,7 @@ import { ensureDaemon, request, runListing, statusSummary } from "../../.pi/lib/
 import { pidAlive } from "../../.pi/lib/claw/daemon.ts";
 import { refreshDaemon } from "../../.pi/lib/claw/lifecycle.ts";
 import { deliveredInboxIds, pumpInbox } from "../../.pi/lib/claw/inbox.ts";
-import { nameClawTab, ownPaneBlock, ternExec, CLAW_TAB, type TernExec } from "../../.pi/lib/claw/launcher.ts";
+import { liveBlocks, nameClawTab, ownPaneBlock, ternExec, CLAW_TAB, type TernExec } from "../../.pi/lib/claw/launcher.ts";
 import { WORKER_BLOCKED_TOOLS, askFromCompleted, askFromStarted, recordAsk, recordFinish, recordGoal, recordResumed, recordSettled, recordStarted, validateFinish, workerIdentity } from "../../.pi/lib/claw/child.ts";
 import { clearGoal, establishGoal, goalHostForSession, type GoalHost } from "../../.pi/lib/tools/swarm-goal.ts";
 import { onAgentSettled } from "../../.pi/lib/runtime/agent-settled.ts";
@@ -323,7 +323,14 @@ export function registerOrchestrator(pi: any, options: OrchestratorOptions = {})
 			label: "Claw list",
 			description: "List Claw runs and triggers with status, Hoja identifiers, and daemon state. Read-only.",
 			parameters: { type: "object", additionalProperties: false, properties: {} },
-			execute: async () => text({ ...statusSummary(store), runs: runListing(store.listRuns(), Date.now()) }),
+			execute: async () => {
+				// The rows and claw_resume's accept/refuse decision must come from the SAME liveness verdict, so the listing
+				// takes the same Tern snapshot the daemon takes for a resume. A failed snapshot stays "unknown", never
+				// "nothing alive" (TREBOL-388: yesterday's listing said resumable while resume said still running).
+				const live = await liveBlocks(tern).catch(() => undefined);
+				const now = Date.now();
+				return text({ ...statusSummary(store, now, { live }), runs: runListing(store.listRuns(), now, { live }) });
+			},
 		},
 		{
 			name: "claw_read",

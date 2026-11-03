@@ -21,6 +21,8 @@ import { encodeTspBlob, projectTranscript, type TspMessage, type TspNode, type T
 import { composerNodes, modelDisplayName, type GitFacts } from "./composer-view.ts";
 import { artifactNodes, previewFile, type ArtifactPreview } from "./artifact-previews.ts";
 import { readMcpStatus, subscribeMcpStatus } from "../tools/mcp-status.ts";
+import { readMcpInventory } from "../tools/mcp-inventory.ts";
+import { mcpInventoryLines } from "./mcp-view.ts";
 import { STARTUP_CSS, gitDismissNode, readRepoStatus, startupBlob, startupNodes, trebolVersion, watchRepo, type RepoStatus } from "./startup-card.ts";
 import { commitIndex, discardPaths, readCommitDiff, readFileDiff, stagePaths, unstagePaths, type GitSection } from "./git-status.ts";
 import { PI_GIT_CSS, gitHelpNodes, gitPanelNodes, gitPanelRefs, type GitDiffMode, type GitPanelRef, type GitSidebarStyle } from "./git-panel.ts";
@@ -3016,6 +3018,17 @@ export class PiTernBridge {
 		if (route.kind === "dispatch" && route.immediate) {
 			// Extension commands run inside Pi before its busy check, so they are not queued behind a turn.
 			this.#draft = "";
+			// Pi's `/mcp` with no arguments opens a TUI component (`ctx.ui.custom`) that Tern
+			// cannot render: ext-ui disposes it and prints "needs Pi's terminal UI", so the
+			// command looked broken and told the user to run `pi -nt`. Answer it here from the
+			// published inventory instead. Subcommands (login/logout/reconnect) only use
+			// select/notify and keep Pi's own handler.
+			if (route.entry.name === "mcp" && prompt.trim().slice("mcp".length + 1).trim() === "") {
+				const inventory = readMcpInventory(this.#session.sessionManager?.getSessionId?.() as string | undefined);
+				this.#projector.add("system", mcpInventoryLines(inventory).join("\n"));
+				this.#render();
+				return Promise.resolve();
+			}
 			return this.#session.prompt(prompt).catch((error: unknown) => {
 				this.#projector.add("system", `error: ${error instanceof Error ? error.message : String(error)}`);
 				this.#render();

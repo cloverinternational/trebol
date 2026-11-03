@@ -81,6 +81,19 @@ describe("OMP composer port", () => {
 		expect(parseGitStatus("## HEAD (no branch)\n")?.branch).toBeUndefined();
 		expect(parseGitStatus("")).toBeUndefined();
 	});
+
+	it("counts an unmerged file once, and never as staged work", () => {
+		// Real output from a scratch repo mid-merge: one conflicted file, unmerged in both columns.
+		expect(parseGitStatus("## main\nUU both.txt\n")).toEqual({ branch: "main", staged: 0, unstaged: 1, untracked: 0 });
+		// The other unmerged pairs are conflicts too; only a clean "A " / "M " is staged work.
+		expect(parseGitStatus("## main\nAU added.txt\nDD gone.txt\n")).toEqual({ branch: "main", staged: 0, unstaged: 2, untracked: 0 });
+		// The bar must not show a green "+n" for a conflict: nothing there can be committed as-is.
+		const git = parseGitStatus("## main\nUU both.txt\n");
+		const seg = find(composerNodes({ draft: "", busy: false, effortKind: false, git }), "git")!;
+		expect(seg.p.spans.map((s: any) => s.t).join("")).toBe("main *1");
+		// One conflicted file keeps the branch dirty, so the seg stays warning-toned and is never dropped.
+		expect(seg.p.tone).toBe("warning");
+	});
 });
 
 describe("OMP composer fact parity", () => {

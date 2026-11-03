@@ -42,11 +42,26 @@ export type Origin = {
 	pane?: number;
 };
 export type SpawnInput = Origin & { task: string; project: string; assignee?: string; label?: string; cwd?: string; provider?: string; model?: string; keepOpen?: boolean; upgrade?: boolean };
+/** The worker process as it was when it reported `started`. A pid on its own cannot answer "is it still running":
+ *  after a host reboot the number can belong to an unrelated process. `start` is the kernel start token, `commandHash`
+ *  the argv, and `seenAt` the instant the worker itself reported being alive; see .pi/lib/claw/process.ts. */
+export type WorkerProcess = {
+	pid: number;
+	/** Kernel start token, unique per process on one boot. Absent when it could not be read at the time. */
+	start?: string;
+	/** The argv it ran, truncated, and its hash. */
+	command?: string;
+	commandHash?: string;
+	/** When the `started` event that recorded this identity was written. */
+	seenAt: string;
+};
 export type Run = Origin & {
 	id: string; label: string; task: string; cwd: string; status: RunStatus; phase: RunPhase;
 	createdAt: string; updatedAt: string; project: string; assignee?: string; provider?: string; model?: string;
 	requestedAssignee?: string; requestId?: string; fireKey?: string; trigger?: string;
 	tab?: number; block?: number; sessionFile?: string; pid?: number;
+	/** Identity of the worker that owns `pid`: liveness is decided by this, never by PID existence alone. */
+	worker?: WorkerProcess;
 	eventsOffset: number; settles: number; finalText?: string; finish?: Finish;
 	hoja?: HojaRef; attempts: number; outbox: OutboxOp[]; seen: string[]; error?: string;
 	/** The worker is running but its tab did not take the run label; shown by claw_read and status. */
@@ -124,6 +139,9 @@ export type Remedy = { attempts: number; lastAt: string; nextAt: string; done?: 
 export type ClawEvent = {
 	eid: string; type: "started" | "settled" | "ask" | "resumed" | "goal" | "finish"; at: string; runId: string;
 	pid?: number; sessionFile?: string; text?: string; stopReason?: string;
+	/** Written by the worker with its `started` event: its own kernel start token and argv hash. The daemon cannot
+	 *  re-read them later (the process may be gone, or the pid reused), so the worker records them itself. */
+	pidStart?: string; pidCommandHash?: string;
 	outcome?: Finish["outcome"]; summary?: string; evidence?: string[];
 	/** For type "ask": the worker's own modal opening or resolving. The worker owns this event; the daemon only applies it. */
 	ask?: { flowId: string; title?: string; questionIds: string[]; state: "opened" | "answered" | "cancelled" };
@@ -195,7 +213,11 @@ export type OrchestratorState = {
 };
 /** The daemon singleton lock. `fingerprint` is the code key the daemon was started from (see ./fingerprint.ts); it is
  *  absent on a lock written before that check existed, which is what makes an old supervisor recognizable. */
-export type DaemonLock = { pid: number; startedAt?: string; heartbeat?: number; fingerprint?: string };
+export type DaemonLock = {
+	pid: number; startedAt?: string; heartbeat?: number; fingerprint?: string;
+	/** The daemon's kernel start token, so a reused pid cannot make a dead daemon look like the live singleton. */
+	processStart?: string;
+};
 /** Request without its id/timestamp, distributed over the union so each kind keeps its fields. */
 export type RequestBody = Request extends infer R ? (R extends unknown ? Omit<R, "id" | "createdAt" | "expiresAt"> : never) : never;
 

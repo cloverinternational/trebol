@@ -21,6 +21,7 @@ import { preflightLaunch } from "./preflight.ts";
 import { recordAttempt, remedyKey } from "./remedy.ts";
 import { queueComment, tabNameFor, type LaunchDeps } from "./spawn.ts";
 import type { Run } from "./store.ts";
+import { bootedAfter, type ProcessIdentity } from "./process.ts";
 
 /** A resume whose tab call has not finished within this window is stale (the daemon died mid-resume) and may be retried. */
 export const RESUME_INFLIGHT_MS = 120_000;
@@ -33,6 +34,10 @@ export const RESUME_KEY = remedyKey("resume");
 export type ResumeFacts = {
 	/** Is this worker pid a live process? */
 	alive: (pid: number) => boolean;
+	/** The pid's identity (start token and argv). Absent means it cannot be read, never that the process is gone. */
+	identity?: (pid: number) => ProcessIdentity | undefined;
+	/** When this host booted (epoch ms). A worker that reported before the boot is provably gone, whatever its pid does now. */
+	bootedAt?: number;
 	/** Blocks Tern reports as live, when the caller has a snapshot. Undefined means "not known", never "dead". */
 	live?: Set<number>;
 	sessionExists: (path: string) => boolean;
@@ -41,6 +46,8 @@ export type ResumeFacts = {
 
 export type ResumeDeps = LaunchDeps & {
 	alive: (pid: number) => boolean;
+	identity?: (pid: number) => ProcessIdentity | undefined;
+	bootedAt?: number;
 	now: () => Date;
 	sessionExists?: (path: string) => boolean;
 	/** Tern's live blocks, when the caller already has a snapshot. Undefined means "not known", never "nothing alive". */
@@ -53,17 +60,46 @@ const fileExists = (path: string) => existsSync(path);
  *  gone first, because two processes on one session file would fork the same history. */
 const ACTIVE_STATUSES: readonly Run["status"][] = ["launching", "running", "idle", "awaiting_decision"];
 
-/** Is this run alive right now? A live pid settles it; a live block settles it too. Nothing else does. */
-function aliveNow(run: Run, facts: ResumeFacts): boolean {
-	if (run.pid !== undefined && facts.alive(run.pid)) return true;
-	return run.block !== undefined && facts.live !== undefined && facts.live.has(run.block);
-}
+/** One verdict about one run's worker: `alive`, `dead`, or `unknown` (which is never treated as dead). Both `claw_list`
+ *  and `claw_resume` must use this function — two liveness answers for one run is the defect behind TREBOL-388. */
+export type RunLiveness = { state: "alive" | "dead" | "unknown"; why: string };
 
-/** Can the worker be proven gone? A dead pid proves it; a block missing from a real Tern snapshot proves it. An active
- *  run with neither is unknown, and unknown is never treated as dead. */
-function provablyGone(run: Run, facts: ResumeFacts): boolean {
-	if (run.pid !== undefined) return !facts.alive(run.pid);
-	return run.block !== undefined && facts.live !== undefined && !facts.live.has(run.block);
+/** Is the worker that owns this run running right now?
+ *
+ *  A recorded pid is authoritative when identity can be checked: a different kernel start token, a different argv, or
+ *  a worker recorded on an earlier host boot all mean the number now belongs to somebody else (or to nobody). A live
+ *  Tern block is only evidence for a run that never recorded a pid, because a restored or recycled block says nothing
+ *  about the process that used to own it. */
+export function runLiveness(run: Run, facts: Omit<ResumeFacts, "sessionExists">): RunLiveness {
+	const pid = run.pid;
+	if (pid !== undefined) {
+		const worker = run.worker;
+		// Decisive and cheap: a worker that reported before this host booted cannot be running, whatever this pid is
+		// doing now. This is the reboot case, and it also covers records written before identity was stored.
+		const lastSeen = worker?.seenAt ?? run.lastResumeAt ?? run.launchStartedAt ?? run.createdAt;
+		if (bootedAfter(facts.bootedAt, lastSeen)) return { state: "dead", why: `the host rebooted at ${new Date(facts.bootedAt!).toISOString()} after pid ${pid} last reported (${lastSeen})` };
+		if (!facts.alive(pid)) return { state: "dead", why: `pid ${pid} is not running` };
+		// No identity probe in this caller: the pid and the boot check above are all the evidence there is, which is the
+		// behaviour every call site had before identity existed. Production always supplies one (daemon-main.ts).
+		if (!facts.identity) return { state: "alive", why: `pid ${pid} is running` };
+		// A run recorded before identity was stored: same boot, live pid, no start token to compare. Trust the pid (the
+		// boot check already ruled out the reboot case); inventing "dead" here would strand every older run.
+		if (!worker) return { state: "alive", why: `pid ${pid} is running (this run has no recorded start token; it predates process identity)` };
+		const current = facts.identity?.(pid);
+		if (current === undefined) return { state: "unknown", why: `pid ${pid} is alive but its start time and command cannot be read` };
+		if (worker.start !== undefined && current.start !== worker.start) {
+			return { state: "dead", why: `pid ${pid} was reused: the live process has start ${current.start}, the worker had ${worker.start}` };
+		}
+		if (worker.commandHash !== undefined && current.commandHash !== undefined && worker.commandHash !== current.commandHash) {
+			return { state: "dead", why: `pid ${pid} was reused: it is running another command (${(current.command ?? "").slice(0, 120)})` };
+		}
+		if (worker.start === undefined && worker.commandHash === undefined) return { state: "unknown", why: `run ${run.id} recorded no process identity for pid ${pid}` };
+		return { state: "alive", why: `pid ${pid} is this run's worker (start ${current.start})` };
+	}
+	if (run.block === undefined) return { state: "unknown", why: "no worker process and no worker tab is recorded" };
+	if (facts.live === undefined) return { state: "unknown", why: "the Tern snapshot is unavailable, so its tab cannot be checked" };
+	if (facts.live.has(run.block)) return { state: "alive", why: `tab block ${run.block} is open` };
+	return { state: "dead", why: `tab block ${run.block} is gone` };
 }
 
 /** Why this run cannot be resumed, or undefined when it can. Pure: no side effect, no throw, usable by a read-only
@@ -72,14 +108,16 @@ export function resumeRefusal(run: Run, facts: ResumeFacts): string | undefined 
 	if (run.resumingAt !== undefined && facts.nowMs - Date.parse(run.resumingAt) < RESUME_INFLIGHT_MS) {
 		return `a resume of ${run.id} is already in flight (started ${run.resumingAt.slice(11, 19)}Z); read claw_read ${run.id} instead of starting a second one`;
 	}
-	if (aliveNow(run, facts)) {
+	const liveness = runLiveness(run, facts);
+	if (liveness.state === "alive") {
 		const where = run.pid !== undefined ? `pid ${run.pid}` : `tab block ${run.block}`;
 		return `run ${run.id} is still running (${where}), so a resume would start a second worker on the same session; use claw_send ${run.id} "<message>" to continue it, or claw_close ${run.id} / claw_cancel ${run.id} first`;
 	}
 	// Not proven gone is not the same as gone. Refusing here is what keeps a resume from forking a live conversation when
 	// Tern cannot be asked (an unreadable snapshot used to be treated as "no live blocks").
-	if (ACTIVE_STATUSES.includes(run.status) && !provablyGone(run, facts)) {
-		return `run ${run.id} is ${run.status} and its worker cannot be proven gone${facts.live === undefined ? " (the Tern snapshot is unavailable)" : ""}, so a resume could start a second worker on the same session; close its tab with claw_close ${run.id}, or end the run with claw_cancel ${run.id}, then resume it`;
+	if (ACTIVE_STATUSES.includes(run.status) && liveness.state === "unknown") {
+		const why = run.pid === undefined && facts.live === undefined ? "the Tern snapshot is unavailable" : liveness.why;
+		return `run ${run.id} is ${run.status} and its worker cannot be proven gone (${why}), so a resume could start a second worker on the same session; close its tab with claw_close ${run.id}, or end the run with claw_cancel ${run.id}, then resume it`;
 	}
 	const remedy = run.remedies?.[RESUME_KEY];
 	if (remedy?.exhausted) {
@@ -117,6 +155,7 @@ function beginResume(run: Run, at: string): void {
 	// The dead worker's identity must not survive: the supervisor reads a stale pid as a corpse and would close the fresh
 	// tab, and the aliveness guard would refuse the very resume that just happened.
 	run.pid = undefined;
+	run.worker = undefined;
 	// A modal lived in the old process. Its answer can never arrive, so it must not be presented as still waiting.
 	if (run.ask?.state === "open") run.ask = { ...run.ask, state: "unresolved", closedAt: at };
 	run.resumingAt = at;
@@ -133,6 +172,7 @@ function failResume(run: Run, priorStatus: Run["status"], reason: string): void 
 	run.block = undefined;
 	run.tab = undefined;
 	run.pid = undefined;
+	run.worker = undefined;
 }
 
 /**
@@ -142,7 +182,8 @@ function failResume(run: Run, priorStatus: Run["status"], reason: string): void 
 export async function resumeRun(run: Run, deps: ResumeDeps): Promise<Run> {
 	const { store, hoja } = deps;
 	const sessionExists = deps.sessionExists ?? fileExists;
-	const refusal = resumeRefusal(run, { alive: deps.alive, live: deps.live, sessionExists, nowMs: deps.now().getTime() });
+	const facts = { alive: deps.alive, identity: deps.identity, bootedAt: deps.bootedAt, live: deps.live, nowMs: deps.now().getTime() };
+	const refusal = resumeRefusal(run, { ...facts, sessionExists });
 	if (refusal) throw new Error(refusal);
 	// The issue is this run's identity: continuing a run whose issue was deleted would report work nobody can see.
 	try {
