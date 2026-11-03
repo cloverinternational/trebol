@@ -41,9 +41,9 @@ function expectedRows(cwd) {
       if (y !== ".") rows.push(`unstaged|${path}|${y}`);
     } else if (t.startsWith("u ")) {
       const xy = t.split(" ")[1];
-      rows.push(`conflicts|${pathAfter(t, 10)}|${xy}`);
+      rows.push(`unstaged|${pathAfter(t, 10)}|${xy}`);
     } else if (t.startsWith("? ")) {
-      rows.push(`untracked|${t.slice(2)}|??`);
+      rows.push(`unstaged|${t.slice(2)}|??`);
     }
   }
   return rows.sort();
@@ -80,11 +80,16 @@ async function openCard(cwd) {
   };
   const click = (id, act, value) => bridge.handle({ verb: "e", body: { ev: "action", id, act, ...(value !== undefined ? { value } : {}) } });
   const key = (k) => bridge.handle({ verb: "e", body: { ev: "key", key: k } });
+  const pathMode = () => bridge.handle({ verb: "e", body: { ev: "select", id: "git-side-style", item: "path" } });
   const overlayFiles = (nodes) => [...nodes.keys()].filter((id) => /^git-file-\d+$/.test(id)).map((id) => {
-    const section = nodes.get(id).parent.replace(/^git-section-/, "");
-    return `${section}|${nodes.get(`${id}-path`).node.p.spans[0].t}|${nodes.get(`${id}-code`).node.p.spans[0].t}`;
+    const entry = nodes.get(id);
+    const section = entry.parent.replace(/^git-list-/, "");
+    const label = entry.node.p.label;
+    const code = label[0].t;
+    const path = label.slice(2).map((span) => span.t).join("");
+    return `${section}|${path}|${code}`;
   }).sort();
-  return { bridge, replay, waitFor, click, key, overlayFiles, dispose: () => { bridge.close(); session.dispose(); } };
+  return { bridge, replay, waitFor, click, key, pathMode, overlayFiles, dispose: () => { bridge.close(); session.dispose(); } };
 }
 
 const fixtures = {
@@ -125,15 +130,17 @@ try {
     await check(`${state}: status view lists exactly git's changed, staged, unstaged, untracked and conflicted files`, async () => {
       card.click("tern-startup-state", "git.open");
       assert.ok(await card.waitFor(() => card.replay().get("git-status")), "status overlay opened");
+      card.pathMode();
       const want = expectedRows(dir);
       const got = card.overlayFiles(card.replay());
       assert.deepEqual(got, want, `rows for ${state}`);
-      card.click("git-status", "git.close");
+      card.click("git-bar-close", "git.close");
       assert.ok(await card.waitFor(() => !card.replay().get("git-status")), "close action removes the overlay");
     });
     await check(`${state}: each file's click opens its diff`, async () => {
       card.click("tern-startup-state", "git.open");
       assert.ok(await card.waitFor(() => card.replay().get("git-status")));
+      card.pathMode();
       const rows = card.overlayFiles(card.replay());
       const nodes = card.replay();
       const ids = [...nodes.keys()].filter((id) => /^git-file-\d+$/.test(id));
@@ -144,9 +151,11 @@ try {
         assert.equal(diff.k, "diff");
         assert.ok(diff.p.text.length > 0, `non-empty diff for ${id}`);
         assert.ok(!diff.p.text.startsWith("Diff unavailable"), `git produced a diff for ${id}`);
-        card.click("git-back", "git.back");
+        card.key("escape");
         assert.ok(await card.waitFor(() => !card.replay().get("git-diff") && card.replay().get("git-status")), "back returns to the list");
       }
+      card.click("git-bar-close", "git.close");
+      assert.ok(await card.waitFor(() => !card.replay().get("git-status")), "close removes the overlay");
       assert.ok(rows.length === ids.length, "every listed file is clickable");
     });
     await check(`${state}: escape returns from a diff, then closes the overlay`, async () => {
@@ -183,8 +192,9 @@ try {
     assert.ok(await card.waitFor(() => card.replay().get("tern-startup-state")?.node.p.text === "1 changed", 8_000), "badge follows the index");
     card.click("tern-startup-state", "git.open");
     assert.ok(await card.waitFor(() => card.replay().get("git-status")));
+    card.pathMode();
     assert.deepEqual(card.overlayFiles(card.replay()), expectedRows(live));
-    card.click("git-status", "git.close");
+    card.click("git-bar-close", "git.close");
   });
   await check("reads never write .git/index or leave index.lock", async () => {
     const before = indexHash();
@@ -193,7 +203,8 @@ try {
       await card.waitFor(() => card.replay().get("git-status"));
       card.click("git-file-0", "git.file", "0");
       await card.waitFor(() => card.replay().get("git-diff"));
-      card.click("git-back", "git.back");
+      card.key("escape");
+      await card.waitFor(() => !card.replay().get("git-diff"));
       card.key("escape");
       await card.waitFor(() => !card.replay().get("git-status"));
     }

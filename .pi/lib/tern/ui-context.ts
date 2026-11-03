@@ -5,6 +5,11 @@ const CONTROL_RE = /[\x00-\x08\x0b-\x1f\x7f]/g;
 
 export const UI_LINE_LIMIT = 8;
 
+// Terminal escapes and control bytes removed, newlines kept: for multi-line text taken from a TUI component.
+export function stripTerminal(text: string): string {
+	return text.replace(ANSI_RE, "").replace(/\r\n?/g, "\n").replace(/[\x00-\x08\x0b-\x1f\x7f]/g, "");
+}
+
 // Strips terminal escapes and control bytes, then bounds each line to width with an ellipsis.
 export function sanitizeUiLines(lines: readonly string[], width: number, maxLines: number = UI_LINE_LIMIT): string[] {
 	const cols = Math.max(1, Math.floor(width));

@@ -1,7 +1,9 @@
 // Slash-command catalogue, autocomplete entries and routing for the Tern bridge. Only pi-tui's pure fuzzy filter is imported.
-// Only names Pi would dispatch are runnable. Anything else is refused here, so an unknown or unsupported
-// `/x` never reaches the model. Extension, template and skill names are read from the live session on
-// every submission (see sessionCommandSource), so reloads are picked up.
+// Runnable names are Pi's own (builtins it can run from here, extension commands, templates and skills) plus
+// BRIDGE_COMMANDS, which the bridge runs itself and which are offered only while no Pi command claims the
+// name — so a later Pi `/context` wins and nothing here shadows Pi. Anything else is refused, so an unknown
+// or unsupported `/x` never reaches the model. Extension, template and skill names are read from the live
+// session on every submission (see sessionCommandSource), so reloads are picked up.
 
 import { fuzzyFilter } from "@earendil-works/pi-tui";
 // BUILTIN_SLASH_COMMANDS is not exported from the pi-coding-agent 1.0.4 package root (its exports map
@@ -35,7 +37,14 @@ export const BUILTIN_COMMANDS: ReadonlyArray<{ name: string; description: string
 
 // Builtins the Tern frontend runs on the live session (bridge #runBuiltin). The rest need Pi's interactive
 // mode (terminal selectors, clipboard, gist, session switching) and stay unavailable here.
-export const TERN_BUILTINS: ReadonlySet<string> = new Set(["model", "thinking", "compact", "name", "export", "reload", "quit", "resume", "new"]);
+export const TERN_BUILTINS: ReadonlySet<string> = new Set(["model", "thinking", "compact", "name", "export", "reload", "quit", "resume", "new", "tree"]);
+
+// Commands with no Pi handler, run by the bridge itself (see routeSubmission's "bridge" route). Offered only
+// while nothing in Pi claims the name, so `pi` stays the source of truth for what a slash name means.
+export const BRIDGE_COMMANDS: ReadonlyArray<{ name: string; description: string; icon: string }> = [
+	// Opens the same context card as a click on the composer's context meter (context-panel.ts).
+	{ name: "context", description: "Show the context window: used, free, auto-compact room and the parts", icon: "gauge" },
+];
 
 // OMP's slash-command icon names (its builtin table; commands without one fall back to "action").
 // Tern resolves these OMP symbol names to its own icons.
@@ -45,7 +54,7 @@ const BUILTIN_ICONS: Readonly<Record<string, string>> = {
 	logout: "signOut", new: "plus", compact: "compress", resume: "history", quit: "power",
 };
 
-export type CommandKind = "builtin" | "extension" | "template" | "skill";
+export type CommandKind = "builtin" | "bridge" | "extension" | "template" | "skill";
 
 export interface CatalogEntry {
 	// Invocation name without the slash. Skills keep Pi's `skill:<name>` form.
@@ -187,6 +196,12 @@ export function autocompleteCommands(source: CommandSource): SlashCommandItem[] 
 	const builtinComplete = source.builtinCompletions?.() ?? {};
 	const builtinValues = source.builtinValues?.() ?? {};
 	const builtinNames = new Set(BUILTIN_COMMANDS.map((c) => c.name));
+	// Each live source is read once: the bridge's own commands are filtered against them.
+	const templates = source.promptTemplates();
+	const extensions = source.extensionCommands();
+	const skillsEnabled = source.skillCommandsEnabled?.() ?? true;
+	const skills = skillsEnabled ? source.skills() : [];
+	const bridge = bridgeCommandsFor(claimedNames({ templates, extensions, skills }));
 	return [
 		...BUILTIN_COMMANDS.map((c): SlashCommandItem => ({
 			name: c.name,
@@ -197,15 +212,16 @@ export function autocompleteCommands(source: CommandSource): SlashCommandItem[] 
 			// separately refuses terminal-only handlers with an explicit `pi -nt` notice.
 			...(builtinComplete[c.name] ? { complete: builtinComplete[c.name] } : {}),
 		})),
-		...source.promptTemplates().map((t): SlashCommandItem => ({ name: t.name, description: full(t.argumentHint, tagged(t.description, t.sourceInfo)), icon: "prompt" })),
-		...source.extensionCommands().filter((c) => !builtinNames.has(c.name ?? c.invocationName)).map((c): SlashCommandItem => ({
+		...bridge.map((c): SlashCommandItem => ({ name: c.name, description: c.description, icon: c.icon })),
+		...templates.map((t): SlashCommandItem => ({ name: t.name, description: full(t.argumentHint, tagged(t.description, t.sourceInfo)), icon: "prompt" })),
+		...extensions.filter((c) => !builtinNames.has(c.name ?? c.invocationName)).map((c): SlashCommandItem => ({
 			name: c.invocationName,
 			description: tagged(c.description, c.sourceInfo) || undefined,
 			icon: "extension",
 			...(c.getArgumentCompletions ? { complete: (prefix: string) => c.getArgumentCompletions!(prefix) } : {}),
 		})),
-		...(source.skillCommandsEnabled?.() ?? true
-			? source.skills().map((s): SlashCommandItem => ({ name: `skill:${s.name}`, description: tagged(s.description, s.sourceInfo) || undefined, icon: "skill" }))
+		...(skillsEnabled
+			? skills.map((s): SlashCommandItem => ({ name: `skill:${s.name}`, description: tagged(s.description, s.sourceInfo) || undefined, icon: "skill" }))
 			: []),
 	];
 }
@@ -229,20 +245,41 @@ export class CommandCatalog {
 }
 
 export function buildCatalog(source: CommandSource): CommandCatalog {
+	// Each live source is read once: the bridge's own commands are filtered against them.
+	const templates = source.promptTemplates();
+	const extensions = source.extensionCommands();
+	const skills = source.skills();
 	const entries: CatalogEntry[] = [
 		...BUILTIN_COMMANDS.map((c): CatalogEntry => ({ name: c.name, kind: "builtin", description: c.description, supported: TERN_BUILTINS.has(c.name) })),
-		...source.promptTemplates().map((t): CatalogEntry => ({ name: t.name, kind: "template", description: t.description ?? "", supported: true })),
+		...bridgeCommandsFor(claimedNames({ templates, extensions, skills })).map((c): CatalogEntry => ({ name: c.name, kind: "bridge", description: c.description, supported: true })),
+		...templates.map((t): CatalogEntry => ({ name: t.name, kind: "template", description: t.description ?? "", supported: true })),
 		// Pi skips extension commands that shadow a builtin in autocomplete; dispatch still refuses the clash.
-		...source.extensionCommands().map((c): CatalogEntry => ({ name: c.invocationName, kind: "extension", description: c.description ?? "", supported: true })),
-		...source.skills().map((s): CatalogEntry => ({ name: `skill:${s.name}`, kind: "skill", description: s.description ?? "", supported: true })),
+		...extensions.map((c): CatalogEntry => ({ name: c.invocationName, kind: "extension", description: c.description ?? "", supported: true })),
+		...skills.map((s): CatalogEntry => ({ name: `skill:${s.name}`, kind: "skill", description: s.description ?? "", supported: true })),
 	];
 	return new CommandCatalog(entries);
+}
+
+// Every name a Pi source already answers to. A bridge command is offered only outside this set, in both the
+// catalogue and the autocomplete list, so it never shadows a Pi command and never makes a name ambiguous.
+function claimedNames(live: { templates: ReadonlyArray<CommandInfo>; extensions: ReadonlyArray<ExtensionCommandInfo>; skills: ReadonlyArray<CommandInfo> }): ReadonlySet<string> {
+	return new Set<string>([
+		...BUILTIN_COMMANDS.map((c) => c.name),
+		...live.templates.map((t) => t.name),
+		...live.extensions.map((c) => c.invocationName),
+		...live.skills.map((s) => `skill:${s.name}`),
+	]);
+}
+
+export function bridgeCommandsFor(claimed: ReadonlySet<string>): ReadonlyArray<{ name: string; description: string; icon: string }> {
+	return BRIDGE_COMMANDS.filter((c) => !claimed.has(c.name));
 }
 
 export type SlashRoute =
 	| { kind: "plain" }
 	| { kind: "dispatch"; entry: CatalogEntry; immediate: boolean }
 	| { kind: "builtin"; name: string; args: string }
+	| { kind: "bridge"; name: string; args: string }
 	| { kind: "refuse"; reason: string };
 
 // Extension commands dispatch immediately, even while a turn streams (Pi runs them before its busy check).
@@ -258,6 +295,8 @@ export function routeSubmission(text: string, catalog: CommandCatalog, busy: boo
 	}
 	const [entry] = matches;
 	if (!entry.supported) return { kind: "refuse", reason: `${head} needs Pi's interactive terminal mode and is unavailable in Tern (run \`pi -nt\`)` };
+	// A bridge command is a local view, so it is safe mid-turn and never queues behind one.
+	if (entry.kind === "bridge") return { kind: "bridge", name: entry.name, args: trimmed.slice(head.length).trim() };
 	if (entry.kind === "builtin") return { kind: "builtin", name: entry.name, args: trimmed.slice(head.length).trim() };
 	if (entry.kind === "extension") return { kind: "dispatch", entry, immediate: true };
 	if (busy) return { kind: "refuse", reason: `busy: ${head} runs when the current turn finishes or is cancelled` };
