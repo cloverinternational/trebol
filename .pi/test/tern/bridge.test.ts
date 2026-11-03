@@ -244,9 +244,15 @@ describe("PiTernBridge", () => {
 		bridge.close();
 	});
 
-	it("submits typed text and queues a follow-up while busy", async () => {
+	it("plain Enter steers while busy; Alt+Enter remains a follow-up", async () => {
 		const out = capture();
 		const fake = fakeSession();
+		const modes: Array<string | undefined> = [];
+		const prompt = fake.session.prompt;
+		fake.session.prompt = (text, options) => {
+			modes.push(options?.streamingBehavior);
+			return prompt(text, options);
+		};
 		const bridge = new PiTernBridge(fake.session, { write: out.write, surfaceId: "pi", credits: CREDITS });
 		bridge.start();
 		const first = bridge.submit("  what is 2+2?  ");
@@ -259,8 +265,46 @@ describe("PiTernBridge", () => {
 		expect(frame).not.toContain("Follow-up queued");
 		expect(frame).toContain('"role":"omp.queue.item"');
 		expect(frame).toContain('"text":"second"');
+		expect(frame).toContain('"title":"Steering"');
+		const deferred = bridge.submitFollowUp("after yield");
+		expect(modes).toEqual([undefined, "steer", "followUp"]);
 		fake.finish();
-		await Promise.all([first, followUp]);
+		await Promise.all([first, followUp, deferred]);
+		bridge.close();
+	});
+
+	it("keeps input queued between attempt end and native settlement", async () => {
+		const fake = fakeSession();
+		let streaming = true;
+		Object.defineProperty(fake.session, "isStreaming", { get: () => streaming });
+		const modes: Array<string | undefined> = [];
+		fake.session.prompt = async (_text, options) => { modes.push(options?.streamingBehavior); };
+		const bridge = new PiTernBridge(fake.session, { write: capture().write, credits: CREDITS });
+		bridge.start();
+		fake.session.emit({ type: "agent_start" });
+		fake.session.emit({ type: "agent_end" });
+		expect(bridge.busy).toBe(true);
+		await bridge.submit("during settlement");
+		await bridge.submitFollowUp("after settlement");
+		expect(modes).toEqual(["steer", "followUp"]);
+		streaming = false;
+		fake.session.emit({ type: "agent_settled" });
+		expect(bridge.busy).toBe(false);
+		bridge.close();
+	});
+
+	it("removes rejected steering from the optimistic queue", async () => {
+		const fake = fakeSession();
+		const out = capture();
+		fake.session.prompt = async () => { throw new Error("submission refused"); };
+		const bridge = new PiTernBridge(fake.session, { write: out.write, credits: CREDITS });
+		bridge.start();
+		fake.session.emit({ type: "agent_start" });
+		await bridge.submit("not accepted");
+		expect(JSON.stringify(lastFrame(out.writes))).toContain("submission refused");
+		bridge.restoreQueuedMessages();
+		expect(bridge.draft).toBe("");
+		bridge.close();
 	});
 
 	it("draws Pi's queue from queue_update, drops it when empty, and Edit restores it", () => {

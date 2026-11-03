@@ -190,9 +190,10 @@ function commitsTable(repo: Extract<RepoStatus, { git: true }>): TspNode {
 
 // Undefined status means unavailable (no MCP state published); an empty list means none connected.
 function mcpNode(mcp: McpStatus | undefined): TspNode {
-	if (!mcp) return { id: "tern-startup-mcp", k: "text", p: { role: "pi.startup.mcp", text: "MCP status unavailable", tone: "muted" } };
-	if (mcp.connected.length === 0) return { id: "tern-startup-mcp", k: "text", p: { role: "pi.startup.mcp", text: "No MCP servers connected", tone: "muted" } };
-	return { id: "tern-startup-mcp", k: "text", p: { role: "pi.startup.mcp", title: "Initialized clients with no observed disconnect; HTTP status reflects the last connection observation, not continuous health checks.", spans: [{ t: "MCP connected", s: "dim" }, { t: "  " }, { t: mcp.connected.join(" · "), s: "accent" }] } };
+	const actions = { click: "mcp.open" };
+	if (!mcp) return { id: "tern-startup-mcp", k: "text", p: { role: "pi.startup.mcp", text: "MCP status unavailable", tone: "muted", actions } };
+	if (mcp.connected.length === 0) return { id: "tern-startup-mcp", k: "text", p: { role: "pi.startup.mcp", text: "No MCP servers connected", tone: "muted", actions } };
+	return { id: "tern-startup-mcp", k: "text", p: { role: "pi.startup.mcp", actions, title: "Open MCP control center. Last observed tool registration, not continuous connection health.", spans: [{ t: "MCP connected", s: "dim" }, { t: "  " }, { t: mcp.connected.join(" · "), s: "accent" }] } };
 }
 
 function infoNodes(repo: RepoStatus | undefined, mcp: McpStatus | undefined): TspNode[] {

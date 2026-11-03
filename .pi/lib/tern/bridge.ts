@@ -7,6 +7,8 @@
 import { onRunningWorkChange, runningWorkSnapshot, type RunningWorkItem } from "../ui/running-work-store.ts";
 import { detachRunningWork, hasRunningWorkDetach } from "../ui/running-work.ts";
 import { readSubagentConversationCached } from "../ui/running-work-view.ts";
+import { BackgroundPanel } from "./background-panel.ts";
+import { safeWorkText } from "./background-format.ts";
 import {
 	autocompleteCommands,
 	EMPTY_COMMAND_SOURCE,
@@ -21,8 +23,11 @@ import { encodeTspBlob, projectTranscript, type TspMessage, type TspNode, type T
 import { composerNodes, modelDisplayName, type GitFacts } from "./composer-view.ts";
 import { artifactNodes, previewFile, type ArtifactPreview } from "./artifact-previews.ts";
 import { readMcpStatus, subscribeMcpStatus } from "../tools/mcp-status.ts";
-import { readMcpInventory } from "../tools/mcp-inventory.ts";
-import { mcpInventoryLines } from "./mcp-view.ts";
+import type { McpToolDefinitionLike } from "../tools/mcp-inventory.ts";
+import { McpController } from "./mcp-controller.ts";
+import { readMcpHost } from "./mcp-host.ts";
+import { mcpPanelNodes } from "./mcp-panel.ts";
+import { filterWork, workCounts, workInspectorNodes, workToolbar, type WorkFilter } from "./work-inspector.ts";
 import { STARTUP_CSS, gitDismissNode, readRepoStatus, startupBlob, startupNodes, trebolVersion, watchRepo, type RepoStatus } from "./startup-card.ts";
 import { commitIndex, discardPaths, readCommitDiff, readFileDiff, stagePaths, unstagePaths, type GitSection } from "./git-status.ts";
 import { PI_GIT_CSS, gitHelpNodes, gitPanelNodes, gitPanelRefs, type GitDiffMode, type GitPanelRef, type GitSidebarStyle } from "./git-panel.ts";
@@ -63,6 +68,7 @@ export interface PiSessionLike {
 	subscribe(listener: (event: PiEventLike) => void): () => void;
 	prompt(text: string, options?: { streamingBehavior?: "steer" | "followUp"; images?: ImageContentLike[] }): Promise<void>;
 	clearQueue?(): { steering: string[]; followUp: string[] };
+	readonly isStreaming?: boolean;
 	abort(): Promise<void>;
 	dispose(): void;
 	readonly model?: unknown;
@@ -78,6 +84,9 @@ export interface PiSessionLike {
 	navigateTree?(targetId: string): Promise<{ cancelled: boolean; editorText?: string }>;
 	getUserMessagesForForking?(): Array<{ entryId: string; text: string }>;
 	getContextUsage?(): unknown;
+	/** Live Pi registry; MCP registrations can arrive after session_start. */
+	getAllTools?(): McpToolDefinitionLike[];
+	getActiveToolNames?(): string[];
 	/** The effective system prompt as one string; the `/context` card splits it (context-panel.ts). */
 	readonly systemPrompt?: unknown;
 	/** The live agent state: the prompt, the tool roster and the transcript the `/context` card measures. */
@@ -577,6 +586,19 @@ export class TranscriptProjector {
 		this.#groupViews.set(groupId, { ...this.#groupViews.get(groupId), minimized: false, view });
 	}
 
+	groupItems(id: string): Item[] {
+		const group = segmentTranscript(this.items).find((s) => s.kind === "tools" && groupId(s.items) === id);
+		return group?.kind === "tools" ? group.items : [];
+	}
+
+	revealStep(id: string): string | undefined {
+		const group = segmentTranscript(this.items).find((s) => s.kind === "tools" && s.items.some((i) => i.id === id));
+		if (!group || group.kind !== "tools") return undefined;
+		const key = groupId(group.items);
+		this.setGroupView(key, "all");
+		return key;
+	}
+
 	clearGroupViews(): void {
 		this.#groupViews.clear();
 	}
@@ -611,7 +633,7 @@ function groupId(items: readonly Item[]): string {
 // Three presentations per group. Opening a card is a request to see the work, so an opened group shows every
 // step (All steps) whether it is live or settled; the activity panel is an explicit choice that persists through
 // streamed updates. Minimize persists the same way.
-type DetailView = "activity" | "all";
+type DetailView = "activity" | "all" | "active" | "failed";
 interface GroupView { minimized?: boolean; view?: DetailView }
 
 interface GroupContext {
@@ -650,6 +672,9 @@ function toolGroupNode(items: Item[], ctx: GroupContext): TspNode[] {
 	const minimized = ctx.view?.minimized ?? (!live && !ctx.outputExpanded);
 	const steps = tools.length === 1 ? "1 step" : `${tools.length} steps`;
 	const badges = failureBadge(summary);
+	const counts = workCounts(tools);
+	if (counts.done) badges.push({ text: `${counts.done} completed`, tone: "success" });
+	if (counts.cancelled) badges.push({ text: `${counts.cancelled} cancelled`, tone: "muted" });
 	// The head says the turn's state and names its request; each step below carries its own verb and target.
 	const age = live ? liveAge(tools) : undefined;
 	const took = live ? undefined : summary.durationMs;
@@ -669,10 +694,13 @@ function toolGroupNode(items: Item[], ctx: GroupContext): TspNode[] {
 				...(badges.length > 0 ? { badges } : {}),
 				frame: "card", collapsible: true, collapsed: minimized, meta: [steps],
 			},
-			c: minimized ? workBody(id, items, ctx.currentTask, ctx.outputExpanded, "all", ctx.goal, true) : workBody(id, items, ctx.currentTask, ctx.outputExpanded, mode, ctx.goal, true),
+			c: workBody(id, items, ctx.currentTask, ctx.outputExpanded, mode, ctx.goal, true),
 		};
 		// Only a minimized live group needs the one-line tail; the activity panel already carries narration.
-		const tail: TspNode[] = minimized && ctx.tail ? [{ id: `${id}-tail`, k: "text", p: { role: "tern.work-tail", tone: "muted", wrap: "none", truncate: "end", text: ctx.tail } }] : [];
+		const current = tools.find((item) => item.status === "running" && !item.cancelled);
+		const currentHead = current ? stepHead(current.name ?? "tool", current.args) : undefined;
+		const tailText = ctx.tail || currentHead?.intent || currentHead?.target || "";
+		const tail: TspNode[] = minimized && tailText ? [{ id: `${id}-tail`, k: "text", p: { role: "tern.work-tail", tone: "muted", wrap: "none", truncate: "end", text: tailText } }] : [];
 		return [card, ...tail];
 	}
 	// Narration whose tool calls never started (the turn ended first) is just what the agent said.
@@ -688,7 +716,7 @@ function toolGroupNode(items: Item[], ctx: GroupContext): TspNode[] {
 			frame: "card", collapsible: true, collapsed: minimized,
 			meta: [steps],
 		},
-		c: workBody(id, items, undefined, ctx.outputExpanded, "all"),
+		c: workBody(id, items, undefined, ctx.outputExpanded, ctx.view?.view ?? "all"),
 	}];
 }
 
@@ -698,7 +726,14 @@ const textNode = (id: string, role: string, text: string, tone: string, extra: R
 // `tool` draws unframed inside the group card, so a turn reads as one card of steps rather than one card of rows.
 // The group's controls come first, so an opened card shows how to fold it again without scrolling past the steps.
 function workBody(groupId: string, items: readonly Item[], currentTask: CurrentTask | undefined, outputExpanded: boolean, mode: DetailView | "all", goal = "", live = false): TspNode[] {
-	return mode === "activity" ? activityBody(groupId, items, currentTask, outputExpanded, goal) : allStepsBody(groupId, items, currentTask, outputExpanded, mode === "all" && live, goal);
+	const tools = items.filter((i) => i.role === "tool");
+	const toolbar = workToolbar(groupId, tools, mode);
+	if (mode === "active" || mode === "failed") {
+		const filtered = filterWork(items, mode);
+		return [...controls(groupId, undefined), toolbar, ...(filtered.length ? filtered.map((i) => toolRow(i as Item, outputExpanded)) : [{ id: `${groupId}-filter-empty`, k: "empty", p: { title: mode === "active" ? "No active steps" : "No failed steps", description: "This view updates as work changes. Choose All to see the full timeline." } }])];
+	}
+	const body = mode === "activity" ? activityBody(groupId, items, currentTask, outputExpanded, goal) : allStepsBody(groupId, items, currentTask, outputExpanded, mode === "all" && live, goal);
+	return [...body.slice(0, 1), toolbar, ...body.slice(1)];
 }
 
 // A settled group has no activity panel, so it offers only Collapse work. Live groups always offer the mode
@@ -743,6 +778,7 @@ function controls(groupId: string, mode: DetailView | undefined): TspNode[] {
 	if (mode === "activity") chips.push(textNode(`${groupId}-all`, "tern.work-mode", ALL_STEPS_LABEL, "muted", { actions: { click: `work.all=${groupId}` } }));
 	if (mode === "all") chips.push(textNode(`${groupId}-activity`, "tern.work-mode", ACTIVITY_LABEL, "muted", { actions: { click: `work.activity=${groupId}` } }));
 	chips.push(textNode(`${groupId}-collapse`, "tern.work-collapse", "Collapse work", "muted", { actions: { click: `work.collapse=${groupId}` } }));
+	for (const chip of chips) { chip.k = "button"; chip.p = { ...chip.p, variant: "quiet", size: "sm" }; }
 	// One row, so the chips sit side by side on a single quiet line instead of stacking as two transcript lines.
 	return [{ id: `${groupId}-controls`, k: "row", p: { role: "tern.work-controls", gap: "sm", align: "center" }, c: chips }];
 }
@@ -1041,12 +1077,12 @@ function tailWindow(text: string, lines: number): string {
 const BACKGROUND_WORK_LABEL_CHARS = 80;
 const boundedChars = (value: string, limit: number) => { const chars = Array.from(value.replace(/\s+/g, " ").trim()); return chars.length > limit ? `${chars.slice(0, limit - 1).join("")}…` : chars.join(""); };
 /** Bash shows its command; a subagent shows its task. Full text stays in the row title. */
-const backgroundWorkLabel = (item: RunningWorkItem) => boundedChars(item.kind === "bash" ? item.detail : `${item.label} · ${item.detail}`, BACKGROUND_WORK_LABEL_CHARS);
+const backgroundWorkLabel = (item: RunningWorkItem) => boundedChars(safeWorkText((item.kind === "bash" ? item.detail : `${item.label} · ${item.detail}`).slice(0, 1000)), BACKGROUND_WORK_LABEL_CHARS);
 /** Latest non-empty output line for bash, read without changing the process (readOutput only drains buffers). */
 function backgroundWorkTitle(item: RunningWorkItem): string {
 	let latest = "";
 	try { latest = (item.readOutput?.() ?? item.output ?? "").split("\n").filter((line) => line.trim()).at(-1) ?? ""; } catch { latest = ""; }
-	return [item.label, item.detail, latest ? `last output: ${boundedChars(latest, 120)}` : ""].filter(Boolean).join("\n");
+	return [safeWorkText(item.label), safeWorkText(item.detail.slice(0, 1000)), latest ? `last output: ${boundedChars(safeWorkText(latest.slice(-1000)), 120)}` : ""].filter(Boolean).join("\n");
 }
 const BACKGROUND_OUTPUT_LINES = 200;
 const BACKGROUND_OUTPUT_STEPS = 8;
@@ -1100,6 +1136,9 @@ export class PiTernBridge {
 	#repoWatch: (() => void) | undefined;
 	#repoWatchKey = "";
 	#mcpUnsubscribe: (() => void) | undefined;
+	readonly #mcpManager: McpController;
+	#stepInspector?: { group: string; selected?: string; filter: WorkFilter; search: DraftEditor };
+	#workReveal?: string;
 	#gitView: { mode: "list" } | { mode: "diff"; ref: GitPanelRef; text: string } | undefined;
 	// Bumped on every Git view navigation, session change and close; a diff read lands only if it is still the latest.
 	#gitRequest = 0;
@@ -1123,6 +1162,7 @@ export class PiTernBridge {
 	#contextStyled = false;
 	// Background item whose output sheet is open, and the timer that keeps its output fresh.
 	#workViewId: string | undefined;
+	#backgroundPanel = new BackgroundPanel();
 	#workViewTimer: ReturnType<typeof setInterval> | undefined;
 	readonly #onClose?: () => void;
 	readonly #onEventTap?: (event: PiEventLike) => void;
@@ -1184,6 +1224,18 @@ export class PiTernBridge {
 
 	constructor(session: PiSessionLike, options: BridgeOptions) {
 		this.#session = session;
+		this.#mcpManager = new McpController({
+			host: () => readMcpHost(String(this.#session.sessionManager?.getSessionId?.() ?? "")),
+			snapshot: () => ({ tools: this.#session.getAllTools?.() ?? [], active: this.#session.getActiveToolNames?.() ?? [], connected: readMcpStatus(this.#session.sessionManager?.getSessionId?.() as string | undefined)?.connected }),
+			reload: async () => {
+				if (this.#busy) throw new Error("Wait for the current turn before reloading");
+				if (!this.#reload) throw new Error("No reload handler bound");
+				const draft = this.#draft;
+				this.#mcpManager.close();
+				try { await this.submit("/reload"); }
+				finally { if (!this.#closed) this.setDraft(draft); }
+			},
+		}, () => this.#render());
 		this.#write = options.write;
 		this.#clipboard = options.clipboard ?? {
 			...createClipboard({ platform: process.platform, env: process.env, native: getNativeClipboard }),
@@ -1268,6 +1320,9 @@ export class PiTernBridge {
 
 	// Pi replaces the session on resume and similar switches; the bridge follows the replacement.
 	rebind(session: PiSessionLike): void {
+		if (this.#workViewId !== undefined) this.#closeWorkView();
+		this.#stepInspector = undefined;
+		if (this.#mcpManager.open) this.#mcpManager.close();
 		this.#unsubscribe?.();
 		this.#session = session;
 		this.#unsubscribe = session.subscribe((event) => this.#onEvent(event));
@@ -1318,6 +1373,8 @@ export class PiTernBridge {
 		if (id === this.#sessionId) return;
 		this.#sessionId = id;
 		this.#gitRequest++;
+		if (this.#workViewId !== undefined) this.#closeWorkView();
+		if (this.#mcpManager.open) this.#mcpManager.close();
 	}
 
 	// Sends picture blobs before re-rendering, so no frame references a blob Tern has not received.
@@ -1363,7 +1420,8 @@ export class PiTernBridge {
 			this.#turnStartedAt = Date.now();
 		}
 		if (event.type === "agent_settled" || event.type === "agent_end") {
-			this.#busy = false;
+			// agent_end ends an attempt, not the session's retry/compaction/settlement work.
+			this.#busy = event.type === "agent_settled" ? false : (this.#session.isStreaming ?? false);
 			this.#refreshGit();
 		}
 		if (event.type === "model_select") {
@@ -1413,6 +1471,8 @@ export class PiTernBridge {
 			git: this.#git,
 			cost: costOf(this.#session),
 			backgroundable,
+			// A phone-width bar gives Send a real touch target and keeps secondary facts from crowding it.
+			compact: this.#columns < 56,
 			...(this.#attachments.length ? { chips: attachmentChips(this.#attachments) } : {}),
 		}, [...(this.#editing ? [editingBanner(this.#editing)] : []), ...this.#taskTop()]), ...this.#ui.widgetNodes("belowEditor")];
 	}
@@ -1462,12 +1522,12 @@ export class PiTernBridge {
 
 	// The status overlay: a list of changed files, then one file's diff. Clicks carry indexes into the list last rendered.
 	#openWorkView(id: string): void {
-		if (!runningWorkSnapshot().some((item) => item.id === id)) return;
+		if (id !== "all" && !runningWorkSnapshot().some((item) => item.id === id)) return;
 		this.#workViewId = id;
+		this.#backgroundPanel.select(id === "all" ? undefined : id);
 		clearInterval(this.#workViewTimer);
 		this.#workViewTimer = setInterval(() => {
-			const item = runningWorkSnapshot().find((entry) => entry.id === this.#workViewId);
-			if (item && backgroundWorkLive(item)) this.#render();
+			if (this.#backgroundPanel.follow) this.#render();
 		}, BACKGROUND_OUTPUT_REFRESH_MS);
 		this.#workViewTimer.unref?.();
 		this.#render();
@@ -1477,6 +1537,7 @@ export class PiTernBridge {
 		clearInterval(this.#workViewTimer);
 		this.#workViewTimer = undefined;
 		this.#workViewId = undefined;
+		this.#backgroundPanel = new BackgroundPanel();
 		this.#render();
 	}
 
@@ -1484,8 +1545,11 @@ export class PiTernBridge {
 	#stopWork(id: string): void {
 		const item = runningWorkSnapshot().find((entry) => entry.id === id);
 		if (!item || !backgroundWorkLive(item) || !item.stop) return;
+		if (this.#backgroundPanel.stopping.has(id)) return;
+		this.#backgroundPanel.stopping.add(id);
 		try { item.stop(); } catch (error) {
-			this.#projector.add("system", `Could not stop ${item.label}: ${error instanceof Error ? error.message : String(error)}`);
+			this.#backgroundPanel.stopping.delete(id);
+			this.#backgroundPanel.stopError = "Could not request stop. The work may still be running; retry or inspect its runtime status.";
 		}
 		this.#render();
 	}
@@ -1791,7 +1855,12 @@ export class PiTernBridge {
 	// The slash autocomplete is OMP's caret-anchored list; keys stay
 	// in the editor and the bridge routes ↑/↓, Tab, Enter and Esc to it.
 	#layer(): TspNode[] {
-		if (this.#workViewId !== undefined) return backgroundWorkOutputNodes(runningWorkSnapshot().find((item) => item.id === this.#workViewId));
+		if (this.#stepInspector) {
+			const v = this.#stepInspector;
+			return workInspectorNodes(v.group, this.#projector.groupItems(v.group), v.selected, v.search.text, v.search.cursor, v.filter, this.#columns);
+		}
+		if (this.#mcpManager.open) return [...mcpPanelNodes(this.#mcpManager, this.#columns), ...(this.#ui.active ? this.#ui.nodes() : [])];
+		if (this.#workViewId !== undefined) return this.#backgroundPanel.nodes(this.#backgroundItems(), this.#columns);
 		if (this.#contextView) return this.#contextNodes();
 		if (this.#gitView && this.#repo?.git) {
 			// The dismiss layer sits under the card, so a click outside the card closes the view.
@@ -1977,7 +2046,7 @@ export class PiTernBridge {
 	// turn's work line in the transcript, so they appear here only once moved to the background.
 	#backgroundWork(now = Date.now()): TspNode[] {
 		const live = runningWorkSnapshot().filter((item) => (item.status === "queued" || item.status === "running") && item.foreground !== true);
-		if (!live.length) return [];
+		if (!live.length) return this.#backgroundItems().length ? [{ id: "background-recent", k: "button", p: { text: "Recent background work", variant: "quiet", size: "sm", actions: { click: "bg.open=all" } } }] : [];
 		// Clicking a row opens its output sheet. The x stops work that still runs; it is a sibling of the
 		// clickable part, never nested in it, so one click runs exactly one action.
 		const stopNode = (item: RunningWorkItem): TspNode[] => item.stop
@@ -1990,9 +2059,9 @@ export class PiTernBridge {
 				id: `bg-work-${item.id}`, k: "agent",
 				p: {
 					role: "pi.background.agent",
-					name: boundedChars(item.label, BACKGROUND_WORK_LABEL_CHARS),
-					task: item.detail,
-					status: "running",
+					name: boundedChars(safeWorkText(item.label), BACKGROUND_WORK_LABEL_CHARS),
+					task: safeWorkText(item.detail.slice(0, 500)),
+					status: item.status === "queued" ? "pending" : "running",
 					stats: { age: Math.max(0, now - item.startedAt), ...(item.tokens ? { tokens: item.tokens } : {}) },
 					grow: 1,
 					actions: { click: `bg.open=${item.id}` },
@@ -2005,8 +2074,14 @@ export class PiTernBridge {
 					{ id: `bg-work-${item.id}-time`, k: "elapsed", p: { age: Math.max(0, now - item.startedAt) } },
 				],
 			}, ...stopNode(item)] }));
-		if (live.length > BACKGROUND_WORK_MAX_ROWS) rows.push({ id: "bg-work-more", k: "text", p: { role: "pi.background.more", text: `+${live.length - BACKGROUND_WORK_MAX_ROWS} more · /work`, wrap: "none", tone: "muted" } });
-		return [{ id: "background-work", k: "card", p: { head: `Background work · ${live.length} running`, status: "running", tone: "accent", role: "pi.background" }, c: rows }];
+		rows.push({ id: "bg-work-more", k: "button", p: { role: "pi.background.more", text: live.length > BACKGROUND_WORK_MAX_ROWS ? `View all · ${live.length - BACKGROUND_WORK_MAX_ROWS} more` : "View all work", variant: "quiet", size: "sm", actions: { click: "bg.open=all" } } });
+		const queued = live.filter((i) => i.status === "queued").length;
+		return [{ id: "background-work", k: "card", p: { head: `Background work · ${live.length - queued} running${queued ? ` · ${queued} queued` : ""}`, status: "running", tone: "accent", role: "pi.background" }, c: rows }];
+	}
+
+	#backgroundItems(): RunningWorkItem[] {
+		const now = Date.now();
+		return runningWorkSnapshot().filter((i) => i.foreground !== true && (backgroundWorkLive(i) || (now - (i.endedAt ?? i.startedAt) < 15 * 60 * 1000)));
 	}
 
 	// The one focused task Pi's task state reports, as a plain value for the work table (no inference from prose).
@@ -2071,11 +2146,12 @@ export class PiTernBridge {
 		if (this.#closed) return;
 		this.#syncSession();
 		const gitFocus = this.#gitView && this.#gitFocus ? (this.#gitFocus === "summary" ? "git-summary" : "git-body-field") : undefined;
-		const focus = this.#ui.focusId ?? gitFocus ?? (this.#treePickerOpen ? "session-tree-picker" : this.#modelPickerOpen ? "model-picker-sheet" : "composer");
+		const focus = this.#ui.focusId ?? (this.#workViewId !== undefined ? "bg-search" : undefined) ?? (this.#stepInspector ? "work-inspector-search" : undefined) ?? (this.#mcpManager.open ? this.#mcpManager.focusId : undefined) ?? gitFocus ?? (this.#treePickerOpen ? "session-tree-picker" : this.#modelPickerOpen ? "model-picker-sheet" : "composer");
 		const transcript = this.#projector.nodes(this.#toolOutputExpanded, { currentTask: this.#currentTask(), messageFocus: this.#messageFocus, editing: this.#editing?.itemId, busy: this.#busy });
 		// The git sheet replaces the composer, as OMP's fullscreen git app does; hiding the dock also gives the
 		// full sheet the whole pane instead of leaving the composer under it.
-		this.#surface.render([...startupNodes(this.#logo, this.#version, this.#repo, readMcpStatus(this.#session.sessionManager?.getSessionId?.() as string | undefined)), ...transcript], this.#gitView ? [] : this.#dock(), focus, this.#layer(), this.#complete.selectedId);
+		this.#surface.render([...startupNodes(this.#logo, this.#version, this.#repo, readMcpStatus(this.#session.sessionManager?.getSessionId?.() as string | undefined)), ...transcript], this.#gitView ? [] : this.#dock(), focus, this.#layer(), this.#workReveal ?? this.#complete.selectedId);
+		this.#workReveal = undefined;
 		try { this.#onRenderTap?.(transcript, this.#trigger, this.#busy); } catch { /* tracing never affects the UI */ }
 	}
 
@@ -2173,6 +2249,47 @@ export class PiTernBridge {
 
 	// The git sheet is modal in Tern (an overlay never takes the keyboard), so run.ts asks it first. Every key
 	// is consumed while it is open: the commit fields edit their own text, the rest are OMP's git bindings.
+	applyMcpKey(effect: KeyEffect): boolean {
+		if (this.#ui.active) return false;
+		if (this.#mcpManager.open && effect.kind === "paste") { void this.pasteClipboard(); return true; }
+		return this.#mcpManager.key(effect);
+	}
+
+	applyWorkKey(effect: KeyEffect): boolean {
+		if (this.#workViewId !== undefined && !this.#ui.active) {
+			if (effect.kind === "escape") this.#closeWorkView();
+			else if (effect.kind === "paste") {
+				const panel = this.#backgroundPanel;
+				void this.#clipboard.text().then((text) => { if (text && this.#workViewId !== undefined && this.#backgroundPanel === panel) { panel.search.insert(text); this.#render(); } }).catch(() => {});
+			} else { this.#backgroundPanel.key(effect, this.#backgroundItems()); this.#render(); }
+			return true;
+		}
+		const v = this.#stepInspector;
+		if (!v || this.#ui.active) return false;
+		switch (effect.kind) {
+			case "escape": this.#stepInspector = undefined; break;
+			case "text": v.search.insert(effect.text); break;
+			case "backspace": v.search.backspace(); break;
+			case "deleteWord": v.search.deleteWordBackward(); break;
+			case "deleteForward": v.search.deleteForward({ word: effect.word }); break;
+			case "deleteToEdge": v.search.deleteToEdge(effect.direction); break;
+			case "selectAll": v.search.selectAll(); break;
+			case "undo": v.search.undo(); break;
+			case "cursor": v.search.move(effect.direction, { word: effect.word, extend: effect.extend, line: effect.line }); break;
+			case "tabMove": v.search.move(effect.delta < 0 ? -1 : 1); break;
+			case "tab": v.filter = (["all", "active", "failed"] as const)[(["all", "active", "failed"].indexOf(v.filter) + 1) % 3]!; break;
+			case "up": case "down": {
+				const rows = filterWork(this.#projector.groupItems(v.group), v.filter, v.search.text);
+				const i = Math.max(0, rows.findIndex((r) => r.id === v.selected));
+				v.selected = rows[Math.max(0, Math.min(rows.length - 1, i + (effect.kind === "up" ? -1 : 1)))]?.id;
+				break;
+			}
+			case "paste": void this.#clipboard.text().then((text) => { if (text && this.#stepInspector === v) { v.search.insert(text); this.#render(); } }).catch(() => {}); break;
+		}
+		this.#render();
+		return true;
+	}
+
 	applyGitKey(effect: KeyEffect): boolean {
 		if (!this.#gitView) return false;
 		if (this.#gitHelp) {
@@ -2325,7 +2442,7 @@ export class PiTernBridge {
 
 	// The composer takes Tern's `send` only when nothing else owns Enter; otherwise Tern holds the prompt.
 	#composerSendable(): boolean {
-		return !this.#closed && !this.#ui.active && !this.#dialog?.active && !this.#btw?.active && !this.#modelPickerOpen && !this.#treePickerOpen;
+		return !this.#closed && this.#workViewId === undefined && !this.#stepInspector && !this.#mcpManager.open && !this.#ui.active && !this.#dialog?.active && !this.#btw?.active && !this.#modelPickerOpen && !this.#treePickerOpen;
 	}
 
 	// Tern's atomic `send` goes through the normal submit path but is not the user's draft: a half-typed
@@ -2363,6 +2480,11 @@ export class PiTernBridge {
 	// chips (any mix, several at once); otherwise the text is pasted.
 	async pasteClipboard(): Promise<void> {
 		if (this.#closed || this.#ui.active || this.#dialog?.active || this.#modelPickerOpen || this.#treePickerOpen) return;
+		if (this.#mcpManager.open) {
+			const text = await this.#clipboard.text().catch(() => null);
+			if (text && this.#mcpManager.open) this.#mcpManager.key({ kind: "text", text });
+			return;
+		}
 		const paths = await this.#clipboard.filePaths().catch(() => null);
 		if (paths?.length) {
 			this.attachPaths(paths);
@@ -2385,6 +2507,9 @@ export class PiTernBridge {
 	// write for files dropped on the pane) attaches them. Large text becomes a marker that expands on submit;
 	// small text is flattened to one line, so embedded newlines never submit.
 	pasteText(text: string): void {
+		if (this.#workViewId !== undefined && !this.#ui.active) { this.applyWorkKey({ kind: "text", text }); return; }
+		if (this.#stepInspector && !this.#ui.active) { this.applyWorkKey({ kind: "text", text }); return; }
+		if (this.#mcpManager.open && !this.#ui.active) { this.#mcpManager.key({ kind: "text", text }); return; }
 		const normalized = text.replace(/\r\n?/g, "\n");
 		const composer = !this.#ui.active && !this.#dialog?.active && !this.#btw?.active && !this.#modelPickerOpen && !this.#treePickerOpen;
 		const dropped = composer ? parseDroppedPaths(normalized) : null;
@@ -2460,6 +2585,8 @@ export class PiTernBridge {
 	// Escape: dismiss transient UI, cancel a running turn, or clear non-empty input before idle double-Escape.
 	// Returns true only when the configured `none` action closes the Tern surface.
 	escape(): boolean {
+		if (this.#stepInspector && !this.#ui.active) { this.#stepInspector = undefined; this.#render(); return false; }
+		if (this.#mcpManager.open && !this.#ui.active) { this.#mcpManager.escape(); return false; }
 		if (this.#workViewId !== undefined) {
 			this.#closeWorkView();
 			this.#lastEligibleEscapeAt = 0;
@@ -2569,6 +2696,47 @@ export class PiTernBridge {
 	// Routes one parsed TSP message. Returns the promise of any submitted prompt, for tests.
 	handle(msg: TspMessage): Promise<void> | undefined {
 		if (this.#closed) return undefined;
+		if (this.#workViewId !== undefined && msg.verb === "e" && !this.#ui.active) {
+			const b = msg.body;
+			if (b.ev === "action" && b.act === "bg.close") { this.#closeWorkView(); return; }
+			if (b.ev === "action" && b.act === "bg.stop" && typeof b.value === "string") { this.#stopWork(b.value); return; }
+			if (b.ev === "action" && b.act === "bg.open" && typeof b.value === "string") { this.#openWorkView(b.value); return; }
+			this.#backgroundPanel.event(b);
+			if (b.ev === "paste" && typeof b.text === "string") this.#backgroundPanel.search.insert(b.text);
+			if (b.ev === "key") {
+				const key = String(b.key ?? "");
+				const effects: Record<string, KeyEffect> = { escape: { kind: "escape" }, up: { kind: "up" }, down: { kind: "down" }, tab: { kind: "tab" }, backspace: { kind: "backspace" } };
+				const effect = effects[key] ?? (key.length === 1 ? { kind: "text" as const, text: key } : undefined);
+				if (effect) this.applyWorkKey(effect);
+			}
+			if (["action", "select", "activate", "edit", "undo", "paste", "key", "send", "focus"].includes(String(b.ev))) { this.#render(); return; }
+		}
+		if (this.#stepInspector && msg.verb === "e" && !this.#ui.active) {
+			const v = this.#stepInspector;
+			const b = msg.body;
+			if (b.ev === "action" && b.act === "work.inspect.close") { this.#stepInspector = undefined; this.#render(); return; }
+			if (b.ev === "action" && b.act === "work.reveal" && typeof b.value === "string") {
+				if (this.#projector.revealStep(b.value)) this.#workReveal = b.value;
+				this.#stepInspector = undefined; this.#render(); return;
+			}
+			if ((b.ev === "select" || b.ev === "activate") && b.id === "work-inspector-list" && typeof b.item === "string") v.selected = b.item;
+			if ((b.ev === "select" || b.ev === "activate") && b.id === "work-inspector-tabs" && ["all", "active", "failed"].includes(String(b.item))) v.filter = b.item as WorkFilter;
+			if (b.ev === "edit" && b.id === "work-inspector-search") v.search.applyHostEdit(b as unknown as HostEdit);
+			if (b.ev === "undo" && b.id === "work-inspector-search") v.search.undo();
+			if (b.ev === "paste" && typeof b.text === "string") v.search.insert(b.text);
+			if (b.ev === "key") {
+				const key = String(b.key ?? "");
+				const effects: Record<string, KeyEffect> = { escape: { kind: "escape" }, up: { kind: "up" }, down: { kind: "down" }, tab: { kind: "tab" }, backspace: { kind: "backspace" } };
+				const effect = effects[key] ?? (key.length === 1 ? { kind: "text" as const, text: key } : undefined);
+				if (effect) this.applyWorkKey(effect);
+			}
+			if (["action", "select", "activate", "edit", "undo", "paste", "key", "send", "focus"].includes(String(b.ev))) { this.#render(); return; }
+		}
+		if (msg.verb === "e" && msg.body.act === "mcp.open") return this.#mcpManager.show();
+		if (this.#mcpManager.open && msg.verb === "e" && !this.#ui.active) {
+			// Own every editing event while modal, including stale composer edits.
+			if (["edit", "undo", "key", "paste", "send", "focus", "select", "activate", "action"].includes(String(msg.body.ev))) return this.#mcpManager.event(msg.body);
+		}
 		// The context card is a peek, not a modal: the composer keeps the keys, so the first thing typed (or a
 		// paste) closes the card and edits the draft as before.
 		if (this.#contextView && msg.verb === "e" && (msg.body.ev === "edit" || msg.body.ev === "key" || msg.body.ev === "paste")) {
@@ -2756,7 +2924,22 @@ export class PiTernBridge {
 		}
 		if (msg.verb !== "e" || msg.body.ev !== "action") return undefined;
 		const act = msg.body.act;
-		if (act === "submit") return this.submit(submittedText(msg.body));
+		if (act === "work.inspect" && typeof msg.body.value === "string") {
+			this.#stepInspector = { group: msg.body.value, filter: "all", search: new DraftEditor() };
+			this.#render(); return;
+		}
+		if (typeof act === "string" && act.startsWith("work.filter.") && typeof msg.body.value === "string") {
+			const filter = act.slice("work.filter.".length);
+			if (["all", "active", "failed"].includes(filter)) this.#projector.setGroupView(msg.body.value, filter as WorkFilter);
+			this.#render(); return;
+		}
+		// Form-backed actions carry `values.text`. The composer's Send control carries no payload, so it
+		// must fall through to the same path as Enter (autocomplete, ask-dialog confirmation, attachments
+		// and the draft) instead of submitting an empty string.
+		if (act === "submit") {
+			const text = submittedText(msg.body);
+			return text ? this.submit(text) : this.submitDraft();
+		}
 		if (act === ATTACHMENT_REMOVE) {
 			const n = attachmentFromNodeId(msg.body.id);
 			if (n !== undefined) this.removeAttachment(n);
@@ -3020,14 +3203,11 @@ export class PiTernBridge {
 			this.#draft = "";
 			// Pi's `/mcp` with no arguments opens a TUI component (`ctx.ui.custom`) that Tern
 			// cannot render: ext-ui disposes it and prints "needs Pi's terminal UI", so the
-			// command looked broken and told the user to run `pi -nt`. Answer it here from the
-			// published inventory instead. Subcommands (login/logout/reconnect) only use
-			// select/notify and keep Pi's own handler.
+			// command looked broken and told the user to run `pi -nt`. Open the native manager
+			// instead. Typed subcommands retain Pi's handler; GUI auth uses mcp-host's native
+			// prompt adaptation because Pi's TUI login also uses a custom component.
 			if (route.entry.name === "mcp" && prompt.trim().slice("mcp".length + 1).trim() === "") {
-				const inventory = readMcpInventory(this.#session.sessionManager?.getSessionId?.() as string | undefined);
-				this.#projector.add("system", mcpInventoryLines(inventory).join("\n"));
-				this.#render();
-				return Promise.resolve();
+				return this.#mcpManager.show();
 			}
 			return this.#session.prompt(prompt).catch((error: unknown) => {
 				this.#projector.add("system", `error: ${error instanceof Error ? error.message : String(error)}`);
@@ -3124,11 +3304,10 @@ export class PiTernBridge {
 		return this.#sendPrompt(prompt);
 	}
 
-	// A plain prompt with the composer's attachments: queued as a follow-up during a turn (Pi's native
-	// queued-message path for plain Enter), otherwise sent now.
+	// Plain Enter steers at the next boundary, like native Pi. Only Alt+Enter waits for a yield.
 	#sendPrompt(prompt: string): Promise<void> {
 		if (this.#editing) return this.#sendEdited(prompt);
-		if (this.#busy) return this.submitFollowUp(prompt);
+		if (this.#busy || this.#session.isStreaming) return this.#submitQueued(prompt, "steer");
 		const { text: sent, images } = this.#takeAttachments(this.#withMentions(prompt), prompt);
 		this.#draft = "";
 		this.#projector.add("user", sent.typed);
@@ -3156,19 +3335,25 @@ export class PiTernBridge {
 
 	// Pi's Alt+Enter queues a follow-up while streaming and submits normally while idle.
 	submitFollowUp(text: string): Promise<void> {
+		return this.#submitQueued(text, "followUp");
+	}
+
+	#submitQueued(text: string, mode: "steer" | "followUp"): Promise<void> {
 		const prompt = text.trim();
 		if (!prompt && !this.#attachments.length) return Promise.resolve();
-		if (!this.#busy) return this.submit(prompt);
+		if (!this.#busy && !this.#session.isStreaming) return this.submit(prompt);
 		this.#draft = "";
 		const { text: { model: sent, typed }, images } = this.#takeAttachments(this.#withMentions(prompt), prompt);
 		this.#queuedTyped.set(sent, typed);
 		// Optimistic until Pi's queue_update replaces it; the dock's queue band shows it, not the transcript.
-		this.#queuedFollowUp = [...this.#queuedFollowUp, sent];
+		if (mode === "steer") this.#queuedSteering = [...this.#queuedSteering, sent];
+		else this.#queuedFollowUp = [...this.#queuedFollowUp, sent];
 		this.#render();
-		return this.#session.prompt(sent, { streamingBehavior: "followUp", ...(images.length ? { images } : {}) }).catch((error: unknown) => {
-			const queuedIndex = this.#queuedFollowUp.lastIndexOf(sent);
-			if (queuedIndex >= 0) this.#queuedFollowUp.splice(queuedIndex, 1);
-			this.#projector.add("system", `error queueing follow-up: ${error instanceof Error ? error.message : String(error)}`);
+		return this.#session.prompt(sent, { streamingBehavior: mode, ...(images.length ? { images } : {}) }).catch((error: unknown) => {
+			const queue = mode === "steer" ? this.#queuedSteering : this.#queuedFollowUp;
+			const queuedIndex = queue.lastIndexOf(sent);
+			if (queuedIndex >= 0) queue.splice(queuedIndex, 1);
+			this.#projector.add("system", `error queueing ${mode === "steer" ? "steering" : "follow-up"}: ${error instanceof Error ? error.message : String(error)}`);
 			this.#render();
 		});
 	}
@@ -3206,6 +3391,9 @@ export class PiTernBridge {
 	// submits, an argument completion stays in the draft.
 	submitDraft(): Promise<void> {
 		if (this.#closed) return Promise.resolve();
+		if (this.#workViewId !== undefined && !this.#ui.active) return Promise.resolve();
+		if (this.#stepInspector && !this.#ui.active) return Promise.resolve();
+		if (this.#mcpManager.open && !this.#ui.active) { this.#mcpManager.key({ kind: "submit" }); return Promise.resolve(); }
 		if (this.#treePickerOpen) return this.#navigateSessionTree();
 		const owned = this.#ui.active || this.#dialog?.active || this.#btw?.active || this.#modelPickerOpen;
 		if (!owned && this.#complete.active && !this.#complete.enter()) return Promise.resolve();
@@ -3298,6 +3486,7 @@ export class PiTernBridge {
 		this.#workViewTimer = undefined;
 		if (this.#closed) return;
 		this.#closed = true;
+		this.#mcpManager.close();
 		this.#gitRequest++;
 		clearInterval(this.#gitTimer);
 		this.#repoWatch?.();

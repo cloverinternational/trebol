@@ -54,7 +54,7 @@ describe("turn grouping in the Tern transcript", () => {
 		start(p, "a"); end(p, "a");
 		start(p, "b"); end(p, "b", true);
 		const [summary] = p.nodes().slice(1);
-		expect(summary?.p).toMatchObject({ role: "tern.work", title: "Done", status: "done", target: "fix login", collapsed: true, collapsible: true, meta: ["2 steps"], badges: [{ text: "1 failed", tone: "warning" }] });
+		expect(summary?.p).toMatchObject({ role: "tern.work", title: "Done", status: "done", target: "fix login", collapsed: true, collapsible: true, meta: ["2 steps"], badges: [{ text: "1 failed", tone: "warning" }, { text: "1 completed", tone: "success" }] });
 		expect(stepsOf(summary).map((r) => [r.id, r.p?.status])).toEqual([["t-a", "done"], ["t-b", "error"]]);
 	});
 

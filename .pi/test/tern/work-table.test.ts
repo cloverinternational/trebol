@@ -46,7 +46,7 @@ describe("work steps (projector)", () => {
 		start(p, "b");
 		const [live] = groups(p.nodes(true, { currentTask: CURRENT }));
 		// The controls and the heading come first, then the steps with the narration kept between them.
-		expect((live!.c ?? []).filter((n) => n.k !== "text" && n.p?.role !== "tern.work-controls").map((n) => n.k)).toEqual(["tool", "md", "tool"]);
+		expect((live!.c ?? []).filter((n) => n.k !== "text" && n.p?.role !== "tern.work-controls" && n.p?.role !== "pi.work.explore").map((n) => n.k)).toEqual(["tool", "md", "tool"]);
 	});
 
 	it("shows the current task only in the active group, and only when one is supplied", () => {
@@ -82,7 +82,7 @@ describe("work steps (projector)", () => {
 		const [settled] = groups(p.nodes(false));
 		expect(settled!.p).toMatchObject({ status: "done", meta: ["2 steps"] });
 		expect(typeof settled!.p?.took).toBe("number");
-		expect(settled!.p?.badges).toEqual([{ text: "1 failed", tone: "warning" }]);
+		expect(settled!.p?.badges).toEqual([{ text: "1 failed", tone: "warning" }, { text: "1 completed", tone: "success" }]);
 		expect(step(settled!, "t-a")?.p).toMatchObject({ status: "error", exit: 1 });
 	});
 

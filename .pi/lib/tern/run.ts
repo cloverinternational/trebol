@@ -27,6 +27,7 @@ import { createShortcutDispatcher, type ShortcutSession } from "./ext-shortcuts.
 import { piBuiltinExtensions } from "./pi-builtins.ts";
 import { detectTern, helloQuery, PI_TSP_FEATURES, shouldProbe, splitInput } from "./tsp.ts";
 import { bootGeneration, clearPaneRecord, openStartupSession, paneKey, pidAlive, readPaneBook, recordPaneSession } from "./startup-session.ts";
+import { startPlanContextClearHost } from "./plan-context.ts";
 
 const PROBE_MS = 1000;
 const stdin = process.stdin;
@@ -105,6 +106,8 @@ function startTsp(): void {
 		if (bridge && shortcuts?.(sequence)) return;
 		const effect = keyEffect(sequence);
 		if (!bridge || !effect) return;
+		if (bridge.applyWorkKey(effect)) return;
+		if (bridge.applyMcpKey(effect)) return;
 		if (bridge.applyGitKey(effect)) return;
 		if (bridge.applyEditKey(effect)) return;
 		if (effect.kind === "interrupt") {
@@ -199,6 +202,16 @@ function startTsp(): void {
 			cwd,
 			agentDir: getAgentDir(),
 			sessionManager: startupSession(cwd),
+		});
+		// "Approve + Clear Context" needs a command-capable session runtime: the
+		// plan-mode tool reports intent, then this host waits for the turn to end,
+		// replaces the session, and resumes from the approved plan exactly once.
+		startPlanContextClearHost({
+			sessionFile: () => runtime.session.sessionManager?.getSessionFile?.(),
+			waitForIdle: () => runtime.session.waitForIdle(),
+			newSession: (options) => runtime.newSession(options as Parameters<typeof runtime.newSession>[0]),
+		}, {
+			notify: (text) => bridge?.notice(text),
 		});
 		// Pi writes a session file at the first message, not at startup, so the pane record is written
 		// from the events and after every session replacement rather than here. Only a changed file is

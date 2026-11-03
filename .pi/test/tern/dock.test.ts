@@ -445,6 +445,12 @@ describe("Tern regions and dock structure", () => {
 			expect(nodes.get("bg-work-agent-1-stop")?.parent).toBe("bg-work-agent-1-line");
 
 			bridge.handle({ verb: "e", body: { ev: "action", id: "bg-work-bg-1", act: "bg.open", value: "bg-1" } });
+			bridge.setDraft("preserve draft");
+			bridge.applyWorkKey({ kind: "text", text: "Tail" });
+			bridge.pasteText(" search");
+			expect(bridge.draft).toBe("preserve draft");
+			bridge.applyWorkKey({ kind: "selectAll" });
+			bridge.applyWorkKey({ kind: "backspace" });
 			nodes = replay(writes);
 			expect(nodes.get("bg-output")?.p).toMatchObject({ head: "Tail · running", role: "pi.background.output" });
 			expect(nodes.get("bg-output-text")?.p?.text).toBe("line 1");
@@ -457,7 +463,9 @@ describe("Tern regions and dock structure", () => {
 			expect(replay(writes).get("bg-output-text")?.p?.text).toBe("line 1\nline 2\nline 3");
 
 			bridge.handle({ verb: "e", body: { ev: "action", id: "bg-output-stop", act: "bg.stop", value: "bg-1" } });
+			bridge.handle({ verb: "e", body: { ev: "action", id: "bg-output-stop", act: "bg.stop", value: "bg-1" } });
 			expect(stopped).toEqual(["bg-1"]);
+			expect(replay(writes).get("bg-stop-pending")?.p?.text).toContain("awaiting runtime settlement");
 
 			// Settled work has no stop, in the bar or the sheet, and a stale stop event does nothing.
 			setRunningWork({ id: "bg-1", kind: "bash", label: "Tail", status: "cancelled", startedAt: Date.now(), endedAt: Date.now(), detail: "tail -f log", output: "line 1\nline 2\nline 3" });
