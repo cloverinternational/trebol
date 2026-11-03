@@ -5,6 +5,47 @@ it before changing anything. If a change makes this file inaccurate, update
 `AGENTS.md` in the same change. A task is not complete until the index,
 architecture notes, and commands below still describe the repository.
 
+## Repository-local design skills
+
+For Tern UI/UX work, read
+[`skills/tern-native-experience/SKILL.md`](skills/tern-native-experience/SKILL.md)
+before designing or implementing. It covers ambitious native GUI interfaces,
+proactive interaction improvements, composer/input ergonomics and collapsed work.
+Read its [work and composer checklist](skills/tern-native-experience/references/work-and-composer.md)
+when changing those surfaces. These skills live in the root `skills/` directory,
+not a provider-specific hidden directory; this explicit pointer makes them
+available to agents regardless of their automatic skill-discovery conventions.
+
+Fetch **https://docs.stencil.so/tern/index.md** at the start of each Tern UI task
+and follow the current links for the latest design and protocol documentation.
+Verify support against the installed Tern version rather than assuming the latest
+published API is already available locally.
+
+### Progressive work inspection
+
+Background commands and agents use `background-panel.ts` for a unified native
+manager and `background-format.ts` for bounded presentation: safe ANSI, complete
+JSON formatting, diagnostic badges and stable-ID visible agent messages/tool
+results. The live shelf distinguishes queued/running, links to all work and
+retains access to recent work for 15 minutes while the runtime still tracks it.
+Follow live/Pause viewing affects only the display. Stop requests are single-flight
+and do not claim cancellation before runtime settlement. Agent reasoning is not
+projected. Raw text is sanitized, not a byte-for-byte terminal escape replay.
+Tests: background-panel, dock, background-button under `.pi/test/tern/`.
+Native fixture harness: `node tools/e2e/tern-background-manager.mjs`.
+
+Tern work groups offer All / Active / Failed filters and Search & inspect.
+`work-inspector.ts` provides pure counts/filtering and a native selected-step
+overlay; `bridge.ts` keeps per-group disclosure/filter state through streaming
+and settlement. Headers retain failure/completion/cancellation counts, and a
+collapsed live group can show the current action when no narration tail exists.
+The inspector searches safe step summaries, shows bounded captured output with
+explicit truncation, and reveals the original step without globally expanding
+other groups. It neither retries nor cancels operations. Raw/native input is
+isolated from the composer, and session replacement drops the inspector.
+Tests: `.pi/test/tern/work-inspector.test.ts` plus work-table, turn-work and
+turn-groups. Runner changes require restarting the pane.
+
 ## Index
 
 1. [Mission and architecture](#mission-and-architecture)
@@ -558,6 +599,14 @@ group, or user-facing command, add it to the relevant tables above in the same
 patch. This is a contract, not optional documentation.
 
 ## Tern work
+
+Conversation input in `.pi/lib/tern/bridge.ts` follows native Pi: ordinary Enter
+while busy queues **steering** for the next agent boundary; Alt+Enter queues a
+**follow-up** until the agent yields. Queue rendering follows Pi's `queue_update`.
+`agent_end` ends an attempt, not necessarily the active session run: retain busy
+while `session.isStreaming` is true until `agent_settled`. Regression coverage:
+`.pi/test/tern/bridge.test.ts` and `tools/e2e/tern-queue-delivery.mjs` (real Pi,
+loopback scripted provider). Restart the pane runner to load bridge changes.
 
 Whenever work touches or adds a Tern-related feature (for example
 `.pi/lib/tern/`, `tern-plugins/`, `extensions/tern-resume/`, or
@@ -1284,8 +1333,12 @@ Rules that keep this true:
   whenever a registered `mcp__*` definition is `deferred`, and re-runs at
   `turn_start` so late registrations are picked up.
 - The same pass publishes `.pi/lib/tools/mcp-inventory.ts` (session-scoped:
-  server, exposure, active/total, tool names). Tern's `/mcp` renders it through
-  `.pi/lib/tern/mcp-view.ts`; Pi's own bare `/mcp` opens a TUI component this
+  server, exposure, active/total, tool names). Tern's `/mcp` reads Pi's live
+  `getAllTools()` / `getActiveToolNames()` at invocation and while visible,
+  rendering unavailable metadata honestly on older hosts, through
+  `.pi/lib/tern/mcp-panel.ts`. This includes background registrations before any
+  model turn; an empty registry does not prove no servers are configured.
+  Pi's own bare `/mcp` opens a TUI component this
   frontend cannot draw, so the bridge answers bare `/mcp` itself and leaves
   `login`/`logout`/`reconnect` on Pi's handler.
 - `extensions/swarm-prompt/extension.ts` replaces Pi's base prompt; it must
@@ -1294,6 +1347,34 @@ Rules that keep this true:
 
 Tests: `.pi/test/runtime/{swarm-mcp-activation,swarm-extra-tool-gating}.test.ts`,
 `.pi/test/tools/mcp-inventory.test.ts`, `.pi/test/tern/mcp-command.test.ts`.
+
+### Native Tern MCP control center
+
+Bare `/mcp` and the startup MCP line open a native TSP overlay, not transcript
+text. `mcp-panel.ts` renders Servers / Tools / Diagnostics, responsive master/detail
+tables, searchable schemas and guided configuration forms. `mcp-controller.ts`
+owns editing, confirmation, single-flight actions and visible-only registry
+refresh (no network probes). Closing drops form text and its undo history;
+session replacement invalidates pending UI completions.
+
+`pi-builtins.ts` captures the builtin MCP command handler and publishes a
+session-owned `mcp-host.ts` adapter. It loads configuration through Pi's own
+`loadMcpConfig`, using the session's actual project trust, and merges extension
+registrations by Pi namespace. Reconnect/auth reuse Pi's handler; an RPC-shaped
+UI context avoids its terminal-only custom manager while retaining Tern native
+input for OAuth redirects. Add/Remove call Pi's CLI implementation, never a
+custom config writer; their output is not forwarded because it may contain
+credentials. Scope/overwrite/plaintext-secret warnings precede writes. Reload
+is explicit. The adapter does not call `pi mcp list`, which opens duplicate
+connections. Connection health is unknown beyond observed tool registrations.
+
+Tests: `.pi/test/tern/{mcp-host,mcp-control-center,mcp-command,pi-builtins}.test.ts`.
+The existing `mcp-panel.test.ts` separately covers the terminal-component adapter.
+Native screenshot harness: `node tools/e2e/tern-mcp-panel.mjs` (deterministic
+fixtures, no real connections or configuration mutations), artifacts under
+`artifacts/tern-mcp/`. Real OAuth/browser completion is not certified by that
+harness. Restart the pane for runner JavaScript changes; `/reload` alone does
+not replace the bridge implementation.
 
 ### Startup card watcher budget
 

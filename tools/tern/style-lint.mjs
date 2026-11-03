@@ -24,7 +24,9 @@ const WIDTHS = [480, 800, 1100, 1400];
 
 // The declared design scale. A value outside it is a decision someone made without recording it, which is
 // exactly how four near-identical font sizes (9.5 / 10 / 10.5 / 11) accumulated in composer-style.ts.
-const TYPE_SCALE = [9.5, 10, 10.5, 11, 13];
+// Native Tern small buttons use 12px (work controls now use button rather than text).
+// Accept the native component scale rather than overriding it with custom CSS.
+const TYPE_SCALE = [9.5, 10, 10.5, 11, 12, 13];
 // Recorded inventory, not a principle: these are the spacing values in use today. The check fails a *new*
 // value that nobody wrote down, which is how 1/3/5/6/7 px accumulated in the first place.
 const SPACE_SCALE = [0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 16, 24, 320];
