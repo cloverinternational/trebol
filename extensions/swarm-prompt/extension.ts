@@ -76,7 +76,12 @@ const assembledKind = (prompt: string): "interactive" | "headless" | undefined =
 export interface PromptExtensionEvent {
   systemPrompt: string;
   prompt?: string;
-  systemPromptOptions?: { cwd?: string; appendSystemPrompt?: string };
+  systemPromptOptions?: {
+    cwd?: string;
+    appendSystemPrompt?: string;
+    /** Sections other Pi extensions contribute to the base prompt, e.g. the built-in MCP extension's `mcp_servers`. */
+    sections?: Record<string, unknown>;
+  };
   /** Optional Forge prompt controls supplied by the host/bridge. */
   swarmPrompt?: PromptAssemblyOptions;
 }
@@ -525,9 +530,19 @@ export function registerSwarmPrompt(pi: PromptExtensionAPI): void {
     // structured value rather than extracting text from the rendered prompt.
     const append = event.systemPromptOptions?.appendSystemPrompt;
     const addendum = append ? `<addendum>\n${append}\n</addendum>` : undefined;
-    const base = assembled?.systemPrompt && addendum && !assembled.systemPrompt.includes(addendum)
+    let base = assembled?.systemPrompt && addendum && !assembled.systemPrompt.includes(addendum)
       ? `${assembled.systemPrompt}\n\n${addendum}`
       : assembled?.systemPrompt ?? event.systemPrompt;
+    // Pi extensions publish prompt sections on this same object — the built-in MCP
+    // extension writes `mcp_servers`, which names every server whose tools are not
+    // declared to the model and how to reach them (codemode scripts or
+    // tool_search). Replacing the base prompt used to drop that map on the floor,
+    // so the model was never told those servers exist. Carry every contributed
+    // section through, as with the addendum above, skipping text already present.
+    const contributed = Object.values(event.systemPromptOptions?.sections ?? {})
+      .filter((value): value is string => typeof value === "string" && value.trim() !== "")
+      .filter((value) => !base.includes(value));
+    if (contributed.length) base = `${base}\n\n${contributed.join("\n\n")}`;
     if (assembled) assembled.systemPrompt = base;
     if (assembled) assembledPromptKinds.set(hash(base), (ctx as { hasUI?: boolean }).hasUI === true ? "interactive" : "headless");
     const result = assembled ? { systemPrompt: base } : undefined;

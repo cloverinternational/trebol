@@ -53,6 +53,12 @@ export function swarmSurfaceFor(environment: GatingEnvironment): Set<string> {
   // Pi's native CodeMode tool is a built-in surface, not a Swarm-owned tool;
   // keep it visible to the model when enabled by Pi settings.
   names.add("codemode");
+  // Pi reaches MCP servers whose exposure is "deferred" through tool_search: the
+  // built-in MCP extension activates tool_search (not codemode) for those servers
+  // and declares their tools only after it runs. Both are Pi built-ins that stand
+  // in for the same capability, so gating one and keeping the other silently
+  // makes every deferred MCP server unreachable while codemode servers still work.
+  names.add("tool_search");
   // Durable memory is a Pi-Swarm state extension, not part of the upstream
   // Swarm wire fixture, but it is an intentional model-facing capability.
   names.add("memory_history");
@@ -61,6 +67,7 @@ export function swarmSurfaceFor(environment: GatingEnvironment): Set<string> {
   names.add("project_init");
   // Tern browser, pane and tab control is an intentional model-facing capability of the Tern pane.
   names.add("tern");
+  names.add("hoja_project");
   for (const name of CLAW_TOOLS) names.add(name);
   for (const name of ["CronCreate", "CronList", "CronDelete", "ScheduleWakeup"]) names.delete(name);
   names.add("scheduler");

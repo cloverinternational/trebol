@@ -9,6 +9,7 @@ import { loadSwarmCanonicalTools } from "../../.pi/lib/runtime/swarm-tool-surfac
 import { HOOK_SLOT_TYPE, type HookSlotPart } from "../../.pi/lib/runtime/swarm-builtin-hooks-runtime.ts";
 import { effectiveSelection, loadPromptContextConfig } from "../../.pi/lib/context/swarm-prompt-context-config.ts";
 import { clawModeOn, clawRoutedTools } from "../../.pi/lib/claw/mode.ts";
+import { clearMcpInventory, deriveMcpInventory, publishMcpInventory } from "../../.pi/lib/tools/mcp-inventory.ts";
 
 type Pi = any;
 
@@ -30,9 +31,14 @@ export function registerSwarmTransportParity(pi: Pi): void {
   let interactive = false;
   // Tern runs a TUI without bound UI; its ask_user_question answers through remote-ask events.
   let remoteAsk = false;
+  // Owning object for the MCP inventory slot, so shutdown can clear only our snapshot.
+  const inventoryOwner = {};
+  let sessionId: string | undefined;
   const alignTools = () => {
+    const toolDefinitions: any[] = pi.getAllTools?.() ?? [];
     const active: string[] = pi.getActiveTools?.() ?? [];
-    const available: string[] = (pi.getAllTools?.() ?? []).map((tool: any) => tool.name).filter((name: any): name is string => typeof name === "string");
+    const available: string[] = toolDefinitions.map((tool: any) => tool.name).filter((name: any): name is string => typeof name === "string");
+    const byName = new Map<string, any>(toolDefinitions.map((tool: any) => [tool.name, tool]));
     const configured = loadPromptContextConfig(pi.getCwd?.() ?? process.cwd(), undefined, { persistMigration: false }).tools;
     // Default mode preserves Pi's current runtime selection. An allowlist is
     // authoritative and may re-enable a tool after a prior selection changed
@@ -41,14 +47,34 @@ export function registerSwarmTransportParity(pi: Pi): void {
       ? effectiveSelection(available.length ? available : active, configured)
       : active;
     const mcpTools = available.filter(name => {
-      const definition = pi.getToolDefinition?.(name);
-      return name === "mcp" || name === "mcpScript" || name.startsWith("mcp__") || definition?.label?.startsWith("MCP:");
+      const definition = byName.get(name);
+      // Definition-first: getToolDefinition is not populated for every registered
+      // tool on Pi 1.3.0, so read the registry this module already holds.
+      return name === "mcp" || name === "mcpScript" || name.startsWith("mcp__")
+        || definition?.label?.startsWith("MCP:")
+        // Discovery surfaces (codemode, tool_search) declare other tools rather
+        // than being MCP tools; gating them off strands every MCP server whose
+        // exposure needs them.
+        || typeof definition?.reachesTools === "function";
     });
     // Claw routing hides alternate spawners while /claw is on; the allowlist path must not re-add them.
     const base = gateActiveTools(selected, { interactive, remoteAsk, mcpTools }, process.env, available) ?? selected;
-    const gated = clawModeOn() ? clawRoutedTools(base, available) : base;
+    const routed = clawModeOn() ? clawRoutedTools(base, available) : base;
+    // Pi declares servers whose exposure is "deferred" only after tool_search loads
+    // them, and activates tool_search in ensureDiscoveryActive. Measured on Pi
+    // 1.3.0 under this harness, that activation never lands: four user-scope
+    // servers register `exposure: "deferred"` tools while the active set holds
+    // codemode only, so their tools cannot be discovered or called at all. Decide
+    // from the definitions actually registered rather than Pi's config view: if a
+    // deferred MCP tool exists, the surface that declares it must be active.
+    const needsToolSearch = available.includes("tool_search")
+      && toolDefinitions.some((tool: any) => typeof tool?.name === "string" && tool.name.startsWith("mcp__") && tool.exposure === "deferred");
+    const gated = needsToolSearch && !routed.includes("tool_search") ? [...routed, "tool_search"] : routed;
     const ordered = swarmToolOrder(gated) ?? (gated === active ? undefined : gated);
     if (ordered) pi.setActiveTools?.(ordered);
+    // Publish what the model can actually reach now. Tern's /mcp reads this
+    // instead of Pi's TUI panel, which this frontend cannot render.
+    publishMcpInventory(inventoryOwner, deriveMcpInventory(toolDefinitions, pi.getActiveTools?.() ?? []), sessionId);
   };
   const alignModel = (ctx: any) => {
     applySwarmModelCompat(ctx?.model ?? pi.getModel?.(), { interactive });
@@ -70,8 +96,16 @@ export function registerSwarmTransportParity(pi: Pi): void {
   };
   const currentMode = () => "act";
 
-  pi.on?.("session_start", (_event: unknown, ctx: any) => { interactive = ctx?.hasUI === true; remoteAsk = ctx?.mode === "tui" && !interactive; alignTools(); alignModel(ctx); });
+  pi.on?.("session_start", (_event: unknown, ctx: any) => { sessionId = ctx?.sessionManager?.getSessionId?.(); interactive = ctx?.hasUI === true; remoteAsk = ctx?.mode === "tui" && !interactive; alignTools(); alignModel(ctx); });
   pi.on?.("model_select", (_event: unknown, ctx: any) => { alignModel(ctx); });
+  pi.on?.("session_shutdown", () => { clearMcpInventory(inventoryOwner); sessionId = undefined; });
+  // MCP servers connect in the background, so a server's tools (and their
+  // exposure) can register after session_start and before_agent_start have run.
+  // Without a later pass, those names never enter the active set: measured on Pi
+  // 1.3.0, four servers registered "deferred" tools that stayed inactive for the
+  // life of the session. Re-align as each turn starts, which is the first moment
+  // the model could use them anyway.
+  pi.on?.("turn_start", () => { alignTools(); });
   // Tool sets and model can change mid-session (extensions, /model, /tools).
   // Re-check right before every request; both operations are idempotent.
   pi.on?.("before_agent_start", (_event: unknown, ctx: any) => { if (typeof ctx?.hasUI === "boolean") interactive = ctx.hasUI; if (typeof ctx?.mode === "string") remoteAsk = ctx.mode === "tui" && !interactive; alignTools(); alignModel(ctx); });
