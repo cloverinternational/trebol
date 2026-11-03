@@ -19,6 +19,12 @@ export const ASK_NODE_PREFIX = "ask-";
 const OPTION_PREFIX = "ask-opt:";
 export const ASK_SUBMIT_ID = "ask-submit";
 export const ASK_CANCEL_ID = "ask-cancel";
+// Narrow/mobile action bar: move between questions without a keyboard, save a freeform answer, or
+// close the editor. Review still owns Submit and Cancel so a tap can never submit implicitly.
+export const ASK_BACK_ID = "ask-back";
+export const ASK_NEXT_ID = "ask-next";
+export const ASK_EDITOR_SAVE_ID = "ask-editor-save";
+export const ASK_EDITOR_CLOSE_ID = "ask-editor-close";
 // Tab strip: `ask-tab-<question index>` per question, and `ask-tab-submit` for the review tab.
 const TAB_PREFIX = "ask-tab-";
 export const ASK_SUBMIT_TAB_ID = "ask-tab-submit";
@@ -195,8 +201,9 @@ export class TernAskDialog {
 		const pending = this.#queue.length > 1 ? ` (+${this.#queue.length - 1} queued)` : "";
 		const narrow = columns < NARROW_COLUMNS;
 		const children: TspNode[] = [narrow ? this.#progressNode(flow) : this.#tabBar(flow)];
-		children.push(...(flow.tab === flow.questions.length ? this.#reviewNodes(flow, sending) : this.#questionNodes(flow, sending)));
+		children.push(...(flow.tab === flow.questions.length ? this.#reviewNodes(flow, sending, narrow) : this.#questionNodes(flow, sending)));
 		if (flow.error) children.push({ id: "ask-error", k: "text", p: { text: flow.error, tone: "error", wrap: "soft" } });
+		children.push(...this.#mobileActions(flow, sending, narrow));
 		children.push(this.#hintNode(flow, sending, narrow));
 		return [{
 			id: "ask-dialog",
@@ -211,6 +218,12 @@ export class TernAskDialog {
 		if (!id.startsWith(ASK_NODE_PREFIX)) return false;
 		if (id === ASK_SUBMIT_ID) this.submit();
 		else if (id === ASK_CANCEL_ID) this.cancel();
+		else if (id === ASK_BACK_ID) this.moveTab(-1);
+		else if (id === ASK_NEXT_ID) this.moveTab(1);
+		else if (id === ASK_EDITOR_SAVE_ID) {
+			const editing = this.#editingFlow();
+			if (editing) this.#saveInput(editing);
+		} else if (id === ASK_EDITOR_CLOSE_ID) this.cancel();
 		else if (id.startsWith(TAB_PREFIX)) this.#goToTab(id === ASK_SUBMIT_TAB_ID ? undefined : Number(id.slice(TAB_PREFIX.length)));
 		else if (id.startsWith(OPTION_PREFIX)) {
 			const [qi, oi] = id.slice(OPTION_PREFIX.length).split(":").map(Number);
@@ -340,6 +353,9 @@ export class TernAskDialog {
 				this.#onChange();
 				return true;
 			}
+			// Reopening a saved freeform answer edits it instead of starting from an empty field and
+			// silently replacing the answer the user can still see on the row.
+			if (!flow.drafts.has(question.id) && flow.custom.has(question.id)) flow.drafts.set(question.id, flow.custom.get(question.id)!);
 			flow.editing = true;
 			flow.error = undefined;
 			this.#onChange();
@@ -450,6 +466,8 @@ export class TernAskDialog {
 		const question = flow.questions[qi]!;
 		const cursor = flow.option[qi] ?? 0;
 		const selected = flow.selected.get(question.id);
+		const freeform = question.options.find((option) => option.freeform);
+		const draft = flow.drafts.get(question.id) ?? flow.custom.get(question.id);
 		return [
 			{ id: `ask-q-${qi}-prompt`, k: "text", p: { role: "pi.ask.prompt", text: `${question.prompt}${question.required ? "" : " (optional)"}`, wrap: "soft" } },
 			{
@@ -458,11 +476,17 @@ export class TernAskDialog {
 				p: { role: "pi.ask.options", selected: `${OPTION_PREFIX}${qi}:${cursor}` },
 				c: question.options.map((option, oi) => this.#optionItem(flow, question, qi, oi, cursor, selected, sending)),
 			},
+			// Tern item detail is single-line. A long freeform answer would be clipped there, so the
+			// editor's live draft gets its own soft-wrapped line below the rows.
+			...(freeform && (flow.editing || draft)
+				? [{ id: `ask-freeform-${qi}`, k: "text", p: { role: "pi.ask.freeform", text: `${flow.editing ? "Editing" : "Your answer"}: ${draft ?? ""}${flow.editing ? "▏" : ""}`, tone: "accent", wrap: "soft" } }]
+				: []),
 		];
 	}
 
-	// One list row. Text is never wrapped by Tern, so the free-form draft and description go in `detail`.
-	// The row's own click action replaces Tern's `select`, so a tap or click routes back through
+	// One list row. A bounded description may go in `detail`; the free-form draft is drawn by
+	// `#questionNodes` as a soft-wrapped line because item detail cannot wrap. The row's own click
+	// action replaces Tern's `select`, so a tap or click routes back through
 	// handleAction with this row's id: single-choice rows answer and advance, multi rows toggle.
 	#optionItem(flow: PendingFlow, question: DialogQuestion, qi: number, oi: number, cursor: number, selected: Set<string> | undefined, sending: boolean): TspNode {
 		const option = question.options[oi]!;
@@ -472,13 +496,10 @@ export class TernAskDialog {
 		const cursorMark = oi === cursor ? "›" : " ";
 		const hint = oi < 9 ? [String(oi + 1)] : undefined;
 		if (option.freeform) {
-			const saved = flow.custom.get(question.id);
-			const draft = flow.drafts.get(question.id);
-			const body = flow.editing && oi === cursor ? `${draft ?? ""}▏` : (saved ?? draft);
 			return {
 				id,
 				k: "item",
-				p: { role: "pi.ask.option", label: `${cursorMark} ${option.label}`, detail: body ?? "", tone: saved ? "accent" : "muted", hint, disabled: sending, ...click },
+				p: { role: "pi.ask.option", label: `${cursorMark} ${option.label}`, detail: "", tone: flow.custom.has(question.id) || flow.drafts.has(question.id) ? "accent" : "muted", hint, disabled: sending, ...click },
 			};
 		}
 		const on = selected?.has(option.value) ?? false;
@@ -509,28 +530,76 @@ export class TernAskDialog {
 		] };
 	}
 
-	// Keycap hints on the wide layout; narrow keeps only confirm and cancel so a line never wraps.
+	// Keycap hints on the wide layout; narrow uses a touch sentence and the action bar instead.
 	#hintNode(flow: PendingFlow, sending: boolean, narrow: boolean): TspNode {
-		if (sending || flow.editing) return { id: "ask-hint", k: "text", p: { text: sending ? "Sending…" : EDITOR_HINT, tone: "muted", wrap: "soft" } };
-		const pairs = narrow ? HINT_KEYS.filter((pair) => pair.label === "confirm" || pair.label === "cancel") : HINT_KEYS;
+		if (sending) return { id: "ask-hint", k: "text", p: { text: "Sending…", tone: "muted", wrap: "soft" } };
+		if (flow.editing) return { id: "ask-hint", k: "text", p: { text: narrow ? "Type your answer, then tap Save answer." : EDITOR_HINT, tone: "muted", wrap: "soft" } };
+		// A phone has no Escape or arrow keys. The action bar below carries the same moves as tappable
+		// controls, so the narrow hint must not advertise keys the device cannot send.
+		if (narrow && flow.tab === flow.questions.length) return { id: "ask-hint", k: "text", p: { text: "Check every answer, then tap Submit. Cancel discards this flow.", tone: "muted", wrap: "soft" } };
+		if (narrow) return { id: "ask-hint", k: "text", p: { text: "Tap an option, then Next or Review.", tone: "muted", wrap: "soft" } };
+		const pairs = HINT_KEYS;
 		return { id: "ask-hint", k: "row", p: { role: "pi.ask.hint" }, c: pairs.flatMap((pair) => [
 			{ id: `ask-hint-${pair.label}-keys`, k: "kbd", p: { keys: pair.keys } },
 			{ id: `ask-hint-${pair.label}`, k: "text", p: { text: pair.label, tone: "muted" } },
 		]) };
 	}
 
-	#reviewNodes(flow: PendingFlow, sending: boolean): TspNode[] {
+	// Narrow layouts replace the hidden tab strip and keyboard hints with a real touch action bar.
+	// Back/Next only move; Review still requires an explicit Submit, so skipping an optional question
+	// never becomes an implicit answer. The freeform editor gets its own Save and Close targets because
+	// a software keyboard's Return cannot be assumed to arrive as Enter.
+	#mobileActions(flow: PendingFlow, sending: boolean, narrow: boolean): TspNode[] {
+		if (sending) return [];
+		if (flow.editing) {
+			return [{
+				id: "ask-mobile-actions",
+				k: "row",
+				p: { role: "pi.ask.actions", gap: "sm" },
+				c: [
+					{ id: ASK_EDITOR_SAVE_ID, k: "text", p: { role: "pi.ask.action", text: "Save answer", tone: "accent", title: "Save this answer", actions: { click: ASK_EDITOR_SAVE_ID } } },
+					{ id: ASK_EDITOR_CLOSE_ID, k: "text", p: { role: "pi.ask.action", text: "Close editor", tone: "muted", title: "Keep the draft and close the editor", actions: { click: ASK_EDITOR_CLOSE_ID } } },
+				],
+			}];
+		}
+		if (!narrow || flow.tab === flow.questions.length) return [];
+		const last = flow.tab === flow.questions.length - 1;
+		return [{
+			id: "ask-mobile-actions",
+			k: "row",
+			p: { role: "pi.ask.actions", gap: "sm" },
+			c: [
+				...(flow.tab > 0 ? [{ id: ASK_BACK_ID, k: "text", p: { role: "pi.ask.action", text: "Back", tone: "muted", title: "Previous question", actions: { click: ASK_BACK_ID } } }] : []),
+				{ id: ASK_NEXT_ID, k: "text", p: { role: "pi.ask.action", text: last ? "Review" : "Next", tone: "accent", title: last ? "Review every answer" : "Next question", actions: { click: ASK_NEXT_ID } } },
+				{ id: ASK_CANCEL_ID, k: "text", p: { role: "pi.ask.action", text: "Cancel", tone: "muted", title: "Cancel this question flow", actions: { click: ASK_CANCEL_ID } } },
+			],
+		}];
+	}
+
+	#reviewNodes(flow: PendingFlow, sending: boolean, narrow: boolean): TspNode[] {
 		const rows: TspNode[] = flow.questions.map((question, qi) => ({
 			id: `ask-review-${qi}`,
 			k: "text",
 			p: { role: "pi.ask.review", text: `${question.label}: ${answerText(flow, question)}`, wrap: "soft", ...(isAnswered(flow, question) ? {} : { tone: "muted" }) },
 		}));
+		if (narrow) {
+			rows.push({
+				id: "ask-actions",
+				k: "row",
+				p: { role: "pi.ask.actions", gap: "sm" },
+				c: [
+					{ id: ASK_SUBMIT_ID, k: "text", p: { role: "pi.ask.action", text: sending ? "Sending…" : "Submit", tone: "accent", title: "Submit every answer", ...(sending ? {} : { actions: { click: ASK_SUBMIT_ID } }) } },
+					{ id: ASK_CANCEL_ID, k: "text", p: { role: "pi.ask.action", text: "Cancel", tone: "muted", title: "Cancel this question flow", ...(sending ? {} : { actions: { click: ASK_CANCEL_ID } }) } },
+				],
+			});
+			return rows;
+		}
 		const submitCursor = flow.action === 0 ? "›" : " ";
 		const cancelCursor = flow.action === 1 ? "›" : " ";
 		rows.push({
 			id: "ask-actions",
-			k: "col",
-			p: { role: "pi.ask.actions" },
+			k: "row",
+			p: { role: "pi.ask.actions", gap: "sm" },
 			c: [
 				{ id: ASK_SUBMIT_ID, k: "text", p: { role: "pi.ask.action", text: `${submitCursor} 1. ${sending ? "Sending…" : "Submit"}`, ...(flow.action === 0 ? { tone: "accent" } : {}), ...(sending ? {} : { actions: { click: "ask-submit" } }) } },
 				{ id: ASK_CANCEL_ID, k: "text", p: { role: "pi.ask.action", text: `${cancelCursor} 2. Cancel`, tone: "muted", ...(sending ? {} : { actions: { click: "ask-cancel" } }) } },

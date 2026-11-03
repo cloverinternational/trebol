@@ -98,19 +98,59 @@ export const PI_COMPOSER_CSS = `
 [data-role='pi.tasks.row'][data-tone='success'] { color: var(--ok); }
 [data-role='pi.tasks.row'][data-tone='muted'] { color: var(--t2); }
 [data-role='pi.tasks.pq'] { color: var(--t3); font-size: calc(var(--sf-fs, 13px) * 10 / 13); }
-.sf-overlay[data-role='pi.ask'] [data-role='pi.ask.question'] { gap: 8px; margin-bottom: 16px; }
-.sf-overlay[data-role='pi.ask'] [data-role='pi.ask.option'] {
+[data-role='pi.ask'] [data-role='pi.ask.question'] { gap: 8px; margin-bottom: 16px; }
+[data-role='pi.ask'] [data-role='pi.ask.option'] {
   border: 1px solid var(--l2);
   border-radius: var(--r-ctl);
-  padding: 8px 12px;
-  min-height: 28px;
+  padding: 10px 12px;
+  min-height: 40px;
   overflow-wrap: anywhere;
   cursor: pointer;
 }
-.sf-overlay[data-role='pi.ask'] [data-role='pi.ask.option']:hover { background: var(--l1); }
-.sf-overlay[data-role='pi.ask'] [data-role='pi.ask.option'][data-tone='accent'] { border-color: var(--sf-sel); background: var(--sf-mark-bg); }
-.sf-overlay[data-role='pi.ask'] [data-role='pi.ask.actions'] { gap: 12px; align-items: center; }
-.sf-overlay[data-role='pi.ask'] [data-role='pi.ask.action'] { padding: 6px 12px; border-radius: var(--r-ctl); background: var(--l1); cursor: pointer; }
+[data-role='pi.ask'] [data-role='pi.ask.option']:hover { background: var(--l1); }
+[data-role='pi.ask'] [data-role='pi.ask.option'][data-tone='accent'] { border-color: var(--sf-sel); background: var(--sf-mark-bg); }
+[data-role='pi.ask'] [data-role='pi.ask.tabs'],
+[data-role='pi.ask'] [data-role='pi.ask.hint'] { gap: 10px; align-items: center; flex-wrap: wrap; }
+[data-role='pi.ask'] [data-role='pi.ask.tab'] {
+  padding: 4px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+[data-role='pi.ask'] [data-role='pi.ask.tab']:hover { background: var(--l1); }
+[data-role='pi.ask'] [data-role='pi.ask.actions'] { gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 4px; }
+[data-role='pi.ask'] [data-role='pi.ask.action'] {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 8px 12px;
+  border: 1px solid var(--l2);
+  border-radius: var(--r-ctl);
+  background: var(--l1);
+  cursor: pointer;
+}
+[data-role='pi.ask'] [data-role='pi.ask.action']:hover { border-color: var(--accent); }
+[data-role='pi.ask'] [data-role='pi.ask.action'][data-tone='accent'] { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+[data-role='pi.ask'] [data-role='pi.ask.action'][data-tone='muted'] { color: var(--t3); }
+[data-role='pi.ask'] [data-role='pi.ask.progress'] { gap: 8px; align-items: baseline; flex-wrap: wrap; }
+[data-role='pi.ask'] [data-role='pi.ask.freeform'] {
+  padding: 8px 10px;
+  border-left: 2px solid var(--accent);
+  border-radius: 6px;
+  background: var(--l1);
+}
+/* A phone-width composer gives Send a labelled, comfortably tappable target. */
+[data-role='pi.composer.send'] {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 6px 12px;
+  border: 1px solid var(--accent);
+  border-radius: var(--r-ctl);
+  color: var(--accent);
+  font-weight: 600;
+  cursor: pointer;
+}
+[data-role='pi.composer.send']:hover { background: var(--l1); }
 [data-role='pi.board'] { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 4px; }
 /* /btw card, inline in the composer slot: the newest exchange reads as body text, the input row is the boundary. */
 [data-role='pi.btw.question'] { color: var(--t2); }

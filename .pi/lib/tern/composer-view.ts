@@ -41,6 +41,11 @@ export interface ComposerFacts {
 	/** Attachment chips (attachments.ts), drawn above the editor line. */
 	chips?: TspNode;
 	/**
+	 * A phone-width composer bar. Keeps the primary action as a labelled touch target instead of a
+	 * keycap, and drops secondary facts that would push Send off the row.
+	 */
+	compact?: boolean;
+	/**
 	 * True only while Ctrl+B would really move work to the background: a live foreground call exists and a
 	 * writer published its detach (running-work.ts `hasRunningWorkDetach`). The button is a projection of that
 	 * state, never a second way to start it, so it cannot offer a click that does nothing.
@@ -148,7 +153,7 @@ export function composerNodes(f: ComposerFacts, above: TspNode[] = []): TspNode[
 			],
 		}
 		: undefined;
-	const git = f.git ? gitSeg(f.git) : undefined;
+	const git = f.git && !f.compact ? gitSeg(f.git) : undefined;
 	const usage = f.cost !== undefined && f.cost > 0 ? `$${f.cost.toFixed(2)}` : "";
 	// The turn's own clock while it runs: Tern counts it, so an idle or busy bar costs the same frames.
 	const turn: TspNode | undefined = f.busy && f.turnAgeMs !== undefined
@@ -156,11 +161,15 @@ export function composerNodes(f: ComposerFacts, above: TspNode[] = []): TspNode[
 		: undefined;
 	const submit: TspNode = f.busy
 		? { id: "stop", k: "text", p: { role: "omp.composer.stop", text: `Stop${f.queuedFollowUp ? ` · ${f.queuedFollowUp} queued` : ""}`, tone: "error", title: `Stop  esc · Alt+Enter queues follow-up${f.queuedFollowUp ? ` · ${f.queuedFollowUp} queued` : ""}`, actions: { click: "interrupt" } } }
-		: { id: "send", k: "kbd", p: { role: "omp.composer.send", keys: ["enter"], title: "Send  ⏎", actions: { click: "submit" } } };
+		// A phone has no Enter keycap to aim at. The same action becomes a labelled touch target; the
+		// desktop keeps OMP's keycap so its visual contract does not change.
+		: f.compact
+			? { id: "send", k: "text", p: { role: "pi.composer.send", text: "Send", tone: "accent", title: "Send message", actions: { click: "submit" } } }
+			: { id: "send", k: "kbd", p: { role: "omp.composer.send", keys: ["enter"], title: "Send  ⏎", actions: { click: "submit" } } };
 	// Tern-only affordance for the chord no terminal draws: while Ctrl+B would detach the work blocking the
 	// turn, the bar shows the key it stands for and takes a click on it. Same dispatch as the key
 	// (`bg.background` → bridge.backgroundForegroundWork), so the two can never drift.
-	const background: TspNode | undefined = f.backgroundable
+	const background: TspNode | undefined = f.backgroundable && !f.compact
 		? {
 			id: "composer-background", k: "row",
 			p: { role: "omp.composer.background", gap: "xs", align: "center", title: "Move the running work to the background  ctrl+b", actions: { click: "bg.background" } },
@@ -179,7 +188,7 @@ export function composerNodes(f: ComposerFacts, above: TspNode[] = []): TspNode[
 			...(effort ? [effort] : []),
 			{ id: "extras", k: "status", p: { role: "omp.composer.extras", transparent: true, grow: 1 }, c: git ? [git] : [] },
 			...(turn ? [turn] : []),
-			{ id: "usage", k: "text", p: { role: "omp.composer.usage", text: usage, wrap: "none", ...(usage ? { title: `Session cost ${usage}` } : {}), actions: { click: "status.cost" } } },
+			...(!f.compact ? [{ id: "usage", k: "text", p: { role: "omp.composer.usage", text: usage, wrap: "none", ...(usage ? { title: `Session cost ${usage}` } : {}), actions: { click: "status.cost" } } }] : []),
 			...(background ? [background] : []),
 			submit,
 		],

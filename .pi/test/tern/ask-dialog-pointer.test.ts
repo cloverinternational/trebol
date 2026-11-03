@@ -1,5 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { ASK_OPTIONS_ID, ASK_SUBMIT_TAB_ID, NARROW_COLUMNS, TernAskDialog, type AskEventBus } from "../../lib/tern/ask-dialog.ts";
+import {
+	ASK_BACK_ID,
+	ASK_CANCEL_ID,
+	ASK_EDITOR_CLOSE_ID,
+	ASK_EDITOR_SAVE_ID,
+	ASK_NEXT_ID,
+	ASK_OPTIONS_ID,
+	ASK_SUBMIT_ID,
+	ASK_SUBMIT_TAB_ID,
+	NARROW_COLUMNS,
+	TernAskDialog,
+	type AskEventBus,
+} from "../../lib/tern/ask-dialog.ts";
 import { PI_ASK_STARTED_EVENT, PI_ASK_SUBMIT_EVENT } from "../../../extensions/ask-user/src/remote-ask.ts";
 
 function bus(): AskEventBus & { sent: Array<{ channel: string; data: any }> } {
@@ -150,6 +162,11 @@ describe("TernAskDialog pointer input", () => {
 		const text = JSON.stringify(narrow);
 		expect(text).toContain("ask-progress");
 		expect(text).not.toContain("ask-tab-0");
+		// No dead keyboard hints: the narrow layout offers real Back/Next/Cancel controls.
+		expect(text).not.toContain("ask-hint-enter");
+		expect(text).not.toContain("ask-hint-esc");
+		expect(text).toContain(ASK_NEXT_ID);
+		expect(text).toContain(ASK_CANCEL_ID);
 		expect(rows(dialog, NARROW_COLUMNS - 1).map((row) => row.p?.actions)).toEqual([
 			{ click: option(0, 0) },
 			{ click: option(0, 1) },
@@ -165,6 +182,52 @@ describe("TernAskDialog pointer input", () => {
 		expect(rendered(dialog, NARROW_COLUMNS - 1)).toContain("[x] B");
 		// The wide layout is unaffected: the tab strip is back.
 		expect(rendered(dialog, NARROW_COLUMNS)).toContain("ask-tab-0");
+	});
+
+	it("narrow Next reaches Review without answering, and Review still submits explicitly", () => {
+		const { events, dialog } = setup();
+		// A multi-choice question has no row that advances by itself. Next is the only way forward
+		// on a phone, so it must exist and only move the cursor.
+		expect(dialog.handleAction(ASK_NEXT_ID)).toBe(true);
+		expect(rendered(dialog, NARROW_COLUMNS - 1)).toContain("Which tags?");
+		expect(dialog.handleAction(ASK_NEXT_ID)).toBe(true);
+		expect(rendered(dialog, NARROW_COLUMNS - 1)).toContain("Scope: (unanswered)");
+		expect(rendered(dialog, NARROW_COLUMNS - 1)).toContain("Submit");
+		expect(events.sent.some((e) => e.channel === PI_ASK_SUBMIT_EVENT)).toBe(false);
+		// Back moves one step without losing the unanswered state.
+		expect(dialog.handleAction(ASK_BACK_ID)).toBe(true);
+		expect(rendered(dialog, NARROW_COLUMNS - 1)).toContain("Which tags?");
+		expect(dialog.handleAction(ASK_NEXT_ID)).toBe(true);
+		// Required answers still block an explicit Submit.
+		expect(dialog.handleAction(ASK_SUBMIT_ID)).toBe(true);
+		expect(rendered(dialog, NARROW_COLUMNS - 1)).toContain("Answer required: Scope");
+	});
+
+	it("narrow freeform editor has tappable Save and Close targets", () => {
+		const { events, dialog } = setupWith([
+			{
+				id: "reason",
+				label: "Reason",
+				prompt: "Why?",
+				type: "single",
+				required: true,
+				options: [{ value: "freeform", label: "Type answer", freeform: true }],
+			},
+		]);
+		expect(dialog.handleAction(option(0, 0))).toBe(true);
+		expect(rendered(dialog, NARROW_COLUMNS - 1)).toContain("Save answer");
+		expect(rendered(dialog, NARROW_COLUMNS - 1)).toContain("Close editor");
+		dialog.input("because");
+		expect(dialog.handleAction(ASK_EDITOR_SAVE_ID)).toBe(true);
+		expect(rendered(dialog, NARROW_COLUMNS - 1)).toContain("Reason: because");
+		expect(events.sent.some((e) => e.channel === PI_ASK_SUBMIT_EVENT)).toBe(false);
+		// Reopen, type, and close: the draft survives and nothing is submitted.
+		expect(dialog.handleAction(ASK_BACK_ID)).toBe(true);
+		expect(dialog.handleAction(option(0, 0))).toBe(true);
+		dialog.input(" more");
+		expect(dialog.handleAction(ASK_EDITOR_CLOSE_ID)).toBe(true);
+		expect(rendered(dialog, NARROW_COLUMNS - 1)).toContain("because more");
+		expect(events.sent.some((e) => e.channel === PI_ASK_SUBMIT_EVENT)).toBe(false);
 	});
 
 	it("double tap (activate) on a single-choice option confirms it and advances", () => {
@@ -192,7 +255,7 @@ describe("TernAskDialog pointer input", () => {
 	it("a tap on the freeform row opens the editor instead of advancing", () => {
 		const { dialog } = setup();
 		expect(dialog.handleAction(option(0, 2))).toBe(true);
-		expect(rendered(dialog)).toContain("\"detail\":\"▏\"");
+		expect(rendered(dialog)).toContain("\"text\":\"Editing: ▏\"");
 		expect(rendered(dialog)).toContain("Which scope?");
 	});
 

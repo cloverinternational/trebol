@@ -75,6 +75,24 @@ describe("OMP composer port", () => {
 		expect(find(nodes, "composer-col").p.tone).toBe("pending");
 	});
 
+	it("turns the keycap into a labelled Send touch target on a phone-width bar", () => {
+		const nodes = composerNodes({
+			draft: "hello",
+			busy: false,
+			compact: true,
+			model: "Haiku 5.5",
+			cost: 0.42,
+			git: { branch: "main", staged: 0, unstaged: 2, untracked: 0 },
+			backgroundable: true,
+		});
+		expect(find(nodes, "send")?.p).toMatchObject({ role: "pi.composer.send", text: "Send", actions: { click: "submit" } });
+		// Secondary facts move out rather than clipping the primary action; the context meter above stays.
+		expect(find(nodes, "git")).toBeUndefined();
+		expect(find(nodes, "usage")).toBeUndefined();
+		expect(find(nodes, "composer-background")).toBeUndefined();
+		expect(find(nodes, "composer-bar").c.map((n: any) => n.p.role)).toEqual(["omp.composer.model", "omp.composer.extras", "pi.composer.send"]);
+	});
+
 	it("parses git status --porcelain -b", () => {
 		expect(parseGitStatus("## main...origin/main [ahead 1]\n M a\nM  b\nMM c\n?? d\n")).toEqual({ branch: "main", staged: 2, unstaged: 2, untracked: 1 });
 		expect(parseGitStatus("## No commits yet on dev\n")).toEqual({ branch: "dev", staged: 0, unstaged: 0, untracked: 0 });

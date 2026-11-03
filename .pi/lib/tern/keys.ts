@@ -84,6 +84,10 @@ export function keyEffect(sequence: string): KeyEffect | null {
 	// A kitty key release (event type 3) parses as the same chord as its press: acting on it would type every
 	// letter twice and make one Ctrl+C a double press (quit).
 	if (isKeyRelease(sequence)) return null;
+	// A mobile software keyboard can commit Return as LF, CR, or a CRLF pair. pi-tui parses the first two
+	// as Enter but leaves CRLF unnamed, which used to fall through as non-text and do nothing. Treat the
+	// three carriage-return shapes exactly like Enter before any generic chord parsing.
+	if (sequence === "\r" || sequence === "\n" || sequence === "\r\n") return { kind: "submit" };
 	const name = RAW_NAMES[sequence] ?? parseKey(sequence);
 	if (name === "ctrl+c") return { kind: "interrupt" };
 	if (name === "ctrl+v") return { kind: "paste" };

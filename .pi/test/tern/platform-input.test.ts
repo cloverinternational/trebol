@@ -90,6 +90,14 @@ describe("PC keyboard (Linux, Windows) and macOS chords", () => {
 		expect(keyEffect("\x7f")).toEqual({ kind: "backspace" });
 	});
 
+	it("accepts every Return shape a mobile software keyboard can commit", () => {
+		expect(keyEffect("\r")).toEqual({ kind: "submit" });
+		expect(keyEffect("\n")).toEqual({ kind: "submit" });
+		// A CRLF pair is unnamed in pi-tui's parser; it must not disappear between the two bytes.
+		expect(keyEffect("\r\n")).toEqual({ kind: "submit" });
+		expect(keyEffect("\r\nx")).toBeNull();
+	});
+
 	it("ignores kitty key releases, so one Ctrl+C is not a double press and letters are not doubled", () => {
 		expect(keyEffect(`${ESC}[99;5:3u`)).toBeNull();
 		expect(keyEffect(`${ESC}[104;1:3u`)).toBeNull();

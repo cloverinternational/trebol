@@ -223,6 +223,14 @@ describe("PiTernBridge native editing events", () => {
 		expect(bridge.draft).toBe("d");
 	});
 
+	it("a tap on the composer Send action submits the draft, not an empty string", async () => {
+		const { bridge, session } = make();
+		bridge.appendDraft("hello from mobile");
+		await bridge.handle({ verb: "e", body: { sf: "pi", id: "send", ev: "action", act: "submit" } } as never);
+		expect(session.prompts).toEqual(["hello from mobile"]);
+		expect(bridge.draft).toBe("");
+	});
+
 	it("ignores events for other ids", () => {
 		const { bridge } = make();
 		bridge.appendDraft("a");
