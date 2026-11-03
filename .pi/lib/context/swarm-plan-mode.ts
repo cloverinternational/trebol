@@ -119,6 +119,18 @@ export class PlanModeController {
     }
     return this.snapshotOf();
   }
+
+  /**
+   * Drops an approval that could not be applied by the host (for example, the
+   * host cannot replace the session) and returns to active plan mode so the
+   * user can choose again. Never reports an exit.
+   */
+  abortApproval(): PlanModeSnapshot {
+    if (this.snapshot.state !== "awaiting_approval") throw new Error("no plan approval to abort");
+    this.snapshot = { ...this.snapshot, state: "active" };
+    this.events.onApprovalState?.("active");
+    return this.snapshotOf();
+  }
 }
 
 

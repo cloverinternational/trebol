@@ -18,6 +18,7 @@ import {
 import { withDefaultToolRenderer } from "../../packages/runtime/core/src/tool-renderer.ts";
 import { randomUUID } from "node:crypto";
 import { newErrorID } from "../../.pi/lib/tools/swarm-bash.ts";
+import { planContextClearAvailable, requestPlanContextClear } from "../../.pi/lib/context/plan-context-clear.ts";
 
 /** Minimal Pi surface used by this adapter; intentionally structural for compatibility. */
 export interface PlanModePi {
@@ -40,7 +41,7 @@ export function currentPlanModeController(): PlanModeController | undefined {
   return (globalThis as any)[SHARED_KEY];
 }
 const schema = (properties: Record<string, unknown>, required: string[] = []) => ({ type: "object", properties, required, additionalProperties: false });
-const textResult = (text: string, details: unknown = {}) => ({ content: [{ type: "text", text }], details });
+const textResult = (text: string, details: unknown = {}, terminate = false) => ({ content: [{ type: "text", text }], details, ...(terminate ? { terminate: true } : {}) });
 const errorResult = (error: unknown) => ({ content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }], isError: true, details: {} });
 
 function workspace(pi: PlanModePi): string { return pi.getCwd?.() ?? process.cwd(); }
@@ -62,12 +63,15 @@ function restore(pi: PlanModePi, controller: PlanModeController, ctx: any): void
  */
 export const PLAN_APPROVAL_CHOICES = ["y: Approve", "c: Approve + Clear Context", "n: Reject / Revise"] as const;
 export const PLAN_REJECTED_DEFAULT_FEEDBACK = "Please revise the plan and try again.";
-async function askApproval(ctx: any, plan: string): Promise<PlanApproval> {
+async function askApproval(ctx: any, plan: string, canClearContext: boolean): Promise<PlanApproval> {
   const ui = ctx?.ui;
   if (!ui?.select && !ui?.confirm) return { approved: true, editedPlan: plan, clearContext: false };
+  // Without a host handler the clear choice would be a dead option: offer only
+  // the outcomes this process can actually perform.
+  const choices = canClearContext ? [...PLAN_APPROVAL_CHOICES] : [PLAN_APPROVAL_CHOICES[0], PLAN_APPROVAL_CHOICES[2]];
   for (;;) {
     let choice: string | undefined;
-    if (ui.select) choice = await ui.select("Review the plan above and choose an action:", [...PLAN_APPROVAL_CHOICES]);
+    if (ui.select) choice = await ui.select("Review the plan above and choose an action:", choices);
     else choice = (await ui.confirm("Approve Plan", "Approve this plan and begin implementation?")) ? PLAN_APPROVAL_CHOICES[0] : PLAN_APPROVAL_CHOICES[2];
     if (choice === undefined) throw new Error("plan approval cancelled");
     if (choice.startsWith("y")) return { approved: true, editedPlan: plan, clearContext: false };
@@ -155,7 +159,7 @@ export function registerPlanMode(pi: PlanModePi): PlanModeController {
         // Swarm marks the exit only after actual approval (PlanModeExited);
         // a rejection keeps plan mode active.
         if (controller.snapshotOf().state === "active") controller.beginApproval();
-        response = validatePlanApprovalResponse(await askApproval(ctx, planText));
+        response = validatePlanApprovalResponse(await askApproval(ctx, planText, planContextClearAvailable()));
       } catch (error) { return fail(`approval request failed: ${error instanceof Error ? error.message : String(error)}`); }
       if (!response.approved) {
         controller.finishApproval(response);
@@ -167,6 +171,19 @@ export function registerPlanMode(pi: PlanModePi): PlanModeController {
         catch (error) { return fail(error instanceof Error ? error.message : String(error)); }
         try { writePlanFile(canonicalPlanPath(), finalPlan); }
         catch (error) { return fail(`persist approved plan: ${error instanceof Error ? error.message : String(error)}`); }
+      }
+      if (response.clearContext) {
+        // The tool cannot replace the session itself. Hand the approved plan to
+        // the host, which waits for this turn to finish and resumes there.
+        const outcome = requestPlanContextClear({ requestId: randomUUID(), plan: finalPlan, planPath: canonicalPlanPath() });
+        if (outcome.status === "unavailable") {
+          controller.abortApproval();
+          return fail("clear context is unavailable in this host; approve without clearing");
+        }
+        controller.finishApproval(response);
+        // Do not let the model start implementing in the stale session: the
+        // host resumes implementation once, from the cleared session.
+        return textResult(exitPlanApprovedResult(finalPlan, true), controller.snapshotOf(), true);
       }
       controller.finishApproval(response);
       return textResult(exitPlanApprovedResult(finalPlan, response.clearContext ?? false), controller.snapshotOf());

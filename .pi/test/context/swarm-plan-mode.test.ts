@@ -9,6 +9,7 @@ import {
 import { registerPlanMode } from "../../../extensions/swarm-plan-mode/extension.ts";
 import { createSwarmBuiltinPipeline } from "../../lib/runtime/swarm-builtin-hooks.ts";
 import { resetReminderSequences } from "../../lib/policy/swarm-annoyance-nudge.ts";
+import { installPlanContextClearHandler, type PlanContextClearRequest } from "../../lib/context/plan-context-clear.ts";
 
 class FakePi {
   tools: any[] = []; handlers = new Map<string, any>(); entries: any[] = [];
@@ -119,5 +120,100 @@ describe("plan mode (internal/plan + hooks/builtin plan_mode_first_tool.go/simul
     expect(() => readSubmittedPlan({ workspace: root }, "empty.md")).toThrow(`plan file "empty.md" is empty`);
     expect(() => validatePlanContent("a\0b", "edited plan")).toThrow("edited plan is not valid UTF-8 text");
     expect(planExitDetected("enter_plan_mode") && planExitDetected("exit_plan_mode") && !planExitDetected("Bash")).toBe(true);
+  });
+
+  it("approve + clear context hands the final plan to the host and terminates the stale turn", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-plan-"));
+    const home = mkdtempSync(join(tmpdir(), "pi-plan-home-"));
+    const prev = process.env.SWARM_HOME; process.env.SWARM_HOME = home;
+    const requests: PlanContextClearRequest[] = [];
+    const uninstall = installPlanContextClearHandler((request) => { requests.push(request); return { status: "scheduled" }; });
+    try {
+      const pi = new FakePi(root);
+      const controller = registerPlanMode(pi);
+      writeFileSync(join(root, "plan.md"), "# Plan\n\n1. step one\n");
+      controller.enter();
+      let offered: string[] = [];
+      const ui = { select: async (_title: string, choices: string[]) => { offered = choices; return "c: Approve + Clear Context"; } };
+      const result = await pi.tools[1].execute("x", { plan_file: "plan.md" }, new AbortController().signal, undefined, { ui });
+      expect(offered).toEqual(["y: Approve", "c: Approve + Clear Context", "n: Reject / Revise"]);
+      expect(requests).toHaveLength(1);
+      expect(requests[0].plan).toBe("# Plan\n\n1. step one");
+      expect(requests[0].planPath.endsWith("/plan.md")).toBe(true);
+      expect(requests[0].requestId).toMatch(/^[0-9a-f-]{36}$/);
+      expect(result.terminate).toBe(true);
+      expect(JSON.parse(result.content[0].text).clear_context).toBe(true);
+      expect(controller.isActive()).toBe(false);
+    } finally {
+      uninstall();
+      if (prev === undefined) delete process.env.SWARM_HOME; else process.env.SWARM_HOME = prev;
+    }
+  });
+
+  it("ordinary approval keeps the session and never asks the host to clear", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-plan-"));
+    const home = mkdtempSync(join(tmpdir(), "pi-plan-home-"));
+    const prev = process.env.SWARM_HOME; process.env.SWARM_HOME = home;
+    const requests: PlanContextClearRequest[] = [];
+    const uninstall = installPlanContextClearHandler((request) => { requests.push(request); return { status: "scheduled" }; });
+    try {
+      const pi = new FakePi(root);
+      const controller = registerPlanMode(pi);
+      writeFileSync(join(root, "plan.md"), "# Plan\n");
+      controller.enter();
+      const ui = { select: async () => "y: Approve" };
+      const result = await pi.tools[1].execute("x", { plan_file: "plan.md" }, new AbortController().signal, undefined, { ui });
+      expect(requests).toHaveLength(0);
+      expect(result.terminate).toBeUndefined();
+      expect(JSON.parse(result.content[0].text).clear_context).toBe(false);
+      expect(controller.isActive()).toBe(false);
+    } finally {
+      uninstall();
+      if (prev === undefined) delete process.env.SWARM_HOME; else process.env.SWARM_HOME = prev;
+    }
+  });
+
+  it("does not offer a clear choice when no host can perform it", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-plan-"));
+    const home = mkdtempSync(join(tmpdir(), "pi-plan-home-"));
+    const prev = process.env.SWARM_HOME; process.env.SWARM_HOME = home;
+    delete (globalThis as Record<symbol, unknown>)[Symbol.for("pi-swarm-plan-context-clear-handler")];
+    try {
+      const pi = new FakePi(root);
+      const controller = registerPlanMode(pi);
+      writeFileSync(join(root, "plan.md"), "# Plan\n");
+      controller.enter();
+      let offered: string[] = [];
+      const ui = { select: async (_title: string, choices: string[]) => { offered = choices; return "y: Approve"; } };
+      const result = await pi.tools[1].execute("x", { plan_file: "plan.md" }, new AbortController().signal, undefined, { ui });
+      expect(offered).toEqual(["y: Approve", "n: Reject / Revise"]);
+      expect(result.terminate).toBeUndefined();
+      expect(JSON.parse(result.content[0].text).clear_context).toBe(false);
+    } finally {
+      if (prev === undefined) delete process.env.SWARM_HOME; else process.env.SWARM_HOME = prev;
+    }
+  });
+
+  it("fails closed and stays active when the host stops accepting a clear", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-plan-"));
+    const home = mkdtempSync(join(tmpdir(), "pi-plan-home-"));
+    const prev = process.env.SWARM_HOME; process.env.SWARM_HOME = home;
+    const uninstall = installPlanContextClearHandler(() => ({ status: "unavailable" }));
+    try {
+      const pi = new FakePi(root);
+      const controller = registerPlanMode(pi);
+      writeFileSync(join(root, "plan.md"), "# Plan\n");
+      controller.enter();
+      const ui = { select: async () => "c: Approve + Clear Context" };
+      const result = await pi.tools[1].execute("x", { plan_file: "plan.md" }, new AbortController().signal, undefined, { ui });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toBe("exit_plan_mode: clear context is unavailable in this host; approve without clearing");
+      expect(result.terminate).toBeUndefined();
+      expect(controller.isActive()).toBe(true);
+      expect(controller.snapshotOf().state).toBe("active");
+    } finally {
+      uninstall();
+      if (prev === undefined) delete process.env.SWARM_HOME; else process.env.SWARM_HOME = prev;
+    }
   });
 });
