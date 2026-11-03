@@ -259,8 +259,12 @@ function statSpans(stat: GitStat | undefined): Array<{ t: string; s?: string }> 
 	return [{ t: `+${stat.add}`, s: "success" }, { t: " " }, { t: `−${stat.del}`, s: "error" }];
 }
 
+// Line counts belong to the row's own section: staged rows count the index, unstaged rows the worktree.
+function statFor({ section, entry }: GitFileRef): GitStat | undefined {
+	return section === "staged" ? entry.stagedStat : section === "unstaged" ? entry.unstagedStat : undefined;
+}
+
 function fileRow(ref: GitFileRef, index: number): TspNode {
-	const stat = ref.section === "staged" ? ref.entry.stagedStat : ref.section === "unstaged" ? ref.entry.unstagedStat : undefined;
 	const movedFrom = ref.entry.from ? [{ t: `  ← ${ref.entry.from}`, s: "dim" }] : [];
 	return {
 		id: `git-file-${index}`,
@@ -269,9 +273,26 @@ function fileRow(ref: GitFileRef, index: number): TspNode {
 		c: [
 			{ id: `git-file-${index}-code`, k: "text", p: { role: "pi.git.code", tone: SECTION_TONE[ref.section], spans: [{ t: codeOf(ref), s: SECTION_TONE[ref.section] }], wrap: "none" } },
 			{ id: `git-file-${index}-path`, k: "text", p: { role: "pi.git.path", grow: 1, min: { w: "20ch" }, truncate: "middle", spans: [{ t: ref.entry.path, s: "path" }, ...movedFrom] } },
-			{ id: `git-file-${index}-stat`, k: "text", p: { role: "pi.git.stat", spans: statSpans(stat), wrap: "none" } },
+			{ id: `git-file-${index}-stat`, k: "text", p: { role: "pi.git.stat", spans: statSpans(statFor(ref)), wrap: "none" } },
 		],
 	};
+}
+
+// The size of the pending work at a glance, without adding up the sections. Distinct paths: a file that is
+// staged and then edited again is two rows but one file. Line counts are already on the rows, so this only
+// sums them; binary and untracked rows carry none, and `known` says whether a +/− pair is worth showing.
+function gitTotals(refs: GitFileRef[]): { files: number; add: number; del: number; known: boolean } {
+	let add = 0;
+	let del = 0;
+	let known = false;
+	for (const ref of refs) {
+		const stat = statFor(ref);
+		if (!stat || stat.add === null || stat.del === null) continue;
+		known = true;
+		add += stat.add;
+		del += stat.del;
+	}
+	return { files: new Set(refs.map((ref) => ref.entry.path)).size, add, del, known };
 }
 
 // The status overlay: summary, sections of files, one click per file to its diff.
@@ -280,7 +301,11 @@ export function gitStatusNodes(repo: Extract<RepoStatus, { git: true }>, refs: G
 	const branch = snapshot.detached ? `detached at ${snapshot.oid.slice(0, 7)}` : snapshot.branch;
 	const upstream = snapshot.upstream ? ` → ${snapshot.upstream}` : "";
 	const sync = snapshot.ahead !== undefined ? ` · ↑${snapshot.ahead} ↓${snapshot.behind}` : "";
-	const body: TspNode[] = [{ id: "git-summary", k: "text", p: { role: "pi.git.summary", spans: [{ t: `${branch}${upstream}${sync}`, s: "strong" }] } }];
+	const totals = gitTotals(refs);
+	const files = totals.files ? ` · ${totals.files} ${totals.files === 1 ? "file" : "files"}` : "";
+	const summary: Array<{ t: string; s?: string }> = [{ t: `${branch}${upstream}${sync}${files}`, s: "strong" }];
+	if (totals.known) summary.push({ t: " · " }, { t: `+${totals.add}`, s: "success" }, { t: " " }, { t: `−${totals.del}`, s: "error" });
+	const body: TspNode[] = [{ id: "git-summary", k: "text", p: { role: "pi.git.summary", spans: summary } }];
 	if (refs.length === 0) body.push({ id: "git-clean", k: "text", p: { role: "pi.git.empty", text: "Working tree clean", tone: "muted" } });
 	for (const section of SECTIONS) {
 		const rows = refs.map((ref, i) => ({ ref, i })).filter(({ ref }) => ref.section === section);

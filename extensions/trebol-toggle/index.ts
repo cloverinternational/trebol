@@ -83,6 +83,9 @@ export default function trebolLoader(pi: ExtensionAPI): void {
     handler: async (_args, ctx) => toggle(ctx),
   });
   const shortcut = Object.assign(toggle, { [trebolShortcut]: true });
+  // `app.session.toggleNamedFilter` ships on ctrl+n, but it only fires inside
+  // the session picker. ~/.pi/agent/keybindings.json moves it to ctrl+alt+n so
+  // Pi does not report a conflict; the picker's hint follows that binding.
   pi.registerShortcut("ctrl+n", {
     description: "Toggle Trebol extensions",
     handler: shortcut,

@@ -2,6 +2,12 @@
 import { execFile } from "node:child_process";
 import type { GitFacts } from "./composer-view.ts";
 
+// Porcelain v1 spells an unmerged path with one of these pairs (git-status(1), "Short format"). Such a file is
+// neither staged nor unstaged: counting both columns made the bar read "*1 +1" for one conflicted file and
+// offered a green staged "+1" that cannot be committed until the conflict is resolved. It is counted once, on
+// the worktree side, so one conflicted file keeps the branch dirty without inventing staged work.
+const UNMERGED = new Set(["DD", "AU", "UD", "UA", "DU", "AA", "UU"]);
+
 export function parseGitStatus(out: string): GitFacts | undefined {
 	const lines = out.split("\n").filter(Boolean);
 	if (lines.length === 0 || !lines[0].startsWith("## ")) return undefined;
@@ -14,7 +20,9 @@ export function parseGitStatus(out: string): GitFacts | undefined {
 	for (const line of lines.slice(1)) {
 		const x = line[0];
 		const y = line[1];
-		if (x === "?" && y === "?") facts.untracked++;
+		const xy = `${x ?? ""}${y ?? ""}`;
+		if (xy === "??") facts.untracked++;
+		else if (UNMERGED.has(xy)) facts.unstaged++;
 		else {
 			if (x && x !== " ") facts.staged++;
 			if (y && y !== " ") facts.unstaged++;
