@@ -231,6 +231,13 @@ capabilities and shared policy over duplicate tools or parallel global state.
 
 ## Capability locator
 
+Hoja filing recovery: `extensions/hoja-mode/projects.ts` registers `hoja_project`
+(list/select/create), exposed by `swarm-tool-gating.ts`. Missing projects trigger bounded
+automatic discovery and report candidates for a user filing decision; nothing is blocked. Creation
+requires native confirmation and journaled intent.
+The destination is saved per chat, and selection invalidates the Hoja client catalog.
+See `docs/reference/hoja-task-publication.md` for live reproduction and verification limits.
+
 Use this section when a user names a tool, skill, or hook. Start at the public
 Pi extension, then follow its imported package/library. Keep the extension
 thin: execution/domain logic belongs in the package or `.pi/lib/`, policy
@@ -250,7 +257,7 @@ belongs in `packages/policy/policy`, and rendering belongs in the extension/rend
 | `memory_history recall` | `extensions/memory-history/extension.ts` | `.pi/lib/context/knowledge-pageindex.ts` projects scoped records into read-only PageIndex sections; `.pi/lib/context/memory-agent.ts` calls an isolated Pi model whose only tools are `memory_browse`, `memory_read`, and `memory_select` from `.pi/lib/state/memory-retrieval-worker.ts`. The parent validates selected IDs against its snapshot. Candidate results are leads, never verified recall; writes still use explicit store operations. |
 | `memory_history offer` | `extensions/memory-history/extension.ts` | `.pi/lib/context/memory-handoff.ts` accepts bounded explicit text, source and evidence; tool-less Pi consultation judges durable project knowledge, then the parent writes only a candidate through `KnowledgeStore`. A content/source-derived ID deduplicates retries. A read-only PageIndex projection acknowledges the exact saved revision as `stored-indexed`, otherwise `stored-index-pending` with a retry hint. No global or verified write. |
 | `project_init`, `/init` | `extensions/project-init/extension.ts` | `.pi/lib/policy/project-scaffold.ts`, `.pi/lib/policy/project-structure.ts`. `/init` injects an interview brief via `sendUserMessage`; the agent interviews with `ask_user_question` and calls `project_init` (`inspect`/`plan`/`apply`). There is no modal wizard. `apply` never clobbers existing files. Like `memory_history`, this is an intentional model-facing extension tool, so `swarmSurfaceFor` must keep `project_init` on the surface — otherwise it registers but is gated out and the agent reports it as missing. |
-| `hoja_list`, `hoja_get`; `/hoja on\|off\|status`; automatic TaskManage → Hoja publication | `extensions/hoja-mode/extension.ts` (on by default) | `extensions/hoja-mode/publish.ts` decides from the TaskManage result what is coarse enough to publish (top-level task, or `metadata.hoja:"publish"`; `metadata.hoja:"local"` stays local), reuses a named issue (`metadata.hojaIssue`) without writing to it, resolves the project (`metadata.hojaProject` or `HOJA_PROJECT`), and writes through the shared client in `.pi/lib/claw/hoja.ts` (`createIssue` with `parentId`, `findIssueByIdentifier`, read-back with `Issue.parent`). Associations are journaled as `hoja-task-link` entries and replayed per chat. The pre-write intent is journaled *before* the create request, and any unconfirmed write stays `reconciling` with a description marker; `findIssueByMarker` plus a read-back that proves marker, project and parent is the only way one is adopted, so a marker miss is never retried as a create. A promoted child is deferred (`parent_unpublished`) unless its parent already has an issue. Batches are serialized per session and a generation guard stops an in-flight batch after `/hoja off`, a chat switch or shutdown; the outcome is appended to the TaskManage result, so the model — not only the UI — learns about a skip such as `no_project` and can retry it with corrected metadata. Publication never moves, closes, assigns or comments. `/hoja off` disables publication and guidance; the read tools stay read-only. Docs: `docs/reference/hoja-task-publication.md`; tests: `.pi/test/tools/hoja-publish.test.ts`. |
+| `hoja_list`, `hoja_get`, `hoja_project`; `/hoja on\|off\|status`; automatic TaskManage → Hoja publication | `extensions/hoja-mode/extension.ts` (on by default) | `extensions/hoja-mode/publish.ts` decides from the TaskManage result what is coarse enough to publish (top-level task, or `metadata.hoja:"publish"`; `metadata.hoja:"local"` stays local), reuses a named issue (`metadata.hojaIssue`) without writing to it, resolves the project from declarations — `metadata.hojaProject`, then the chat's target (a `hoja_project` selection, or the host option), then the repository's `.pi/config/hoja.json`, then `HOJA_PROJECT` — never from the workspace directory name, and an agent-named project that does not exist falls back to the repository project with `substitutedFrom` recorded instead of failing the registration; `hoja_project` `action=list` reads the real catalogue including empty projects (`hoja_list` only lists issues), `action=select` remembers an exact project per chat, and `action=create` creates one in an exact team after a host confirmation that shows name and team, journaling the attempt before the request and reconciling it by exact name and team. It writes through the shared client in `.pi/lib/claw/hoja.ts` (`createIssue` with `parentId`, `findIssueByIdentifier`, read-back with `Issue.parent`). Associations are journaled as `hoja-task-link` entries and replayed per chat. The pre-write intent is journaled *before* the create request, and any unconfirmed write stays `reconciling` with a description marker; `findIssueByMarker` plus a read-back that proves marker, project and parent is the only way one is adopted, so a marker miss is never retried as a create. A promoted child is deferred (`parent_unpublished`) unless its parent already has an issue. Batches are serialized per session and a generation guard stops an in-flight batch after `/hoja off`, a chat switch or shutdown; the outcome is appended to the TaskManage result, so the model — not only the UI — learns about a skip such as `no_project` and can retry it with corrected metadata. Missing filing is recovery, not a gate: on `no_project`/`project_unresolved` the extension runs bounded catalogue discovery (journaled as `hoja-recovery`, replayed on resume), reports up to 12 candidates with descriptions and team keys and never picks one, retries the same task once when a declared mapping becomes resolvable, and blocks no tool; queued tasks (authoritative snapshots with canonical answers, bounded, journaled, replayed on resume; deleted and `hoja:local` work dropped; overflow reported) are retried automatically after a selection or on a later plain TaskManage update, with the retry chained into the same serialized queue, and an unfiled completion is reported honestly. An ordinary `hoja_project` select is session-only; only select with `remember:true` (host-confirmed) or create persists the mapping to `.pi/config/hoja.json`, at the repository root resolved from `.git`, preserving existing keys and refusing malformed or symlinked files. A session-owned issue is kept current and closed by `lifecycle.ts`; a reused or shared issue is never written to. `/hoja off` disables publication and guidance; the read tools stay read-only. Docs: `docs/reference/hoja-task-publication.md`; tests: `.pi/test/tools/hoja-publish.test.ts`, `.pi/test/tools/hoja-lifecycle.test.ts`, `.pi/test/tools/hoja-recovery.test.ts`, `.pi/test/tools/hoja-recovery-cache.test.ts`, `.pi/test/tools/hoja-config.test.ts`. |
 | `skills_list`, `skill_view` | `extensions/swarm-skills/extension.ts` | `packages/context/skills/src/index.ts` and `.pi/lib/context/swarm-skill-registry.ts`; skill bodies/support files stay on disk. |
 | Final Mermaid response repair and follow-up | `extensions/mermaid-response/extension.ts` | `.pi/lib/context/mermaid-response.ts` and `mermaid-followup.ts`; `message_end` replaces only successful finalized assistant text before persistence/final redraw. The streaming preview may already have shown the original. Mermaid fences are processed independently (up to 16); only one narrowly recognized flowchart arrow or sequence-message colon per diagram is changed after successful revalidation. Other syntax and validator failures preserve the original. For conceptual/explicit-diagram user requests, `turn_end` queues one model-visible `followUp` if a substantial final explanation lacks a Mermaid fence; it does not replace the previous response, and a second omission does not loop. The follow-up text tells the model to stay on the original request and names the hook's own source files only when the prompt is about the Mermaid hook; it is never sent in subagents (`PI_SWARM_SUBAGENT=1`), whose final text is the deliverable (#299; e2e `node tools/e2e/mermaid-followup-stays-on-task.mjs`). Pi's terminal Markdown renderer displays Mermaid as code, not SVG connectors; connector color belongs in the actual diagram-rendering client. |
 | `Skill`, `SkillManage` | skill/autogen integration via `extensions/swarm-skills/extension.ts`, `extensions/autogenskills/extension.ts` | `packages/context/autogenskills/src/index.ts`; mutate skills only through the vault/revision API. |
@@ -622,6 +629,11 @@ one dispatch for caret/delete/undo keys, used by `run.ts` and the e2e drivers. W
 terminal → program messages as OSC 877 (ST or BEL) through ConPTY and `splitInput` accepts both framings;
 `run.ts` enables VT input on win32. Ctrl+V reads go through
 `.pi/lib/tern/clipboard.ts` (pi-tui native, else wl-paste / xclip / xsel / PowerShell / pbpaste).
+
+Two extension shortcuts shadow a built-in, so `~/.pi/agent/keybindings.json` releases the built-in alias:
+`tui.editor.cursorLeft` keeps only `left` (ctrl+b belongs to `detach`) and `app.session.toggleNamedFilter`
+moves to `ctrl+alt+n` (ctrl+n belongs to `trebol-toggle`; the picker hint follows the binding). A conflict is
+only reported, never resolved automatically, so a fresh machine without those two entries warns at startup.
 
 Attachments (`.pi/lib/tern/attachments.ts`): copied files, a copied image (saved to a temp file), and files
 dropped on the pane become chips above the editor (`omp.composer.chips`), any mix at once, up to 20. The runner
@@ -1081,6 +1093,39 @@ Session replacement/shutdown clear ownership and bridge close unsubscribes.
 Tests: `.pi/test/tern/{startup-card-mcp,mcp-bridge}.test.ts`,
 `.pi/test/tools/{mcp-status,mcp-fallback-status}.test.ts`, and
 `packages/tools/mcp/test/index.test.ts`.
+
+### MCP exposure to the model and to `/mcp`
+
+Two separate facts decide whether the agent can use MCP: what Pi registers, and
+what this harness leaves active. Pi's builtin MCP extension registers
+`mcp__<server>__<tool>` and tags each definition with an `exposure` —
+`direct` (declared like a builtin), `deferred` (declared only after
+`tool_search` loads it), `codemode`, or `hidden`. Measured on Pi 1.3.0 with a
+live probe: the project server registered `direct` tools that reached the
+model, while four user-scope servers registered `deferred` tools that did not,
+because `tool_search` was never in the active set — `codemode` was whitelisted
+in `swarmSurfaceFor` and `tool_search` was not, and servers connecting in the
+background register their tools after the last alignment pass.
+
+Rules that keep this true:
+
+- `swarmSurfaceFor` treats `codemode` and `tool_search` alike; gating one hides
+  every server whose exposure asks for it.
+- `alignTools` (`.pi/lib/runtime/swarm-transport-parity.ts` caller, in
+  `extensions/swarm-transport-parity/extension.ts`) activates `tool_search`
+  whenever a registered `mcp__*` definition is `deferred`, and re-runs at
+  `turn_start` so late registrations are picked up.
+- The same pass publishes `.pi/lib/tools/mcp-inventory.ts` (session-scoped:
+  server, exposure, active/total, tool names). Tern's `/mcp` renders it through
+  `.pi/lib/tern/mcp-view.ts`; Pi's own bare `/mcp` opens a TUI component this
+  frontend cannot draw, so the bridge answers bare `/mcp` itself and leaves
+  `login`/`logout`/`reconnect` on Pi's handler.
+- `extensions/swarm-prompt/extension.ts` replaces Pi's base prompt; it must
+  carry forward any string in `systemPromptOptions.sections` (the MCP
+  extension's `mcp_servers`) rather than dropping the map.
+
+Tests: `.pi/test/runtime/{swarm-mcp-activation,swarm-extra-tool-gating}.test.ts`,
+`.pi/test/tools/mcp-inventory.test.ts`, `.pi/test/tern/mcp-command.test.ts`.
 
 ### Startup card watcher budget
 
