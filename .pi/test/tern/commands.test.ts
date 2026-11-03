@@ -102,6 +102,18 @@ describe("buildCatalog", () => {
 		]);
 		expect(calls).toEqual(["ext"]);
 	});
+
+	it("offers the bridge's own /context only while no Pi command claims the name", () => {
+		expect(catalog.lookup("context")).toEqual([{ name: "context", kind: "bridge", description: expect.any(String), supported: true }]);
+		expect(routeSubmission("/context", catalog, true)).toEqual({ kind: "bridge", name: "context", args: "" });
+		// A bridge command is a local view: it runs mid-turn instead of being refused as busy.
+		expect(autocompleteCommands(source).find((c) => c.name === "context")).toMatchObject({ icon: "gauge" });
+		// A Pi extension that adds /context wins, and the name stays unambiguous.
+		const claimed = buildCatalog({ extensionCommands: () => [{ invocationName: "context" }], promptTemplates: () => [], skills: () => [] });
+		expect(claimed.lookup("context").map((e) => e.kind)).toEqual(["extension"]);
+		expect(autocompleteCommands({ extensionCommands: () => [{ invocationName: "context" }], promptTemplates: () => [], skills: () => [] })
+			.filter((c) => c.name === "context")).toHaveLength(1);
+	});
 });
 
 describe("routeSubmission", () => {
@@ -293,8 +305,10 @@ describe("PiTernBridge command routing", () => {
 		const { calls, bridge, writes } = fakeSession();
 		await bridge.submit("/nope");
 		expect(surfaceJson(writes)).toContain("not sent to the model");
-		await bridge.submit("/tree");
+		await bridge.submit("/settings");
 		expect(surfaceJson(writes)).toContain("unavailable in Tern");
+		// /tree is a Tern builtin now (the session tree picker); it still never reaches the model.
+		await bridge.submit("/tree");
 		expect(calls).toEqual([]);
 	});
 

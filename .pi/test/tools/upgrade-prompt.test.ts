@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildUpgradePrompt, GOAL_CONDITION_LIMIT, registerUpgradePrompt, UPGRADE_TEMPLATE } from "../../../extensions/upgrade-prompt/extension.ts";
+import { GOAL_CONDITION_LIMIT, registerUpgradePrompt } from "../../../extensions/upgrade-prompt/extension.ts";
+import { buildUpgradePrompt, UPGRADE_TEMPLATE } from "../../lib/claw/upgrade-prompt.ts";
 import { goalHostForSession, registerSwarmGoal } from "../../lib/tools/swarm-goal.ts";
 
 /**

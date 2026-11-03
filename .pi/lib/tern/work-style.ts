@@ -5,6 +5,8 @@
  *
  * Stick to the selector subset Tern supports (docs/reference/tern-site/styles/css.md): no `:has()`, no `~`
  * combinator, and no leading region element — a program sheet is prefixed with `[data-scope]`.
+ * Font sizes are `calc(var(--sf-fs, 13px) * N / 13)` so they follow the terminal font with or without Tern's
+ * region zoom (see composer-style.ts).
  */
 export const TERN_WORK_CSS = `
 [data-role='tern.work-controls'] { display: flex; align-items: center; gap: 6px; margin: 0 0 8px; }
@@ -17,7 +19,7 @@ export const TERN_WORK_CSS = `
   border-radius: 999px;
   background: var(--l1);
   color: var(--t3);
-  font-size: 10px;
+  font-size: calc(var(--sf-fs, 13px) * 10 / 13);
   line-height: 1.6;
   letter-spacing: 0.02em;
   white-space: nowrap;
@@ -25,7 +27,7 @@ export const TERN_WORK_CSS = `
 }
 [data-role='tern.work-mode']:hover,
 [data-role='tern.work-collapse']:hover { color: var(--t1); border-color: var(--accent); }
-[data-role='tern.work-focus'] { color: var(--accent); font-size: 11px; margin: 0 0 8px; }
+[data-role='tern.work-focus'] { color: var(--accent); font-size: calc(var(--sf-fs, 13px) * 11 / 13); margin: 0 0 8px; }
 /* Rhythm: one step per line of thought, so steps sit apart instead of stacking into a wall. */
 [data-role='tern.work-live'] .sf-tool-body > .sf-tool + .sf-tool,
 [data-role='tern.work'] .sf-tool-body > .sf-tool + .sf-tool { margin-top: 10px; }
@@ -36,6 +38,6 @@ export const TERN_WORK_CSS = `
 [data-role='tern.work-patch.diff'] { margin-top: 4px; }
 [data-role='tern.work-latest'],
 [data-role='tern.work-failed'],
-[data-role='tern.work-overflow'] { color: var(--t3); font-size: 10.5px; margin-top: 4px; }
-[data-role='tern.work-preparing'] { color: var(--t3); font-size: 10.5px; margin-top: 4px; }
+[data-role='tern.work-overflow'] { color: var(--t3); font-size: calc(var(--sf-fs, 13px) * 10.5 / 13); margin-top: 4px; }
+[data-role='tern.work-preparing'] { color: var(--t3); font-size: calc(var(--sf-fs, 13px) * 10.5 / 13); margin-top: 4px; }
 `;

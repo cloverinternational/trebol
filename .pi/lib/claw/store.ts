@@ -41,7 +41,7 @@ export type Origin = {
 	/** That orchestrator's Tern block (TERN_PANE): the run's worker tabs open in the Tern session holding it. */
 	pane?: number;
 };
-export type SpawnInput = Origin & { task: string; project: string; assignee?: string; label?: string; cwd?: string; provider?: string; model?: string; keepOpen?: boolean };
+export type SpawnInput = Origin & { task: string; project: string; assignee?: string; label?: string; cwd?: string; provider?: string; model?: string; keepOpen?: boolean; upgrade?: boolean };
 export type Run = Origin & {
 	id: string; label: string; task: string; cwd: string; status: RunStatus; phase: RunPhase;
 	createdAt: string; updatedAt: string; project: string; assignee?: string; provider?: string; model?: string;
@@ -98,6 +98,9 @@ export type Run = Origin & {
 	 *  repeated ticks. Persisted on the run (not in memory) so a restart honours it. Released by claw_close or
 	 *  claw_set_keep keep=false, which then closes on the next tick. Absent (the default) closes exactly as before. */
 	keepOpen?: boolean;
+	/** `false` launches the worker with the plain task-file instruction. Absent (the default) wraps it in the /upgrade
+	 *  template. Persisted so a relaunch of the same run sends the same first turn; a resume sends none. */
+	upgrade?: boolean;
 	/** When this run's current launch or resume attempt started. The launch timeout and the no-started notice measure
 	 *  from here, so resuming an old run does not look like a launch that has been hanging since it was created. */
 	launchStartedAt?: string;

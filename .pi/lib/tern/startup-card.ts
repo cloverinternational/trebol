@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import { readdirSync, readFileSync, realpathSync, watch, type FSWatcher } from "node:fs";
 import { join } from "node:path";
 import type { ArtifactBlob } from "./artifact-previews.ts";
-import { readGitSnapshot, type GitEntry, type GitSection, type GitSnapshot, type GitStat } from "./git-status.ts";
+import { readGitSnapshot, readHeadCommit, type GitEntry, type GitSection, type GitSnapshot, type GitStat, type HeadCommit } from "./git-status.ts";
 import type { McpStatus } from "../tools/mcp-status.ts";
 import type { TspNode } from "./tsp.ts";
 
@@ -28,7 +28,7 @@ export interface CommitRow { hash: string; subject: string; when: string }
 
 export type RepoStatus =
 	| { cwd: string; git: false }
-	| { cwd: string; git: true; root: string; gitDir?: string; worktrees: number; commits: CommitRow[]; snapshot: GitSnapshot };
+	| { cwd: string; git: true; root: string; gitDir?: string; worktrees: number; commits: CommitRow[]; snapshot: GitSnapshot; head?: HeadCommit };
 
 export interface GitFileRef { section: GitSection; entry: GitEntry }
 
@@ -64,6 +64,9 @@ export async function readRepoStatus(cwd: string): Promise<RepoStatus> {
 		const [hash = "", subject = "", when = ""] = line.split("\x1f");
 		return { hash, subject, when };
 	});
+	// The clean view shows the HEAD commit and its files, the way OMP's git app does. A dirty tree shows the
+	// change list instead, so the extra git reads only happen when there is nothing to stage.
+	const head = snapshot.entries.length === 0 && !snapshot.noCommits ? await readHeadCommit(cwd) : undefined;
 	return {
 		cwd,
 		git: true,
@@ -72,6 +75,7 @@ export async function readRepoStatus(cwd: string): Promise<RepoStatus> {
 		worktrees: (worktrees ?? "").split("\n").filter((line) => line.startsWith("worktree ")).length,
 		commits,
 		snapshot,
+		head,
 	};
 }
 
