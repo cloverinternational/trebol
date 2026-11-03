@@ -103,7 +103,10 @@ describe("session tree model", () => {
 		expect(model.rows).toHaveLength(20_001);
 		expect(Math.max(...model.rows.map((r) => r.depth))).toBe(0);
 		expect(filterRows(model, "no-tools")).toHaveLength(2_000);
-		expect(performance.now() - t0).toBeLessThan(1_000);
+		// A regression guard, not a microbenchmark: the build measures ~55 ms here and takes tens of
+		// seconds if it ever goes quadratic. A 1 s ceiling failed on a slower CI runner at 1002.5 ms,
+		// so leave an order of magnitude of headroom above the real cost instead of timing the runner.
+		expect(performance.now() - t0).toBeLessThan(10_000);
 	});
 
 	it("reads rows as prose: headings give way to body text, markdown markers drop", () => {
