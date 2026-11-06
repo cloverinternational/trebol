@@ -1389,3 +1389,17 @@ around `watch()` cannot see `ENOSPC`, and an unlistened event aborts the
 process. A watcher that fails is dropped, and the card keeps its last state.
 Tests: `.pi/test/tern/startup-card-watch.test.ts` and the live watcher checks in
 `tools/e2e/tern-startup-card.mjs`.
+
+### Startup card mark
+
+The shamrock in the startup card is sized by explicit `w`/`h` on the `image`
+node, never by a `lines` bound. `max: { h: "7lines" }` alone let Tern pick a box
+wider than the artwork and crop it (`sf-clipped`: 248.84 x 175 measured live),
+and a height in text lines grew the mark with the terminal font. The numbers are
+**base** pixels: Tern lays the pane out at `font-size/13`, so `w: 36, h: 39`
+renders 55.39 x 60 at a 20 px font and keeps the asset's 1172:1268 ratio, which
+is what stops the crop. The asset carries a translucent white rim on its path so
+the dark brand green reads on a dark theme and blends on a light one. The mark
+has no fade-in: a stylesheet animation from `opacity: 0` can be replayed by a
+re-render and leave the logo half-drawn, so `STARTUP_CSS` and its `stylesheet`
+registration are gone. Tests: `.pi/test/tern/startup-logo.test.ts`.

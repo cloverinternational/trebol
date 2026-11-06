@@ -164,6 +164,12 @@ export const PI_COMPOSER_CSS = `
 [data-role='pi.board.card'][data-tone='accent'] { border-color: var(--accent); }
 [data-role='pi.board.meta'] { color: var(--t3); font-size: calc(var(--sf-fs, 13px) * 9.5 / 13); padding-left: 2px; }
 [data-role='pi.board.empty'] { color: var(--t3); font-size: calc(var(--sf-fs, 13px) * 10 / 13); text-align: center; padding: 8px 0; border: 1px dashed var(--l2); border-radius: 6px; }
+/* Task block: the transcript carries the task rows, so only its head and evidence line need a size -
+   a row's verb, target, facts and status are Tern's own drawing, not restated here. */
+[data-role='pi.tasks.block'] { margin-top: 10px; }
+[data-role='pi.tasks.block-head'] { color: var(--t3); font-size: calc(var(--sf-fs, 13px) * 10 / 13); letter-spacing: 0.02em; padding-bottom: 2px; }
+[data-role='pi.tasks.line-e'] { font-size: calc(var(--sf-fs, 13px) * 9.5 / 13); padding-left: 2px; }
+[data-role='pi.tasks.lines-more'] { color: var(--t3); font-size: calc(var(--sf-fs, 13px) * 9.5 / 13); padding-top: 2px; }
 [data-role='pi.tasks.head'][data-action='tasks.view'] { cursor: pointer; }
 [data-role='tasks.call'] { font-family: var(--tv-font, var(--mono)); }
 [data-role='tasks.body'] { gap: 3px; padding: 4px 2px; }

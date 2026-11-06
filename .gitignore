@@ -40,3 +40,7 @@ Untitled
 
 # Local CLI/editor state (machine-specific, never commit)
 .local/
+
+# Scratch and editor files, never a source of truth
+/.tmp/
+*.swp

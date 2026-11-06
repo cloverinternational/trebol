@@ -28,7 +28,7 @@ import { McpController } from "./mcp-controller.ts";
 import { readMcpHost } from "./mcp-host.ts";
 import { mcpPanelNodes } from "./mcp-panel.ts";
 import { filterWork, workCounts, workInspectorNodes, workToolbar, type WorkFilter } from "./work-inspector.ts";
-import { STARTUP_CSS, gitDismissNode, readRepoStatus, startupBlob, startupNodes, trebolVersion, watchRepo, type RepoStatus } from "./startup-card.ts";
+import { gitDismissNode, readRepoStatus, startupBlob, startupNodes, trebolVersion, watchRepo, type RepoStatus } from "./startup-card.ts";
 import { commitIndex, discardPaths, readCommitDiff, readFileDiff, stagePaths, unstagePaths, type GitSection } from "./git-status.ts";
 import { PI_GIT_CSS, gitHelpNodes, gitPanelNodes, gitPanelRefs, type GitDiffMode, type GitPanelRef, type GitSidebarStyle } from "./git-panel.ts";
 import { contextDismissNode, contextPanelNodes, readContextBreakdown } from "./context-panel.ts";
@@ -41,6 +41,7 @@ import { PI_CONTEXT_CSS } from "./context-style.ts";
 import { TERN_MARKDOWN_CSS } from "./markdown-style.ts";
 import { projectTaskView, type TaskView, type TaskViewRow, type TaskViewSessionManager } from "./task-view.ts";
 import { buildBoard } from "./task-board.ts";
+import { buildTaskRows } from "./task-rows.ts";
 import { ASK_OPTIONS_ID, TernAskDialog, type AskEventBus } from "./ask-dialog.ts";
 import { TernBtwCard } from "./btw-card.ts";
 import { TernExtensionUI, UI_PROMPT_INPUT_ID, UI_PROMPT_LIST_ID } from "./ext-ui.ts";
@@ -1209,7 +1210,8 @@ export class PiTernBridge {
 	#modelCatalogError: string | undefined;
 	#modelCatalogRequest = 0;
 	#taskQuestionsCollapsed = false;
-	#taskBoardMode = false;
+	/** Task popover layout: the flat list (default) or the Hoja-style board. */
+	#taskPopMode: "list" | "board" = "list";
 	#toolOutputExpanded = false;
 	readonly #kinds: readonly string[];
 	#git: GitFacts | undefined;
@@ -1339,7 +1341,6 @@ export class PiTernBridge {
 	start(title = "pi"): void {
 		this.#surface.open(title);
 		this.#surface.stylesheet("composer", PI_COMPOSER_CSS);
-		this.#surface.stylesheet("startup", STARTUP_CSS);
 		this.#surface.stylesheet("work", TERN_WORK_CSS);
 		this.#surface.stylesheet("markdown", TERN_MARKDOWN_CSS);
 		// The blob precedes any frame that references it, as with artifact previews.
@@ -2036,14 +2037,49 @@ export class PiTernBridge {
 		return projectTaskView(manager as TaskViewSessionManager, { questionRows: 12 });
 	}
 
-	// Pi's task header (one focused task, its acceptance questions, the next task) as a compact block.
-	// Hovering it reveals every task in a popover drawn above it; leaving hides it. Hover is Tern's own
-	// view state and never reaches the program, so the popover is always in the tree and shown purely
-	// by the stylesheet's :hover rule (composer-style.ts). Clicking a task puts "task #N" in the draft;
-	// right-click folds the questions. Read-only: nothing here answers, approves or mutates a task.
-	// Live background bash and subagent work as a card above the composer. Read-only projection of the
-	// shared running-work store; hidden when nothing is queued or running. Foreground calls belong to the
-	// turn's work line in the transcript, so they appear here only once moved to the background.
+	// Tasks live in the transcript, not in a hover panel: one inline row per task with its acceptance
+	// questions under it and the evidence indented below an answered one - the same rows a work step
+	// uses. `frame: "inline"` is what keeps a row a row: no ring, no tint, no status bar.
+	#taskRowNodes(rows: ReturnType<typeof buildTaskRows>["rows"]): TspNode[] {
+		return rows.map((row) => ({
+			id: row.id, k: "tool",
+			p: {
+				role: "pi.tasks.line", name: "todo", title: row.title, status: row.status,
+				target: row.target, targetKind: "text",
+				meta: row.meta,
+				...(row.badges.length ? { badges: row.badges } : {}),
+				...(row.note ? { note: row.note } : {}),
+				frame: "inline", collapsible: true, collapsed: false,
+			},
+			c: row.questions.map((question): TspNode => ({
+				id: `${row.id}-q-${question.id}`, k: "tool",
+				p: {
+					role: "pi.tasks.line-q", name: question.status === "done" ? "check" : "help", title: question.mark,
+					target: question.text, targetKind: "text", status: question.status, frame: "inline",
+				},
+				...(question.evidence
+					? { c: [{ id: `${row.id}-q-${question.id}-e`, k: "text", p: { role: "pi.tasks.line-e", tone: "muted", wrap: "none", truncate: "end", text: question.evidence } }] }
+					: {}),
+			})),
+		}));
+	}
+
+	// The transcript's task block, keyed so it updates in place instead of being re-added each render.
+	#transcriptTasks(): TspNode[] {
+		const view = this.#taskView();
+		if (!view || view.status !== "ready" || !(view.tasks ?? []).length) return [];
+		const { rows, hidden } = buildTaskRows(view);
+		const blocked = view.summary.blocked ? ` · ${view.summary.blocked} blocked` : "";
+		return [{
+			id: "tasks-block", k: "col", p: { role: "pi.tasks.block" },
+			c: [
+				{ id: "tasks-block-head", k: "text", p: { role: "pi.tasks.block-head", tone: "muted", wrap: "none", text: `Tasks · ${view.summary.open} open · ${view.summary.completed} done${blocked}` } },
+				...this.#taskRowNodes(rows),
+				...(hidden ? [{ id: "tasks-block-more", k: "text", p: { role: "pi.tasks.lines-more", tone: "muted", wrap: "none", text: `+${hidden} more task${hidden === 1 ? "" : "s"}` } }] : []),
+			],
+		}];
+	}
+
 	#backgroundWork(now = Date.now()): TspNode[] {
 		const live = runningWorkSnapshot().filter((item) => (item.status === "queued" || item.status === "running") && item.foreground !== true);
 		if (!live.length) return this.#backgroundItems().length ? [{ id: "background-recent", k: "button", p: { text: "Recent background work", variant: "quiet", size: "sm", actions: { click: "bg.open=all" } } }] : [];
@@ -2119,8 +2155,8 @@ export class PiTernBridge {
 		const open = tasks.filter((t) => t.status !== "completed").length;
 		return [{ id: "task-top", k: "col", p: { role: "pi.tasks", actions: { menu: [fold] } }, c: [
 			{ id: "task-pop", k: "col", p: { role: "pi.tasks.pop" }, c: [
-				{ id: "task-pop-head", k: "text", p: { role: "pi.tasks.head", text: `All tasks · ${open} open · ${tasks.length - open} done · ${this.#taskBoardMode ? "board" : "list"} (click to switch)`, actions: { click: "tasks.view" } } },
-				...(this.#taskBoardMode ? this.#taskBoardNodes(tasks) : popRows),
+				{ id: "task-pop-head", k: "text", p: { role: "pi.tasks.head", text: `All tasks · ${open} open · ${tasks.length - open} done · ${this.#taskPopMode} (click to switch)`, actions: { click: "tasks.view" } } },
+				...(this.#taskPopMode === "board" ? this.#taskBoardNodes(tasks) : popRows),
 			] },
 			{ id: "task-head", k: "text", p: { role: "pi.tasks.head", text: `Tasks  ${view.summary.completed}/${view.summary.completed + view.summary.open} done${view.summary.blocked ? ` · ${view.summary.blocked} blocked` : ""}  ·  hover for all` } },
 			{ id: "task-focus", k: "text", p: {
@@ -2150,7 +2186,7 @@ export class PiTernBridge {
 		const transcript = this.#projector.nodes(this.#toolOutputExpanded, { currentTask: this.#currentTask(), messageFocus: this.#messageFocus, editing: this.#editing?.itemId, busy: this.#busy });
 		// The git sheet replaces the composer, as OMP's fullscreen git app does; hiding the dock also gives the
 		// full sheet the whole pane instead of leaving the composer under it.
-		this.#surface.render([...startupNodes(this.#logo, this.#version, this.#repo, readMcpStatus(this.#session.sessionManager?.getSessionId?.() as string | undefined)), ...transcript], this.#gitView ? [] : this.#dock(), focus, this.#layer(), this.#workReveal ?? this.#complete.selectedId);
+		this.#surface.render([...startupNodes(this.#logo, this.#version, this.#repo, readMcpStatus(this.#session.sessionManager?.getSessionId?.() as string | undefined)), ...transcript, ...this.#transcriptTasks()], this.#gitView ? [] : this.#dock(), focus, this.#layer(), this.#workReveal ?? this.#complete.selectedId);
 		this.#workReveal = undefined;
 		try { this.#onRenderTap?.(transcript, this.#trigger, this.#busy); } catch { /* tracing never affects the UI */ }
 	}
@@ -2982,7 +3018,7 @@ export class PiTernBridge {
 		}
 		if (act === "tasks.reference" && typeof msg.body.value === "string") this.#referenceTask(msg.body.value);
 		if (act === "tasks.view") {
-			this.#taskBoardMode = !this.#taskBoardMode;
+			this.#taskPopMode = this.#taskPopMode === "list" ? "board" : "list";
 			this.#render();
 		}
 		if (act === "git.open") { this.#openGitView(); return undefined; }

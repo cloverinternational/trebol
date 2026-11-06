@@ -52,10 +52,34 @@ export interface TaskViewRow {
 	active: boolean;
 	blocked: boolean;
 	questions: TaskViewFocus["questions"];
+	/** Parent task id; "" when the task is a root. */
+	parent?: string;
+	/** Ids this task waits on. Only three tasks in 293 persisted carry any. */
+	dependsOn?: string[];
+	/** Evidence refs per answered question, already split on ";" and ",". */
+	evidence?: { question: string; refs: string[] }[];
 }
 
 const bounded = (value: string): string => Array.from(value.trim()).slice(0, TASK_VIEW_MAX_TEXT).join("");
 const nonEmpty = (value: unknown): value is string => typeof value === "string" && value.trim() !== "";
+
+export const TASK_VIEW_MAX_REFS = 4;
+
+/** Answered questions' evidence, split into individual refs. Bounded: answers themselves are not carried. */
+function answerEvidence(task: Task): TaskViewRow["evidence"] {
+	const answers: unknown[] = Array.isArray(task.answers) ? task.answers : [];
+	const rows = answers
+		.slice(0, MAX_TASK_QUESTIONS)
+		.map(answer => answer as { question?: unknown; evidence?: unknown } | null)
+		.filter((answer): answer is { question: string; evidence: string } =>
+			!!answer && nonEmpty(answer.question) && nonEmpty(answer.evidence))
+		.map(answer => ({
+			question: String(answer.question),
+			refs: String(answer.evidence).split(/[;,]/).map(ref => ref.trim()).filter(Boolean).slice(0, TASK_VIEW_MAX_REFS),
+		}))
+		.filter(row => row.refs.length > 0);
+	return rows.length ? rows : undefined;
+}
 
 function questionView(task: Task, limit: number): TaskViewFocus["questions"] {
 	const raw: unknown = task.questions;
@@ -144,5 +168,8 @@ function taskRows(tasks: Task[]): TaskViewRow[] {
 			active: t.active === true && t.status === "in_progress",
 			blocked: t.status !== "completed" && (t.dependsOn ?? []).some(id => byId.get(id)?.status !== "completed"),
 			questions: questionView(t, MAX_TASK_QUESTIONS),
+			parent: t.parentTaskId ?? "",
+			dependsOn: [...(t.dependsOn ?? [])],
+			evidence: answerEvidence(t),
 		}));
 }

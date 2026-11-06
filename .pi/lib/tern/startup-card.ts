@@ -1,4 +1,4 @@
-// Tern startup card: the Trebol shamrock on the left (an SVG blob, faded in), the directory's git state on the right.
+// Tern startup card: the Trebol shamrock on the left (an SVG blob), the directory's git state on the right.
 // The blob is sent once when the bridge starts; the node list only references it by SHA-256 id.
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -11,18 +11,6 @@ import type { TspNode } from "./tsp.ts";
 
 const SVG_BYTES = readFileSync(new URL("./assets/trebol-shamrock.svg", import.meta.url));
 const PACKAGE_JSON = new URL("../../../package.json", import.meta.url);
-
-// Fade-in only; the rest of the card is static text, badges and tables.
-export const STARTUP_CSS = `
-[data-role='pi.startup.mark'] { animation: pi-startup-in 0.9s ease-out both; }
-@keyframes pi-startup-in {
-  from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: none; }
-}
-@media (prefers-reduced-motion: reduce) {
-  [data-role='pi.startup.mark'] { animation: none; }
-}
-`;
 
 export interface CommitRow { hash: string; subject: string; when: string }
 
@@ -232,7 +220,10 @@ export function startupNodes(blob: ArtifactBlob, version: string, repo?: RepoSta
 				k: "col",
 				p: { role: "pi.startup.mark", gap: "sm", align: "center", basis: "content" },
 				c: [
-					{ id: "tern-startup-logo", k: "image", p: { blob: blob.id, alt: "Trebol", title: "Trebol", max: { h: "7lines" }, role: "pi.startup.logo" } },
+					// The shamrock's own 1172x1268 viewBox is taller than it is wide. `w`/`h` carry that ratio so the
+					// element is exactly this big and never stretched: `max` alone let Tern choose a wider box and
+					// clip the artwork (`sf-clipped`), and a height in `lines` grew it with the terminal font.
+					{ id: "tern-startup-logo", k: "image", p: { blob: blob.id, alt: "Trebol", title: "Trebol", w: 36, h: 39, role: "pi.startup.logo" } },
 					{ id: "tern-startup-version", k: "text", p: { role: "pi.startup.version", text: `v${version}`, tone: "muted", wrap: "none" } },
 				],
 			},
