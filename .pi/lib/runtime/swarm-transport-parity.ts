@@ -20,9 +20,15 @@
  *  - temperature    Swarm omits temperature. Claude models such as
  *                   claude-haiku-5-5 reject it with a 400 ("`temperature` is
  *                   deprecated for this model"), and the TUI path already omits it.
- *  - reasoning_effort Swarm always sends `reasoning_effort: "high"`.
- *                   Both ride on `model.samplingParams`, which the provider
- *                   `Object.assign`s onto the request.
+ *  - reasoning_effort is deliberately NOT set here. Pi derives it from the
+ *                   model's `thinkingLevelMap` plus the session thinking level.
+ *                   Injecting a literal through `samplingParams` overrode that
+ *                   map (the provider assigns sampling params last) and sent a
+ *                   level the server rejected: SGLang serving Kimi K3.1
+ *                   advertises 'medium' in its reasoning_effort enum and then
+ *                   answers HTTP 500, so every interactive request failed while
+ *                   headless `-p` only survived because it injected 'high'.
+ *                   Thinking stays pi-native and per-model.
  *  - user content   Pi wraps every user turn as `[{type:"text"}]`; Swarm sends
  *                   a plain string when there are no attachments.
  *  - key order      Go's encoding/json emits struct fields in declaration
@@ -33,16 +39,12 @@
  *                   payload right before it is serialised.
  */
 
-export const SWARM_REASONING_EFFORT = "high";
 /**
  * Interactive TUI sampling differs from `swarm -p`: the agent request carries
- * no temperature, max_tokens is the SDKIntegration default (31999,
- * sdk_integration.go) regardless of the provider model entry, and
- * reasoning_effort is derived from the render-settings thinking budget
- * (EnableThinking → 2048 → translate.go budget<4096 ⇒ "medium").
+ * no temperature and max_tokens is the SDKIntegration default (31999,
+ * sdk_integration.go) regardless of the provider model entry.
  */
 export const SWARM_TUI_MAX_TOKENS = 31999;
-export const SWARM_TUI_REASONING_EFFORT = "medium";
 export interface TransportMode { interactive?: boolean }
 import { overlaySwarmToolSchemas } from "./swarm-tool-surface.ts";
 
@@ -142,8 +144,9 @@ export interface ModelLike {
 
 /** Sampling keys this module set on a model (never user-supplied ones). */
 const OWNED_SAMPLING = new WeakMap<object, Set<string>>();
+
 /** Apply Swarm's request-option defaults onto a Pi model object in place. */
-export function applySwarmModelCompat(model: ModelLike | undefined, mode: TransportMode = {}): boolean {
+export function applySwarmModelCompat(model: ModelLike | undefined, _mode: TransportMode = {}): boolean {
   if (!model || typeof model !== "object") return false;
   let changed = false;
   const compat = { ...(model.compat ?? {}) };
@@ -162,23 +165,15 @@ export function applySwarmModelCompat(model: ModelLike | undefined, mode: Transp
   }
   const sampling = { ...(model.samplingParams ?? {}) };
   const ownedKeys = new Set(OWNED_SAMPLING.get(model) ?? []);
-  const samplingDefaults: Record<string, unknown> = mode.interactive
-    ? { reasoning_effort: SWARM_TUI_REASONING_EFFORT }
-    : { reasoning_effort: SWARM_REASONING_EFFORT };
   let samplingChanged = false;
   // A model-default temperature must not reach the wire: claude-haiku-5-5 rejects it.
   // The transport invariant applies to every Swarm request, so the key is removed in both modes.
   if ("temperature" in sampling) { delete sampling.temperature; ownedKeys.delete("temperature"); samplingChanged = true; }
-  // Drop values this function set for the other mode (a session can flip
-  // hasUI between headless and interactive only across processes, but keep
-  // the operation idempotent either way); user-supplied values are kept.
-  for (const key of [...ownedKeys]) {
-    if (!(key in samplingDefaults)) { delete sampling[key]; ownedKeys.delete(key); samplingChanged = true; }
-  }
-  for (const [key, value] of Object.entries(samplingDefaults)) {
-    if (!(key in sampling)) { sampling[key] = value; ownedKeys.add(key); samplingChanged = true; }
-    else if (ownedKeys.has(key) && sampling[key] !== value) { sampling[key] = value; samplingChanged = true; }
-  }
+  // Reason effort is pi-native (model `thinkingLevelMap` + session level), so
+  // nothing here sets it. A model that ran an older build may still carry the
+  // literal this module used to inject, so drop every key we ever owned;
+  // user-supplied sampling keys are kept.
+  for (const key of [...ownedKeys]) { delete sampling[key]; ownedKeys.delete(key); samplingChanged = true; }
   if (samplingChanged) {
     try { model.samplingParams = sampling; } catch { return changed; }
     OWNED_SAMPLING.set(model, ownedKeys);

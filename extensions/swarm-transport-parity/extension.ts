@@ -18,8 +18,9 @@ const registrations = new WeakSet<object>();
 /**
  * Make Pi's OpenAI-compatible request JSON match `swarm -p` at the transport
  * layer: bytewise tool ordering, no `strict`, `max_tokens`, no `store`,
- * no `temperature` (rejected by some Claude models), `reasoning_effort: "high"`,
- * plain-string user content.
+ * no `temperature` (rejected by some Claude models), plain-string user content.
+ * `reasoning_effort` is intentionally not set: pi derives it from the model's
+ * `thinkingLevelMap`, so each provider's own vocabulary is respected.
  * See `.pi/lib/runtime/swarm-transport-parity.ts` for the per-field rationale.
  */
 export function registerSwarmTransportParity(pi: Pi): void {
