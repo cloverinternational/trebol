@@ -165,6 +165,12 @@ describe("Pi agent loop keeps running after hook blocks", () => {
 // ---------------------------------------------------------------------------
 // Tripwire: no Trebol hook source may return `terminate` on a block.
 // ---------------------------------------------------------------------------
+// Tool results, not hook blocks: a run-ending result is the tool's own contract.
+const TOOL_RESULT_TERMINATE: Record<string, string> = {
+  "extensions/swarm-plan-mode/extension.ts":
+    "exit_plan_mode approved-with-clear returns terminate so the host resumes from the cleared session",
+};
+
 describe("source tripwire", () => {
   it("no runtime, extension or package source sets terminate on a hook result", () => {
     const root = join(__dirname, "../../..");
@@ -182,6 +188,13 @@ describe("source tripwire", () => {
       }
     };
     for (const d of dirs) walk(join(root, d));
-    expect(offenders).toEqual([]);
+    // The invariant is about a *block* (a denial). A successful tool result may
+    // legitimately end the turn, and exit_plan_mode does exactly that: approved
+    // with a cleared context is a tool result, and the host resumes from the
+    // cleaned session once this turn is over. Nothing else is allowed, and an
+    // entry that stops matching fails, so a stale allowance cannot hide a block.
+    const unexpected = offenders.filter((p) => !(p in TOOL_RESULT_TERMINATE));
+    expect(unexpected).toEqual([]);
+    for (const path of Object.keys(TOOL_RESULT_TERMINATE)) expect(offenders).toContain(path);
   });
 });
