@@ -310,6 +310,50 @@ describe("Tern regions and dock structure", () => {
 		expect(PI_COMPOSER_CSS).toMatch(/\[data-role='pi\.tasks\.pop'\] \{[^}]*background: var\(--card\);/);
 	});
 
+	it("renders the tasks in the transcript as rows, not in a floating panel", () => {
+		const { writes } = make(fakeSession({ entries: [taskEntry()] }));
+		const nodes = replay(writes);
+		// The block belongs to the main region and is keyed, so a render updates it instead of re-adding it.
+		expect(nodes.get("tasks-block")?.k).toBe("col");
+		expect(nodes.get("tasks-block")?.parent).toBe("main");
+		expect(nodes.get("tasks-block-head")?.p?.text).toBe("Tasks · 2 open · 1 done");
+		expect(childrenOf(writes, "tasks-block")).toEqual(["tasks-block-head", "task-row-1", "task-row-2", "task-row-3"]);
+		// One inline row per task: verb + target + counter, no frame.
+		expect(nodes.get("task-row-1")?.k).toBe("tool");
+		expect(nodes.get("task-row-1")?.p).toMatchObject({
+			role: "pi.tasks.line", title: "Task", status: "running",
+			target: "Inspect renderer", targetKind: "text", meta: ["Q 1/2"], frame: "inline", collapsed: false,
+		});
+		expect(nodes.get("task-row-2")?.p).toMatchObject({ title: "Task", status: "pending", target: "Write tests" });
+		expect(nodes.get("task-row-3")?.p).toMatchObject({ status: "done" });
+		// Questions sit under their task, unanswered first; evidence sits under the answered one.
+		expect(childrenOf(writes, "task-row-1")).toEqual(["task-row-1-q-q2", "task-row-1-q-q1"]);
+		expect(nodes.get("task-row-1-q-q2")?.p).toMatchObject({ role: "pi.tasks.line-q", title: "?", target: "Hover works?", frame: "inline" });
+		expect(nodes.get("task-row-1-q-q1")?.p).toMatchObject({ title: "✓", target: "Full width?" });
+		expect(nodes.get("task-row-1-q-q1-e")?.p?.text).toBe("tool:Bash#1");
+		// The hover popover keeps its own flat list; the transcript block is not a second copy of it.
+		expect(nodes.get("task-pop-1")?.p?.role).toBe("pi.tasks.row");
+	});
+
+	it("omits the transcript task block when the session has no tasks", () => {
+		const { writes } = make(fakeSession());
+		expect(replay(writes).get("tasks-block")).toBeUndefined();
+	});
+
+	it("marks a blocked row, with what it waits on in the note", () => {
+		const base = { priority: "medium", notes: [], createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" };
+		const entry = { type: "custom", customType: "pi-swarm-task-state", data: {
+			schemaVersion: 2, revision: 1, savedAt: "2026-01-01T00:00:00Z", nextId: 3, keys: {}, tasks: [
+				{ ...base, id: "1", subject: "First job", status: "in_progress", active: true, dependsOn: [], questions: [{ id: "q1", text: "ok?" }] },
+				{ ...base, id: "2", subject: "Second job", status: "pending", dependsOn: ["1"], questions: [{ id: "q1", text: "ok?" }] },
+			],
+		} };
+		const { writes } = make(fakeSession({ entries: [entry] }));
+		expect(replay(writes).get("task-row-2")?.p).toMatchObject({
+			title: "Blocked", status: "pending", note: "waits on #1", badges: [{ text: "blocked", tone: "warning" }],
+		});
+	});
+
 	// Tern rejects the whole rule (and reports {"ev":"error","sheet":"composer"}) for selectors it does not
 	// support: no :has(), no ~ combinator, and no leading region element, since a program sheet is prefixed
 	// with [data-scope] and "can't restyle .sf-main" (docs/reference/tern-site/styles/css.md).
@@ -498,7 +542,7 @@ describe("Tern regions and dock structure", () => {
 		bridge.start();
 		await bridge.submit("/reload");
 		expect(called).toBe(1);
-		expect(writes.filter(w => w.startsWith(`${ESC}_tsp;s;`))).toHaveLength(5); // composer, startup, work, markdown, reloaded named sheet
+		expect(writes.filter(w => w.startsWith(`${ESC}_tsp;s;`))).toHaveLength(4); // composer, work, markdown, reloaded named sheet
 		expect(textsUnder(writes, "main").join(" ")).toContain("Reloaded Pi resources");
 		bridge.close();
 	});
@@ -517,7 +561,7 @@ describe("Tern regions and dock structure", () => {
 		fake.emit({ type: "agent_end" });
 		await bridge.submit("/reload");
 		expect(called).toBe(1);
-		expect(writes.filter(w => w.startsWith(`${ESC}_tsp;s;`))).toHaveLength(4); // composer, startup, work, markdown
+		expect(writes.filter(w => w.startsWith(`${ESC}_tsp;s;`))).toHaveLength(3); // composer, work, markdown
 		expect(textsUnder(writes, "main").join(" ")).toContain("reload failed: invalid resource");
 		bridge.close();
 	});

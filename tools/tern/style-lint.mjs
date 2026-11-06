@@ -62,8 +62,9 @@ const record = (level, rule, where, message, detail) => findings.push({ level, r
 /** The sheets the bridge registers, read from the source of truth it reloads from (run.ts does the same). */
 function loadSheets() {
 	const out = [];
-	// Every sheet the bridge registers (bridge.ts: the three `stylesheet` calls).
-	for (const [file, name] of [[".pi/lib/tern/composer-style.ts", "composer"], [".pi/lib/tern/work-style.ts", "work"], [".pi/lib/tern/startup-card.ts", "startup"]]) {
+	// Every sheet the bridge registers (bridge.ts: the `stylesheet` calls). The startup card has none: its mark is
+	// sized by the image node and the rest is Tern's own drawing, so a sheet there only risked a fade.
+	for (const [file, name] of [[".pi/lib/tern/composer-style.ts", "composer"], [".pi/lib/tern/work-style.ts", "work"]]) {
 		const source = readFileSync(join(REPO, file), "utf8");
 		const css = source.match(/export const [A-Z_]+ = `([\s\S]*?)`;/)?.[1];
 		if (!css) throw new Error(`${file}: stylesheet literal not found`);
