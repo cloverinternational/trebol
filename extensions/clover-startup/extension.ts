@@ -7,6 +7,7 @@ import { cloverRows } from "../../.pi/lib/ui/clover-layout.ts";
 import { gitPanel } from "../../.pi/lib/ui/git-panel-layout.ts";
 import { setStartupNoticeRender, startupNotices } from "../../.pi/lib/ui/startup-notices.ts";
 import { ternSetupWizard } from "../../.pi/lib/ui/tern-setup-wizard.ts";
+import { paneRuntimeSetupWizard } from "../../.pi/lib/ui/pane-runtime-setup.ts";
 
 const exec = promisify(execFile);
 const MAX_OUTPUT_BYTES = 12000;
@@ -91,6 +92,13 @@ export default function cloverStartupExtension(pi: any) {
       catch (error) { ctx.ui.notify(`Tern setup failed: ${error instanceof Error ? error.message : String(error)}`, "error"); }
     },
   });
+  pi.registerCommand?.("pane-runtime", {
+    description: "Check for the Tern and herdr pane runtimes and offer to install a missing one",
+    handler: async (_args: string, ctx: any) => {
+      try { ctx.ui.notify(await paneRuntimeSetupWizard(ctx, { workspace: typeof ctx?.cwd === "string" ? ctx.cwd : process.cwd() }), "info"); }
+      catch (error) { ctx.ui.notify(`Pane runtime setup failed: ${error instanceof Error ? error.message : String(error)}`, "error"); }
+    },
+  });
   pi.on?.("session_start", async (event: any, ctx: any) => {
     const own = ++generation;
     activeCtx = ctx;
@@ -122,6 +130,14 @@ export default function cloverStartupExtension(pi: any) {
         if (result.startsWith("installed:") || result.startsWith("conflict:")) ctx.ui?.notify?.(result, result.startsWith("conflict:") ? "warning" : "info");
       } catch (error) {
         ctx.ui?.notify?.(`Tern setup failed: ${error instanceof Error ? error.message : String(error)}`, "error");
+      }
+      // One dismissible nudge about the pane runtime. It never installs without a confirm and
+      // never asks twice for the same workspace, so a declined prompt stays quiet.
+      try {
+        const runtime = await paneRuntimeSetupWizard(ctx, { workspace: typeof ctx?.cwd === "string" ? ctx.cwd : process.cwd() });
+        if (runtime && !runtime.startsWith("skipped") && !runtime.startsWith("available")) ctx.ui?.notify?.(runtime, "info");
+      } catch (error) {
+        ctx.ui?.notify?.(`Pane runtime setup failed: ${error instanceof Error ? error.message : String(error)}`, "error");
       }
     }
   });
