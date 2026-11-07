@@ -9,7 +9,7 @@
 | `~/.pi/agent/settings.json` (or the configured agent directory) | User | Personal package registrations and resource selections, not extension source code. |
 | `<project>/.pi/settings.json` | Project | Project package declarations/overrides, subject to Pi project trust. Relative package paths resolve from this file. |
 | `~/.pi/agent/git/<host>/<repository>` | Pi package manager | Managed Git package checkout. A historical clone can remain on disk without being active. |
-| Trebol `.swarm/`, `.swarmpi/`, `.pi/agent-sessions/` | Runtime | Ignored runtime state/diagnostics; not installation sources. |
+| Trebol `.swarm/`, `.pi/agent-sessions/`, `~/.local/state/pi-swarm/` | Runtime | Ignored runtime state; not installation sources. Harness diagnostics are opt-in (`PI_SWARM_DIAGNOSTICS=1`) and live under the state directory, never in a project checkout. |
 
 Never copy the extensions directory on its own. Its relative imports require the
 rest of the package. Do not relocate memory, credentials or sessions as part of

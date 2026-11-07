@@ -62,7 +62,7 @@ falls back to `--no-approve`, which suppresses the project-local copy only.
 
 A conflict between two *different* repositories is not deduplicated. Pi reports it, the worker
 dies before `session_start`, and the run is recorded `failed` with that line instead of `lost`.
-Worker stderr is captured to `.swarm/claw/runs/<run>.worker.log` for that reason.
+Worker stderr is captured to `<claw>/runs/<run>.worker.log` for that reason.
 
 ## Completion goal (always on)
 
@@ -274,7 +274,7 @@ reach it before any run event can exist; `.pi/lib/claw/preflight.ts` decides bot
   included) is expensive and is not the tree the orchestrator verified.
 - `claw_read` reports `source`, `launchAttempts` and `launchWarning`, so a gate refusal stays diagnosable afterwards.
 - A run that dies **before writing any event** is `failed (startup)` by the daemon with the line from its captured
-  stderr (`.swarm/claw/runs/<run>.worker.log`), and now also names the source checkout it was launched from, so a
+  stderr (`<claw>/runs/<run>.worker.log`), and now also names the source checkout it was launched from, so a
   `ParseError` or a `Tool "X" conflicts with` line and the tree that produced it are in the same message.
 
 The gate is a parse check, not a full load: `npm run check:install` (isolated `DefaultResourceLoader`, no session, no
@@ -285,10 +285,17 @@ model) remains the deeper manual check for registration-time failures such as a 
 Several orchestrator sessions may run Claw in the same workspace (for example two Tern windows on one machine). Each
 session keeps its own runs:
 
+`<claw>` in this document is `ClawStore.forWorkspace(workspace).dir`:
+`<state root>/workspaces/<workspace-key>/claw`, where the state root is `$PI_SWARM_STATE_DIR`,
+else `$XDG_STATE_HOME/pi-swarm`, else `~/.local/state/pi-swarm` (`.pi/lib/state/workspace-state.ts`).
+It is intentionally **not** `<workspace>/.swarm/claw`: that in-repo directory put `control.json`,
+`supervisor.json` and `sessions/*.json` in every user's `git status`, so it is adopted once into the
+state root on first start and then left out of the repository entirely.
+
 | State | Scope | Where |
 | --- | --- | --- |
 | Run owner (`run.owner`) and Tern pane (`run.pane`) | per run | stamped by the calling session on `spawn` and on a trigger's spawn action (`stampOrigin` in `extensions/claw/extension.ts`) |
-| Inbox cursor | per session | `.swarm/claw/sessions/<session>.json`; `registerSession` in `.pi/lib/claw/store.ts` |
+| Inbox cursor | per session | `<claw>/sessions/<session>.json`; `registerSession` in `.pi/lib/claw/store.ts` |
 | Inbox item address (`item.owner`) | per item | `appendInbox` copies the owner of the item's run or trigger |
 | Digest | per session | `flushDigest` writes one `claw_digest` per owner |
 | Daemon, lock, triggers, control (on/off) | per workspace | unchanged: one supervisor serves every session |
@@ -309,8 +316,8 @@ session keeps its own runs:
 
 ## Durability
 
-- One daemon per workspace (`.swarm/claw/daemon.lock`, pid-checked; a dead owner is reclaimed). Started detached via
-  `node --experimental-strip-types daemon-main.ts`; logs to `.swarm/claw/daemon.log`. Exits after 120 s with no active
+- One daemon per workspace (`<claw>/daemon.lock`, pid-checked; a dead owner is reclaimed). Started detached via
+  `node --experimental-strip-types daemon-main.ts`; logs to `<claw>/daemon.log`. Exits after 120 s with no active
   run, enabled trigger or pending request; the next client request restarts it.
 - The daemon also refuses to outlive its own code: it stamps a code fingerprint (`git rev-parse HEAD` plus a sha256 of
   `.pi/lib/claw` sources) in `daemon.lock`, re-checks it every 10 s and exits when the code on disk changes; `/reload`

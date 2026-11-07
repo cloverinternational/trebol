@@ -1151,11 +1151,41 @@ allowance, abort/error/user-interaction/background-work/shutdown and plan/child
 suppression remain. No auto-completion, deletion, or infinite continuation.
 Headless unavailable interaction must be reported with pending tasks retained.
 
+### Machine-local runtime state
+
+Runtime bookkeeping never lives in the workspace. `.pi/lib/state/workspace-state.ts`
+resolves `$PI_SWARM_STATE_DIR`, else `$XDG_STATE_HOME/pi-swarm`, else
+`~/.local/state/pi-swarm`, and keys one folder per workspace by
+`<basename>-<sha256(absolute path)[0:12]>`, so two checkouts with the same name never
+share state. Claw (`ClawStore.forWorkspace` → `<root>/workspaces/<key>/claw`), the
+scheduler (`extensions/schedule`, `<root>/workspaces/<key>/scheduled_tasks.json`) and
+the diagnostics log all use it. A legacy `<workspace>/.swarm/claw` directory or
+`.swarm/scheduled_tasks.json` is adopted once (rename, staged copy across devices) and
+never merged into an existing state folder; the legacy copy is left for inspection on
+a conflict.
+
+`.swarm/` inside a project stays reserved for user-authored inputs (`AGENTS.md`,
+skills, hook config). Do not add a blanket `.swarm/` ignore and do not write runtime
+files there: Claw's `control.json`, `supervisor.json` and `sessions/*.json` used to
+appear as untracked files in every user's `git status` exactly that way. Evidence:
+`.pi/test/state/workspace-state.test.ts`, `.pi/test/claw/state-dir.test.ts`,
+`.pi/test/tools/schedule-state.test.ts`, plus an observed run where
+`git status --porcelain` stays empty. Suites isolate themselves through
+`tests/setup/isolate-state.ts`; never point one at the real state directory.
+
 ### Temporary runtime review logs
-Jev writes bounded metadata under the active Git worktree root's
-`.swarmpi/jev/` (cwd for non-Git projects). Jev records attempt/outcome counts, not raw evidence or
-credentials. Best-effort writes must never break execution. Seven-day retention
-on next write, 500 files/category, 32KiB/file. Gitignored, safe to delete; logs are
+These are opt-in (`PI_SWARM_DIAGNOSTICS=1`) and are never written inside a working
+tree. `.pi/lib/context/execution-log.ts` (`executionLog`) writes bounded metadata to
+`$PI_SWARM_DIAGNOSTICS_DIR`, else `$XDG_STATE_HOME/pi-swarm/diagnostics`, else
+`~/.local/state/pi-swarm/diagnostics`, under one `<basename>-<path-hash>/<area>/`
+folder per workspace. It used to create `./.swarmpi/<area>/` in whatever repository
+Pi ran in — one untracked file per captured memory candidate, invisible in this
+repository only because its `.gitignore` lists `.swarmpi/`, and litter in every
+user's `git status`. Keep the write out of the worktree, and keep the default off:
+diagnostics are harness support, not project output. Jev and lifecycle memory capture
+record attempt/outcome counts and candidate-save receipts, not raw evidence or
+credentials. Best-effort writes must never break execution. Seven-day retention on
+next write, 500 files/category, 32KiB/file, mode 0700/0600. Safe to delete; logs are
 not memory and do not backfill earlier runs. Reload required for instrumentation.
 
 ### Memory capture quality, first curation batch
@@ -1163,7 +1193,8 @@ Lifecycle capture supplies project identity and a bounded sample of existing
 records to discourage semantic duplicates. Its prompt excludes transient execution
 history and asks for explicit project ownership. These are model guidance, not a
 semantic enforcement guarantee. Saved candidates emit metadata receipts under
-.swarmpi/execution. Restricted reviewer policy uses the same durability filter.
+the diagnostics directory above (only when enabled). Restricted reviewer policy
+uses the same durability filter.
 First code-reviewed worktree records document verified-only recall and the exact
 supervisor configuration location; tools/experiments/memory-curation/save-reviewed.ts
 writes them through the canonical store and checks production recall. This does not

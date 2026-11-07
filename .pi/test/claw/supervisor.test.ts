@@ -493,7 +493,8 @@ describe("claw self-supervision", () => {
 		});
 
 		it("keeps the operator's overrides when /claw on writes the control file", () => {
-			writeFileSync(join(dir, ".swarm", "claw", "control.json"), JSON.stringify({ enabled: true, pane: 1, supervise: { digestMs: 1_000 } }));
+			// Claw state lives under the per-user state root, not `<workspace>/.swarm/claw`.
+			writeFileSync(join(store.dir, "control.json"), JSON.stringify({ enabled: true, pane: 1, supervise: { digestMs: 1_000 } }));
 			store.writeControl(false, 2);
 			expect(store.readControl().supervise).toEqual({ digestMs: 1_000 });
 			expect(store.readControl().enabled).toBe(false);

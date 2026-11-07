@@ -351,7 +351,7 @@ describe("claw keep open and resume", () => {
 			store.writeGoalSpec(spec);
 			return { run, spec };
 		};
-		const specs = (id: string) => readdirSync(join(dir, ".swarm", "claw", "runs")).filter((f) => f.startsWith(`${id}.goal`));
+		const specs = (id: string) => readdirSync(join(store.dir, "runs")).filter((f) => f.startsWith(`${id}.goal`));
 
 		it("a kept-open run whose goal ended stays ended: keeping the tab never re-arms or extends the goal", async () => {
 			tern.live.add(500);

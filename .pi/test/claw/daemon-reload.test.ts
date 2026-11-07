@@ -470,6 +470,9 @@ describe("the real daemon entry point", () => {
 		mkdirSync(join(repo, ".pi", "lib"), { recursive: true });
 		mkdirSync(join(repo, "packages", "tools", "schedule", "src"), { recursive: true });
 		cpSync(source, join(repo, ".pi", "lib", "claw"), { recursive: true });
+		// The daemon resolves its state directory through the shared helper, so the copied tree needs it too.
+		mkdirSync(join(repo, ".pi", "lib", "state"), { recursive: true });
+		cpSync(join(process.cwd(), ".pi", "lib", "state", "workspace-state.ts"), join(repo, ".pi", "lib", "state", "workspace-state.ts"));
 		cpSync(cron, join(repo, "packages", "tools", "schedule", "src", "cron.ts"));
 		symlinkSync(join(process.cwd(), "node_modules"), join(repo, "node_modules"));
 	});

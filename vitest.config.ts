@@ -7,5 +7,8 @@ export default defineConfig({
   test: {
     include: ["packages/**/test/**/*.test.ts", ".pi/test/**/*.test.ts", "tests/**/*.test.ts"],
     exclude: ["**/node_modules/**", "**/dist/**", "vendor/**", "artifacts/**"],
+    // Machine-local state (claw, scheduler, diagnostics) resolves under
+    // PI_SWARM_STATE_DIR; tests must never touch the real per-user directory.
+    setupFiles: ["tests/setup/isolate-state.ts"],
   },
 });

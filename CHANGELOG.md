@@ -4,6 +4,35 @@ Release metadata is kept in `package.json`, `update-manifest.json`, and this fil
 
 ## [Unreleased]
 
+### Fixed
+
+- Trebol no longer litters the repository it runs in. The bootstrap/Jev/memory-capture
+  review logs wrote one untracked `.swarmpi/<area>/<timestamp>-<uuid>.json` per captured
+  memory candidate into whatever worktree Pi was running in — invisible in this
+  repository only because its own `.gitignore` lists `.swarmpi/`, and untracked spam in
+  everyone else's `git status` (reported as "ill have to add .swarmpi/* to my git
+  ignore"). Diagnostics are now opt-in (`PI_SWARM_DIAGNOSTICS=1`) and land outside the
+  tree, in `$PI_SWARM_DIAGNOSTICS_DIR`, else
+  `$XDG_STATE_HOME/pi-swarm/diagnostics`, under a per-workspace
+  `<basename>-<path-hash>/<area>/` folder; the 7-day / 500-file / 32 KiB / 0700 bounds
+  are unchanged. Nothing reads the old folders and they are safe to delete
+  (`.pi/lib/context/execution-log.ts`).
+
+- Claw and the scheduler no longer write their own state into the workspace.
+  `ClawStore.forWorkspace` created `<workspace>/.swarm/claw/` with `control.json`,
+  `supervisor.json` and one `sessions/<uuid>.json` per orchestrator, and `/loop` and
+  `/goal` persisted `.swarm/scheduled_tasks.json` next to it — all untracked in a
+  user's repository, which is the reporter's second finding (`claw also made these …
+  should i git ignore those?`). Gitignoring was the wrong answer: this state is
+  machine-local (session cursors, daemon lock, run logs) and `.swarm/` also holds
+  user-authored inputs such as `AGENTS.md` and project skills. Both now resolve
+  through `.pi/lib/state/workspace-state.ts` — `$PI_SWARM_STATE_DIR`, else
+  `$XDG_STATE_HOME/pi-swarm`, else `~/.local/state/pi-swarm`, one
+  `<basename>-<path-hash>` folder per workspace — with existing in-repo state adopted
+  once (rename, staged copy across devices; a conflict is never merged). Claw's
+  directories are created 0700. Tests isolate the state root through
+  `tests/setup/isolate-state.ts`.
+
 ## [0.9.0] - 2026-11-04
 
 ### Highlights
