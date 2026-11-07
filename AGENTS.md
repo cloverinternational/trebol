@@ -673,6 +673,32 @@ hand-drawn table. Tern 0.9.5 draws and *clocks* the parts that change every seco
   positional diff deleted and re-added every sibling after an insert or removal, which threw away the
   terminal-side state (local fold, ansi scroll, highlighted block) and repainted the card on every settle.
   Keep id matching; text that only grows must still go out as `text append`.
+- Keystroke cost must not grow with session length. Every input re-renders the surface, so
+  `TranscriptProjector.nodes` memoizes settled segments (a live group, or one with a running step, is
+  rebuilt every time because it reads `Date.now()`), and `diffNode` skips subtrees that are
+  reference-equal. A cache entry is valid only while its inputs are `===` and every item is shallow-equal
+  to its snapshot, so **replace** item fields (`item.artifacts = …`), never mutate nested values in place.
+  Reused nodes must never be mutated after `nodes()` returns. Gate: `.pi/test/tern/bridge-perf.test.ts`
+  (a scaling check, a wire op-replay oracle and a memo-versus-fresh oracle); `TERN_PERF=1` prints the
+  per-keystroke table up to 1000 turns.
+- The transcript renders a **window**: a resumed session opens on its last `TRANSCRIPT_WINDOW_TURNS` (50)
+  turns behind one `transcript-earlier` row (action `transcript.earlier` adds 50 more), and a live session
+  is trimmed back to 50 once it passes `TRANSCRIPT_TRIM_TURNS` (150) unless the user asked for older turns.
+  The window always starts on a turn boundary, so segments and group ids are the same as for the full
+  transcript; `revealStep` widens it to reach a hidden step.
+- Look up items with `TranscriptProjector.item` / `callItem` (searched from the newest), never a forward
+  `find` over `#items`: that made restoring a session O(n²). Tool items are keyed through `#callItems`
+  because some providers restart call ids per message (`call_0`, …); a repeat gets `t-<callId>~n`.
+- Long runtime: a step keeps at most `OUTPUT_KEEP_CHARS` (256 KB) of output, the tail behind
+  "… N earlier lines not kept" (counted incrementally per streamed update), copied off its parent string
+  once settled; `errorText` is bounded the same way and artifact blobs drop their bytes once sent. Set
+  output through `keepOutput`, never `item.output = …` directly. Soak: `node --expose-gc
+  tools/perf/tern-bridge-soak.mjs [turns]` prints keystroke cost and retained heap as the run goes.
+- TSP chunking counts UTF-8 bytes arithmetically (`codePointBytes`); never allocate per character there.
+- Measure on real sessions and constrained hosts with `node tools/perf/tern-bridge-bench.mjs <session.jsonl>`
+  or `--turns N`, e.g. under `systemd-run --user --scope -p CPUQuota=10% -p MemoryMax=512M node
+  --max-old-space-size=96 …`. Per-render work is about 0.13 ms; a Rust/N-API addon would pay more than that
+  just serializing the view across the boundary (0.22 ms at 1000 turns), so keep this path in TypeScript.
 
 Visual check without a model: `node tools/e2e/tern-live-work-demo.mjs` renders one scripted turn
 (`EXPAND=1` = Ctrl+O, `SPEED=n` = slower) into its own pane; `tern ctl shot <name>` writes

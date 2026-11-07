@@ -19,7 +19,7 @@ import {
 import type { Model } from "@earendil-works/pi-ai";
 import { editingBanner, imageAttachments, MESSAGE_EDIT, MESSAGE_EDIT_CANCEL, MESSAGE_FOCUS, MESSAGE_RESEND, messageActionRow, messageItemFromNode, resolveUserEntry, userEntriesOf, type EditState, type UserEntry } from "./message-actions.ts";
 import { buildTreeModel, DEFAULT_TREE_FILTER, nextFilter, sessionTreePickerNode, TREE_FILTERS, type TreeFilter, type TreeModel, type TreeRow } from "./session-tree.ts";
-import { encodeTspBlob, projectTranscript, type TspMessage, type TspNode, type TspWriter, TernInlineSurface } from "./tsp.ts";
+import { encodeTspBlob, projectTranscript, type TspMessage, type TspNode, type TspView, type TspWriter, TernInlineSurface } from "./tsp.ts";
 import { composerNodes, modelDisplayName, type GitFacts, type WorkFacts } from "./composer-view.ts";
 import { artifactNodes, previewFile, type ArtifactPreview } from "./artifact-previews.ts";
 import { readMcpStatus, subscribeMcpStatus } from "../tools/mcp-status.ts";
@@ -133,6 +133,10 @@ interface Item {
 	name?: string;
 	args?: unknown;
 	output?: string;
+	/** Raw output length seen and newlines counted in what was dropped from it (see keepOutput). */
+	outputSeen?: number;
+	outputDropped?: number;
+	outputScan?: number;
 	startedAt?: number;
 	took?: number;
 	exit?: number;
@@ -283,6 +287,46 @@ function resultText(result: unknown, limit = OUTPUT_LIMIT): string {
 	return text.length > limit ? `${text.slice(0, limit)}\n… (truncated)` : text;
 }
 
+// Output kept per step. A pane left running for hours sees every build and log tail; keeping each one whole
+// grew the heap by about 140 KB per turn without end, and re-splitting a growing live stream made every update
+// of a long-running command slower than the last. Past this size only the tail is kept, behind an honest count.
+export const OUTPUT_KEEP_CHARS = 256 * 1024;
+
+function countNewlines(text: string, from: number, to: number): number {
+	let n = 0;
+	for (let i = text.indexOf("\n", from); i >= 0 && i < to; i = text.indexOf("\n", i + 1)) n++;
+	return n;
+}
+
+// Sets item.output to `text`, or to its last OUTPUT_KEEP_CHARS (from a line start) behind
+// "… N earlier lines not kept". Live streams are append-only snapshots, so dropped lines are counted
+// incrementally: each update scans only the bytes it added.
+function keepOutput(item: Item, text: string, settled = false): void {
+	item.outputSeen = text.length;
+	if (text.length <= OUTPUT_KEEP_CHARS) {
+		item.output = text;
+		delete item.outputDropped;
+		delete item.outputScan;
+		return;
+	}
+	const nl = text.indexOf("\n", text.length - OUTPUT_KEEP_CHARS);
+	const cut = nl < 0 ? text.length - OUTPUT_KEEP_CHARS : nl + 1;
+	let scan = item.outputScan ?? 0, dropped = item.outputDropped ?? 0;
+	if (scan > cut) { scan = 0; dropped = 0; }
+	dropped += countNewlines(text, scan, cut);
+	item.outputScan = cut;
+	item.outputDropped = dropped;
+	const tail = `… ${dropped} earlier ${dropped === 1 ? "line" : "lines"} not kept\n${text.slice(cut)}`;
+	// A slice keeps its whole parent string alive; copy once settled so the full output can be collected.
+	item.output = settled ? Buffer.from(tail, "utf8").toString("utf8") : tail;
+}
+
+// Same snapshot as last time? Exact for kept-whole output; for a bounded one, length plus the kept tail.
+function sameOutput(item: Item, text: string): boolean {
+	if (item.outputDropped === undefined) return text === item.output;
+	return text.length === item.outputSeen && item.output!.endsWith(text.slice(-4096));
+}
+
 // Pure projection of Pi events into an ordered transcript. Keeps stable ids per message and tool call.
 export class TranscriptProjector {
 	#items: Item[] = [];
@@ -296,9 +340,47 @@ export class TranscriptProjector {
 	// Per-group presentation state set by native toggle, select and the group's bottom controls. Never part of the session.
 	#groupViews = new Map<string, GroupView>();
 	#doneSeq = 0;
+	// Settled segments' nodes from the last projection, keyed by segment id. A keystroke re-renders the whole
+	// surface, so rebuilding every settled turn made each input cost O(session length). An entry is reused only
+	// when its inputs are identical (===) and every item is shallow-equal to the snapshot taken when it was built;
+	// reused nodes are the same objects, so diffNode skips them by reference. Live groups are never cached: they
+	// read Date.now() for their clocks.
+	#segmentCache = new Map<string, { deps: readonly unknown[]; items: readonly Item[]; nodes: TspNode[] }>();
+	// Render window: items before #windowStart (always a turn boundary) are summarized by one "earlier turns"
+	// row. A resumed session would otherwise project, diff and ship every turn it ever had before the pane
+	// appears (13 MB and 8 s at 3000 turns), and Tern would hold every node. The window grows with the live
+	// session and is trimmed back once it holds TRANSCRIPT_TRIM_TURNS, unless the user asked for older turns.
+	#windowStart = 0;
+	#hiddenTurns = 0;
+	#userExpanded = false;
 
 	get items(): readonly Item[] {
 		return this.#items;
+	}
+
+	// Tool call id -> the item id of its newest call. Some providers restart call ids in every message
+	// (`call_0`, `call_1`, …), so one id can name several calls in a session; keying items by `t-<callId>` alone
+	// showed restored repeats as interrupted, dropped live repeats entirely and put duplicate ids on the wire.
+	#callItems = new Map<string, string>();
+	#callRepeats = 0;
+
+	/** The item for a tool call id (its newest call). */
+	callItem(callId: string): Item | undefined {
+		return this.item(this.#callItems.get(callId) ?? `t-${callId}`);
+	}
+
+	// A new call: the first use of an id keeps `t-<callId>`; a repeat gets a unique suffix.
+	#newCallItemId(callId: string): string {
+		const id = this.#callItems.has(callId) ? `t-${callId}~${++this.#callRepeats}` : `t-${callId}`;
+		this.#callItems.set(callId, id);
+		return id;
+	}
+
+	/** The item with this id, searched from the newest: a tool's result and live updates arrive right after its
+	 * call, so a forward scan made restoring a session O(n²) and every streamed update O(history). */
+	item(id: string): Item | undefined {
+		for (let i = this.#items.length - 1; i >= 0; i--) if (this.#items[i]!.id === id) return this.#items[i];
+		return undefined;
 	}
 
 	replaceFromSessionBranch(entries: readonly unknown[]): void {
@@ -308,6 +390,10 @@ export class TranscriptProjector {
 		this.#turnOpen = false;
 		this.#turnStart = 0;
 		this.#groupViews.clear();
+		this.#segmentCache.clear();
+		this.#callItems.clear();
+		this.#userExpanded = false;
+		this.#setWindowStart(0);
 		this.#doneSeq = 0;
 		for (const raw of entries) {
 			if (typeof raw !== "object" || raw === null) continue;
@@ -328,7 +414,7 @@ export class TranscriptProjector {
 			if (isFailedAssistant(message)) this.#markTurn("turnFailed");
 			// Persisted tool calls live in the assistant message; their results arrive later as toolResult entries.
 			for (const call of toolCallsOf(message)) {
-				this.#items.push({ id: `t-${call.id}`, role: "tool", text: `tool ${call.name}`, status: "running", name: call.name, args: call.arguments });
+				this.#items.push({ id: this.#newCallItemId(String(call.id)), role: "tool", text: `tool ${call.name}`, status: "running", name: call.name, args: call.arguments });
 			}
 		}
 		// A call with no persisted result was interrupted before the session was saved.
@@ -338,10 +424,12 @@ export class TranscriptProjector {
 				item.cancelled = true;
 			}
 		}
+		// A resumed pane opens on its last turns; older ones are one click away.
+		this.#setWindowStart(turnStartBefore(this.#items, this.#items.length, TRANSCRIPT_WINDOW_TURNS));
 	}
 
 	#settleRestoredTool(result: ToolResultLike): void {
-		const item = this.#items.find((i) => i.id === `t-${result.toolCallId}`);
+		const item = this.callItem(String(result.toolCallId));
 		if (!item || item.status !== "running") return;
 		const details = result.details as { exit_code?: unknown; duration_ms?: unknown } | undefined;
 		item.exit = typeof details?.exit_code === "number" && details.exit_code !== 0 ? details.exit_code : undefined;
@@ -349,8 +437,8 @@ export class TranscriptProjector {
 		item.doneSeq = ++this.#doneSeq;
 		item.took = typeof details?.duration_ms === "number" ? details.duration_ms : undefined;
 		const text = messageText(result);
-		if (item.status === "error") item.errorText = text;
-		item.output = item.name?.toLowerCase() === "bash" && !result.isError ? extractBashDisplayText(text) : resultText(text);
+		if (item.status === "error") item.errorText = text.length > OUTPUT_KEEP_CHARS ? `…${text.slice(-OUTPUT_KEEP_CHARS)}` : text;
+		keepOutput(item, item.name?.toLowerCase() === "bash" && !result.isError ? extractBashDisplayText(text) : resultText(text), true);
 		item.text = `tool ${item.name ?? "tool"} ${item.status}`;
 	}
 
@@ -429,10 +517,12 @@ export class TranscriptProjector {
 				return true;
 			}
 			case "tool_execution_start": {
-				const prior = this.#items.find((i) => i.id === `t-${String(event.toolCallId)}`);
-				if (prior) return false;
+				const prior = this.callItem(String(event.toolCallId));
+				// A repeated start for the same call, or one already restored as interrupted, is the same call. A call
+				// whose id was used by a call that finished is a new call (a provider reusing ids).
+				if (prior && (prior.status === "running" || prior.cancelled === true)) return false;
 				this.#items.push({
-					id: `t-${String(event.toolCallId)}`,
+					id: this.#newCallItemId(String(event.toolCallId)),
 					role: "tool",
 					text: `tool ${String(event.toolName)}`,
 					status: "running",
@@ -443,15 +533,15 @@ export class TranscriptProjector {
 				return true;
 			}
 			case "tool_execution_update": {
-				const item = this.#items.find((i) => i.id === `t-${String(event.toolCallId)}`);
+				const item = this.callItem(String(event.toolCallId));
 				if (!item || item.status !== "running") return false;
 				const output = item.name?.toLowerCase() === "bash" ? messageText(event.partialResult) : resultText(event.partialResult);
-				if (output === item.output) return false;
-				item.output = output;
+				if (sameOutput(item, output)) return false;
+				keepOutput(item, output);
 				return true;
 			}
 			case "tool_execution_end": {
-				const item = this.#items.find((i) => i.id === `t-${String(event.toolCallId)}`);
+				const item = this.callItem(String(event.toolCallId));
 				if (item) {
 					if (item.cancelled || item.status !== "running") return false;
 					const details = (event.result as { details?: { exit_code?: unknown; duration_ms?: unknown; timed_out?: unknown } } | null)?.details;
@@ -464,7 +554,7 @@ export class TranscriptProjector {
 					item.timedOut = details?.timed_out === true || (bashFailure && /^Error executing bash: command timed out after \d+s/.test(resultBody));
 					item.status = event.isError || item.exit !== undefined ? "error" : "ok";
 					item.doneSeq = ++this.#doneSeq;
-					if (item.status === "error") item.errorText = resultBody;
+					if (item.status === "error") item.errorText = resultBody.length > OUTPUT_KEEP_CHARS ? `…${resultBody.slice(-OUTPUT_KEEP_CHARS)}` : resultBody;
 					if (item.name === "TaskManage") item.batch = taskManageBatch(event.result);
 					item.text = `tool ${String(event.toolName)} ${item.status}`;
 					// A cancelled tool may have no final payload. Retain the last live snapshot.
@@ -472,7 +562,8 @@ export class TranscriptProjector {
 					// The final model envelope merges streams by channel, strips ANSI, and may
 					// truncate. The last live snapshot is the full ordered terminal output;
 					// only fall back to the envelope when no update ever arrived.
-					if (!item.output && final) item.output = item.name?.toLowerCase() === "bash" && !event.isError ? extractBashDisplayText(final) : final;
+					if (!item.output && final) keepOutput(item, item.name?.toLowerCase() === "bash" && !event.isError ? extractBashDisplayText(final) : final, true);
+					else if (item.output && item.outputDropped !== undefined) item.output = Buffer.from(item.output, "utf8").toString("utf8");
 				}
 				return true;
 			}
@@ -506,16 +597,61 @@ export class TranscriptProjector {
 		return this.#items.filter((item) => item.role === "user" && !item.turnStart).map((item) => item.id);
 	}
 
+	/** Turns before the render window, shown as one "earlier" row. */
+	get hiddenTurns(): number {
+		return this.#hiddenTurns;
+	}
+
+	/** Brings TRANSCRIPT_WINDOW_TURNS more earlier turns into the render window. */
+	showEarlier(): void {
+		if (this.#windowStart === 0) return;
+		this.#userExpanded = true;
+		this.#setWindowStart(turnStartBefore(this.#items, this.#windowStart, TRANSCRIPT_WINDOW_TURNS));
+	}
+
+	#setWindowStart(start: number): void {
+		this.#windowStart = start;
+		let hidden = 0;
+		for (let i = 0; i < start; i++) if (isTurnBoundary(this.#items[i]!)) hidden++;
+		this.#hiddenTurns = hidden;
+	}
+
+	// Keeps the window bounded: a resumed session opens on its last turns, and a long live one is trimmed back.
+	#fitWindow(): void {
+		if (this.#userExpanded) return;
+		let turns = 0;
+		for (let i = this.#windowStart; i < this.#items.length; i++) if (isTurnBoundary(this.#items[i]!)) turns++;
+		if (turns > TRANSCRIPT_TRIM_TURNS) this.#setWindowStart(turnStartBefore(this.#items, this.#items.length, TRANSCRIPT_WINDOW_TURNS));
+	}
+
 	nodes(outputExpanded = false, options: { currentTask?: CurrentTask; messageFocus?: string; editing?: string; busy?: boolean } = {}): TspNode[] {
 		const out: TspNode[] = [];
-		const segments = segmentTranscript(this.#items);
+		this.#fitWindow();
+		if (this.#hiddenTurns > 0) {
+			const more = Math.min(this.#hiddenTurns, TRANSCRIPT_WINDOW_TURNS);
+			out.push({ id: "transcript-earlier", k: "text", p: { role: "tern.earlier", tone: "muted", wrap: "none", text: `↑ ${this.#hiddenTurns} earlier ${this.#hiddenTurns === 1 ? "turn" : "turns"} · show ${more} more`, title: "Show earlier turns", actions: { click: TRANSCRIPT_EARLIER } } });
+		}
+		const cache = new Map<string, { deps: readonly unknown[]; items: readonly Item[]; nodes: TspNode[] }>();
+		const memo = (key: string, items: readonly Item[], deps: readonly unknown[], build: () => TspNode[]) => {
+			const hit = this.#segmentCache.get(key);
+			if (hit && sameDeps(hit.deps, deps) && sameItems(hit.items, items)) {
+				cache.set(key, hit);
+				out.push(...hit.nodes);
+				return;
+			}
+			const nodes = build();
+			cache.set(key, { deps, items: items.map((item) => ({ ...item })), nodes });
+			out.push(...nodes);
+		};
+		const visible = this.#windowStart === 0 ? this.#items : this.#items.slice(this.#windowStart);
+		const segments = segmentTranscript(visible);
 		// Only the newest turn can still be running; an earlier group is settled once a user message follows it.
 		let openGroup = -1;
 		if (this.#turnOpen) {
 			for (let i = segments.length - 1; i >= 0; i--) {
 				const s = segments[i]!;
 				if (s.kind === "tools") {
-					if (this.#items.indexOf(s.items[0]!) >= this.#turnStart) openGroup = i;
+					if (this.#windowStart + visible.indexOf(s.items[0]!) >= this.#turnStart) openGroup = i;
 					break;
 				}
 				if (isTurnBoundary(s.item)) break;
@@ -531,32 +667,22 @@ export class TranscriptProjector {
 		segments.forEach((segment, i) => {
 			if (segment.kind === "tools") {
 				const turnOpen = i === openGroup;
+				const key = groupId(segment.items);
+				const view = this.#groupViews.get(key);
+				const ctx = { goal, tail: turnOpen ? tail : "", outputExpanded, turnOpen, view, currentTask: options.currentTask };
 				// toolGroupNode labels the current task only in the live (running) group.
-				out.push(...toolGroupNode(segment.items, { goal, tail: turnOpen ? tail : "", outputExpanded, turnOpen, view: this.#groupViews.get(groupId(segment.items)), currentTask: options.currentTask }));
+				if (turnOpen || segment.items.some((item) => item.status === "running")) out.push(...toolGroupNode(segment.items, ctx));
+				else memo(`g:${key}`, segment.items, [goal, outputExpanded, view], () => toolGroupNode(segment.items, ctx));
 				return;
 			}
 			const { item } = segment;
 			if (isTurnBoundary(item)) goal = goalLine(item.text);
 			// A message with no visible text (thinking or tool calls only) has nothing to show.
 			if (item.role === "assistant" && item.text.trim() === "") return;
-			// A visible custom notice (agent completed, goal, monitor, schedule) is one muted line, never a block.
-			if (item.turnStart) {
-				// Auto-graph's planned chart draws natively; its ASCII text is the fallback for renderers without Tern.
-				if (item.chart) {
-					out.push(item.chart);
-					return;
-				}
-				out.push({ id: `msg-${item.id}`, k: "text", p: { role: "tern.notice", tone: "muted", wrap: "none", truncate: "end", text: goalLine(item.text) } });
-				return;
-			}
-			const [node] = projectTranscript([{ id: item.id, role: item.role as Exclude<Role, "tool">, text: item.text, streaming: item.streaming }]);
-			if (node && item.role === "user") {
-				// A click shows what you can do with it; a right-click offers the same.
-				node.p = { ...node.p, actions: { click: MESSAGE_FOCUS, menu: [MESSAGE_EDIT, MESSAGE_RESEND, "copy"] }, title: "Click to edit or resend", ...(options.editing === item.id ? { tone: "accent" } : {}) };
-				if (options.messageFocus === item.id) node.c = [...(node.c ?? []), messageActionRow(item.id, options.busy === true)];
-			}
-			if (node) out.push(node);
+			const focused = options.messageFocus === item.id;
+			memo(`m:${item.id}`, [item], [options.editing === item.id, focused, focused && options.busy === true], () => messageNodes(item, options));
 		});
+		this.#segmentCache = cache;
 		return out;
 	}
 
@@ -577,6 +703,11 @@ export class TranscriptProjector {
 		const group = segmentTranscript(this.items).find((s) => s.kind === "tools" && s.items.some((i) => i.id === id));
 		if (!group || group.kind !== "tools") return undefined;
 		const key = groupId(group.items);
+		const at = this.#items.indexOf(group.items[0]!);
+		if (at < this.#windowStart) {
+			this.#userExpanded = true;
+			this.#setWindowStart(turnStartBefore(this.#items, at + 1, 1));
+		}
 		this.setGroupView(key, "all");
 		return key;
 	}
@@ -584,6 +715,55 @@ export class TranscriptProjector {
 	clearGroupViews(): void {
 		this.#groupViews.clear();
 	}
+}
+
+// Turns a resumed transcript opens on, and the live size at which it is trimmed back to that.
+export const TRANSCRIPT_WINDOW_TURNS = 50;
+export const TRANSCRIPT_TRIM_TURNS = 150;
+export const TRANSCRIPT_EARLIER = "transcript.earlier";
+
+// Index of the boundary that starts the `turns`-th turn before `end` (0 when there are fewer).
+function turnStartBefore(items: readonly Item[], end: number, turns: number): number {
+	let seen = 0;
+	for (let i = end - 1; i >= 0; i--) {
+		if (!isTurnBoundary(items[i]!)) continue;
+		if (++seen === turns) return i;
+	}
+	return 0;
+}
+
+function sameDeps(a: readonly unknown[], b: readonly unknown[]): boolean {
+	return a.length === b.length && a.every((value, i) => value === b[i]);
+}
+
+// Items are flat records whose nested values (args, batch, chart, artifacts) are replaced, never mutated, so a
+// shallow comparison sees every change. Unchanged strings keep their reference, so === is O(1) for them.
+function sameItems(snapshots: readonly Item[], items: readonly Item[]): boolean {
+	if (snapshots.length !== items.length) return false;
+	for (let i = 0; i < items.length; i++) {
+		const a = snapshots[i] as unknown as Record<string, unknown>;
+		const b = items[i] as unknown as Record<string, unknown>;
+		const keys = Object.keys(b);
+		if (keys.length !== Object.keys(a).length) return false;
+		for (const key of keys) if (a[key] !== b[key]) return false;
+	}
+	return true;
+}
+
+function messageNodes(item: Item, options: { messageFocus?: string; editing?: string; busy?: boolean }): TspNode[] {
+	// A visible custom notice (agent completed, goal, monitor, schedule) is one muted line, never a block.
+	if (item.turnStart) {
+		// Auto-graph's planned chart draws natively; its ASCII text is the fallback for renderers without Tern.
+		if (item.chart) return [item.chart];
+		return [{ id: `msg-${item.id}`, k: "text", p: { role: "tern.notice", tone: "muted", wrap: "none", truncate: "end", text: goalLine(item.text) } }];
+	}
+	const [node] = projectTranscript([{ id: item.id, role: item.role as Exclude<Role, "tool">, text: item.text, streaming: item.streaming }]);
+	if (node && item.role === "user") {
+		// A click shows what you can do with it; a right-click offers the same.
+		node.p = { ...node.p, actions: { click: MESSAGE_FOCUS, menu: [MESSAGE_EDIT, MESSAGE_RESEND, "copy"] }, title: "Click to edit or resend", ...(options.editing === item.id ? { tone: "accent" } : {}) };
+		if (options.messageFocus === item.id) node.c = [...(node.c ?? []), messageActionRow(item.id, options.busy === true)];
+	}
+	return node ? [node] : [];
 }
 
 function toolRow(item: Item, outputExpanded: boolean): TspNode {
@@ -797,7 +977,7 @@ function genericToolNode(item: Item, status: "running" | "done" | "error" | "can
 			...(note !== undefined ? { note } : {}),
 		},
 	};
-	if (item.output) node.c = [{ id: `${item.id}-out`, k: "text", p: { text: running ? tailWindow(item.output, STEP_LIVE_LINES) : item.output } }];
+	if (item.output) node.c = [{ id: `${item.id}-out`, k: "text", p: { text: running ? tailWindow(item.output, STEP_LIVE_LINES, item.outputDropped) : item.output } }];
 	return node;
 }
 
@@ -949,7 +1129,7 @@ function bashToolNode(item: Item, status: "running" | "done" | "error" | "cancel
 		id: `${item.id}-run`, k: "col", p: { role: "omp.run", gap: "sm", ...(status === "error" ? { tone: item.timedOut ? "warning" : "error" } : {}) },
 		c: [
 			...(showsCommand ? [{ id: `${item.id}-cmd`, k: "code", p: { role: "omp.tool.bash.command", lang: "bash", wrap: true, text: command.trimEnd() } }] : []),
-			...(item.output?.trim() ? [{ id: `${item.id}-out`, k: "ansi", p: { role: "omp.tool.bash.output", text: status === "running" ? tailWindow(item.output, STEP_LIVE_LINES) : item.output, follow: true } }] : []),
+			...(item.output?.trim() ? [{ id: `${item.id}-out`, k: "ansi", p: { role: "omp.tool.bash.output", text: status === "running" ? tailWindow(item.output, STEP_LIVE_LINES, item.outputDropped) : item.output, follow: true } }] : []),
 			foot,
 		],
 	};
@@ -1049,10 +1229,11 @@ const STEP_HEAD_TARGET = 64;
 const MAX_PATCH_FILES_SHOWN = 3;
 
 // The last `lines` lines of a live stream, with an explicit count of what is held back (never silently cut).
-function tailWindow(text: string, lines: number): string {
-	const all = text.replace(/\s+$/, "").split("\n");
-	if (all.length <= lines) return text;
-	const hidden = all.length - lines;
+function tailWindow(text: string, lines: number, dropped = 0): string {
+	const body = dropped > 0 ? text.slice(text.indexOf("\n") + 1) : text;
+	const all = body.trimEnd().split("\n");
+	if (all.length <= lines && dropped === 0) return text;
+	const hidden = Math.max(0, all.length - lines) + dropped;
 	return `… ${hidden} earlier ${hidden === 1 ? "line" : "lines"}\n${all.slice(-lines).join("\n")}`;
 }
 const BACKGROUND_WORK_LABEL_CHARS = 80;
@@ -1352,7 +1533,7 @@ export class PiTernBridge {
 	// Sends picture blobs before re-rendering, so no frame references a blob Tern has not received.
 	async #previewArtifacts(event: PiEventLike): Promise<void> {
 		const name = String(event.toolName);
-		const args = (this.#projector.items.find((i) => i.id === `t-${String(event.toolCallId)}`)?.args ?? {}) as Record<string, unknown>;
+		const args = (this.#projector.callItem(String(event.toolCallId))?.args ?? {}) as Record<string, unknown>;
 		const cwd = this.#session.sessionManager?.getCwd?.() ?? process.cwd();
 		const paths = name === "Read"
 			? [typeof args.file_path === "string" ? args.file_path : undefined]
@@ -1364,13 +1545,14 @@ export class PiTernBridge {
 			if (preview) previews.push(preview);
 		}
 		if (previews.length === 0 || this.#closed) return;
-		const item = this.#projector.items.find((i) => i.id === `t-${String(event.toolCallId)}`);
+		const item = this.#projector.callItem(String(event.toolCallId));
 		if (!item) return;
 		for (const preview of previews) {
 			if (!preview.blob) continue;
 			for (const chunk of encodeTspBlob(preview.blob.id, preview.blob.mime, preview.blob.base64)) this.#write(chunk);
 		}
-		item.artifacts = previews;
+		// Tern holds each blob once sent; nodes reference it by id, so the bytes need not stay on the item.
+		item.artifacts = previews.map((preview) => (preview.blob ? { ...preview, blob: { ...preview.blob, base64: "" } } : preview));
 		this.#render();
 	}
 
@@ -1820,6 +2002,9 @@ export class PiTernBridge {
 			if (this.#closed || JSON.stringify(git) === JSON.stringify(this.#git)) return;
 			this.#git = git;
 			this.#render();
+		}, () => {
+			// A failed read must not leave the guard set, or git facts would freeze for the rest of the pane's life.
+			this.#gitRefreshing = false;
 		});
 	}
 
@@ -2079,6 +2264,11 @@ export class PiTernBridge {
 		this.#surface.render([...startupNodes(this.#logo, this.#version, this.#repo, readMcpStatus(this.#session.sessionManager?.getSessionId?.() as string | undefined)), ...transcript, ...this.#transcriptTasks()], this.#gitView ? [] : this.#dock(), focus, this.#layer(), this.#workReveal ?? this.#complete.selectedId);
 		this.#workReveal = undefined;
 		try { this.#onRenderTap?.(transcript, this.#trigger, this.#busy); } catch { /* tracing never affects the UI */ }
+	}
+
+	/** The view Tern holds after applying every frame sent so far. For tests that replay the wire. */
+	debugView(): TspView {
+		return this.#surface.sent ?? { main: [], dock: [], layer: [] };
 	}
 
 	// ctrl+o folds or unfolds all tool output; each tool's head click still toggles just that tool.
@@ -2910,6 +3100,7 @@ export class PiTernBridge {
 		if (typeof act === "string" && act.startsWith("git.")) return this.#gitAct(act, typeof msg.body.value === "string" ? msg.body.value : undefined);
 		if (act === "bg.open" && typeof msg.body.value === "string") { this.#openWorkView(msg.body.value); return undefined; }
 		if (act === "bg.close") { this.#closeWorkView(); return undefined; }
+		if (act === TRANSCRIPT_EARLIER) { this.#projector.showEarlier(); this.#render(); return undefined; }
 		if (act === "bg.stop" && typeof msg.body.value === "string") { this.#stopWork(msg.body.value); return undefined; }
 		// The composer's Background button: the same dispatch the ctrl+b key reaches in run.ts.
 		if (act === "bg.background") { this.backgroundForegroundWork(); return undefined; }
