@@ -1,7 +1,31 @@
-/** Minimal Hoja (Linear-compatible GraphQL) client for /claw. The token comes from LINEAR_TOKEN and is
- *  never placed in errors, logs or results. Project names decide the team: every Hoja project belongs to
- *  exactly one team, and the assignee must be a member of that team. */
+/** Minimal Hoja (Linear-compatible GraphQL) client for /claw. Credentials are the canonical `HOJA_*` pair
+ *  (`HOJA_TOKEN`, `HOJA_API_URL`); the `LINEAR_*` names are deprecated aliases that are still consulted so
+ *  existing deployments keep working, but they never win over the canonical names. The token is never placed
+ *  in errors, logs or results. Project names decide the team: every Hoja project belongs to exactly one team,
+ *  and the assignee must be a member of that team. */
 export type FetchLike = (url: string, init: { method: string; headers: Record<string, string>; body: string; signal?: AbortSignal; redirect?: "error" }) => Promise<{ status: number; text(): Promise<string> }>;
+/** Credential names in precedence order: canonical first, deprecated alias second. Only a missing (or blank)
+ *  canonical value falls through to the alias, so a session that exports only `HOJA_*` is never left unconfigured. */
+export const HOJA_TOKEN_VARS = ["HOJA_TOKEN", "LINEAR_TOKEN"] as const;
+export const HOJA_URL_VARS = ["HOJA_API_URL", "LINEAR_API_URL"] as const;
+/** Live default; `HOJA_API_URL` (or the deprecated `LINEAR_API_URL`) overrides it. The previous default,
+ *  `https://hoja.clover4.app/graphql`, now answers 404 for every path — including `/` — so an unset URL
+ *  produced a misleading `Hoja HTTP 404` instead of reaching the API. */
+export const HOJA_URL_DEFAULT = "https://app.hoja.work/graphql";
+/** Names every variable that was consulted, canonical first. The deprecated alias is reported as a fallback
+ *  only, never as the primary credential (issue #415: the message used to name only `LINEAR_TOKEN`). */
+export const MISSING_HOJA_TOKEN =
+	"HOJA_TOKEN is not set (deprecated fallback LINEAR_TOKEN is also unset); Hoja is unavailable";
+type Env = Record<string, string | undefined>;
+/** First non-blank, trimmed value among `names`. A variable exported as an empty string is not a credential, so
+ *  it falls through to the next name instead of authenticating with an empty bearer. */
+export function credentialValue(names: readonly string[], env: Env = process.env): string | undefined {
+	for (const name of names) {
+		const value = env[name]?.trim();
+		if (value) return value;
+	}
+	return undefined;
+}
 /** Only locally authored errors may cross the tool boundary. Never echo server bodies.
  *  `ambiguous` means a write may have been applied even though no usable answer arrived (timeout, dropped connection,
  *  non-200, unreadable body). Only a GraphQL error with no data is a definitive rejection: nothing was committed. */
@@ -39,15 +63,15 @@ export class HojaClient {
 	private readonly fetchImpl: FetchLike;
 	private readonly timeoutMs: number;
 	constructor(options: { url?: string; token?: string; fetch?: FetchLike; timeoutMs?: number } = {}) {
-		this.url = options.url ?? process.env.LINEAR_API_URL ?? "https://hoja.clover4.app/graphql";
-		this.token = options.token ?? process.env.LINEAR_TOKEN ?? "";
+		this.url = options.url ?? credentialValue(HOJA_URL_VARS) ?? HOJA_URL_DEFAULT;
+		this.token = options.token ?? credentialValue(HOJA_TOKEN_VARS) ?? "";
 		this.fetchImpl = options.fetch ?? (globalThis.fetch as unknown as FetchLike);
 		this.timeoutMs = options.timeoutMs ?? 15_000;
 		if (!Number.isFinite(this.timeoutMs) || this.timeoutMs <= 0) throw new Error("Invalid Hoja timeout");
 	}
 
 	async gql<T>(query: string, variables: Record<string, unknown> = {}): Promise<T> {
-		if (!this.token) throw new HojaRequestError("LINEAR_TOKEN is not set; Hoja is unavailable");
+		if (!this.token) throw new HojaRequestError(MISSING_HOJA_TOKEN);
 		const controller = new AbortController();
 		let timer: ReturnType<typeof setTimeout> | undefined;
 		const deadline = new Promise<never>((_, reject) => {

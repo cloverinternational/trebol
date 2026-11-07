@@ -104,6 +104,35 @@ only when it carries Hoja metadata (typically a corrected `hojaProject` after a
 skip, or an explicit `hoja:"publish"`); a plain update never publishes, but it
 **does** keep an already-linked task's issue current (see lifecycle below).
 
+## Credentials
+
+The shared client (`.pi/lib/claw/hoja.ts`) reads the canonical pair first and
+the deprecated aliases only as a fallback, resolved per value:
+
+| Used for | Canonical | Deprecated alias | Default |
+| --- | --- | --- | --- |
+| Bearer token | `HOJA_TOKEN` | `LINEAR_TOKEN` | none — reads and writes report unavailability |
+| GraphQL endpoint | `HOJA_API_URL` | `LINEAR_API_URL` | `https://app.hoja.work/graphql` |
+
+Precedence is per value, so `HOJA_TOKEN` together with `LINEAR_API_URL` and the
+reverse are both valid. A variable exported as an empty or whitespace-only
+string counts as unset and falls through to the next name instead of sending an
+empty bearer. When no token resolves, the error names every variable consulted
+and labels the alias as a fallback: `HOJA_TOKEN is not set (deprecated fallback
+LINEAR_TOKEN is also unset); Hoja is unavailable`. A session that exports only
+`HOJA_*` (for example from `~/.config/hoja/pi.env`) therefore works without the
+legacy name, and the message never implies that only the legacy alias exists.
+Credentials are read from the process environment only: a profile that the Pi
+process did not source leaves the tools unavailable, and that is reported as a
+credential problem rather than a network failure. Tests:
+`.pi/test/claw/hoja-credentials.test.ts`.
+
+The default endpoint moved from `https://hoja.clover4.app/graphql` to
+`https://app.hoja.work/graphql`: the old host answers 404 for every path
+(including `/`), which surfaced as a misleading `Hoja HTTP 404` when no URL
+variable was exported. A deployment on another host sets `HOJA_API_URL` and is
+unaffected.
+
 ## Where work is filed
 
 A delegated agent starts its task tree in a fresh process and cannot know the
@@ -343,7 +372,8 @@ line for every recorded lifecycle error and one for each issue that reached
 ## Hoja schema evidence (read-only)
 
 Recorded by an earlier read-only introspection of the live schema
-(`LINEAR_API_URL`/`LINEAR_TOKEN` from the environment; only type and field
+(`HOJA_API_URL`/`HOJA_TOKEN` from the environment, then the deprecated
+`LINEAR_*` aliases; only type and field
 names were read, no values and no writes). It was **not** re-run for this
 change:
 
