@@ -292,6 +292,8 @@ It is intentionally **not** `<workspace>/.swarm/claw`: that in-repo directory pu
 `supervisor.json` and `sessions/*.json` in every user's `git status`, so it is adopted once into the
 state root on first start and then left out of the repository entirely.
 
+Diagram: [`runtime-state-relocation.svg`](../architecture/runtime-state-relocation.svg).
+
 | State | Scope | Where |
 | --- | --- | --- |
 | Run owner (`run.owner`) and Tern pane (`run.pane`) | per run | stamped by the calling session on `spawn` and on a trigger's spawn action (`stampOrigin` in `extensions/claw/extension.ts`) |

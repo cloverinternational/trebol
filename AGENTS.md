@@ -129,6 +129,7 @@ path, and preserve native tools and unrelated extensions while disabled.
 | `tools/experiments/bootstrap-agent/` | Opt-in bootstrap experiments; `planning-contract.mjs` provides experimental prompt variants and strict plan validation. Private history replays stay in ignored artifacts; planning scores do not prove execution or memory retrieval. |
 | `tools/integration/` | Postgres integration runner and cache dogfood. |
 | `tools/install/` | `doctor.mjs`: global-install health check (`npm run doctor`). |
+| `tools/docs/` | Diagram generators, never hand-drawn assets. `runtime-state-diagram.mjs <out.svg>` emits `docs/architecture/runtime-state-relocation.svg` and exits non-zero on text overflow, on a rect that paint order puts over earlier text, or on contrast below WCAG AA. `tests/runtime-state-diagram.test.ts` regenerates and byte-compares the committed file, matches its env names and paths against `stateRoot`/`workspaceKey`/`clawStateDir`, and rejects any `.swarm` destination outside the known legacy/input set. Regenerate instead of editing the SVG. |
 | `tools/repo/` | Repository maintenance: `rewrite-imports.mjs` re-targets relative specifiers after moves and has a `--check` mode; `check-tracked-symlinks.mjs` fails on a tracked symlink that escapes the checkout (`npm run check:symlinks`); `link-node-modules.mjs` is the opt-in, per-worktree, relative dependency sharing helper. |
 | `docs/architecture/` | Living design descriptions. |
 | `docs/reference/` | Contracts, inventories, and operational references. |
