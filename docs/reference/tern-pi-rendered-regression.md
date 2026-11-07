@@ -99,15 +99,27 @@ factories or arbitrary GPUI widgets. Tern's documented TSP `card`, `text`,
 `docs/reference/tern-site/elements/layout.md` documents the card head/body
 and native status chip; `elements/chrome.md` documents status/seg fitting;
 `styles/variables.md` defines `--tv-font` and `--sf-fs` for the surface font.
-The task/questions region (`task-top`, role `pi.tasks`) is a compact,
-opaque (`--card`) column using session-backed canonical TaskManager
-snapshots: an uppercase summary line, an accent focus line, warn/ok-coloured
-acceptance questions and the next task, at 10.5px. It has no status chip.
-Every task sits in a `pi.tasks.pop` popover above it, hidden by default and
-shown only by the stylesheet rule `[data-role='pi.tasks']:hover`; hover is
-Tern view state, so show/hide needs no program round-trip. Clicking a task
-appends `task #N` to the draft without sending; right-click folds the
-questions. It is read-only: no task click means an answer or consent.
+Tasks are drawn once, in the transcript, and only while they are live.
+`tasks-block` (role `pi.tasks.block`) is a keyed block appended to the main
+region above the composer, built from session-backed canonical TaskManager
+snapshots: one small muted head (`Tasks · 1 active · 2 pending · 3 done ·
+1 blocked`, zero counts omitted), then one inline `tool` row per task that is
+in progress or blocked, with only its **open** acceptance questions as plain
+`pi.tasks.line-q` text lines underneath. Answered questions, their evidence,
+finished tasks and not-yet-started tasks are not rows: they are counted in the
+head, so nothing is lost, and a transcript cannot fill up with a task list that
+only grows. At most 4 live rows and 3 open questions per row are drawn, with
+`+N more live tasks` for the rest. The block is read-only: no task row means an
+answer or consent. Row text sits one step down the design type scale (11px at
+the default 13px terminal font) and questions one more (10px), against 12.5px
+and 13px before (measured in Tern: `node tools/e2e/tern-task-block-measure.mjs`).
+The composer (`omp.editor`) is only the input - context meter, editor line and
+bar - and draws no task state at all.
+It used to repeat the tasks in a compact `pi.tasks` card of its own (summary
+line, accent focus line, question rows, next task and a hover `pi.tasks.pop`
+list/board, at 10.5px, where clicking a task appended `task #N` to the draft
+and right-click folded the questions); that duplicate was removed so the same
+tasks are no longer listed twice on one screen.
 The footer is TSP status/seg rows using only available session metrics and
 conditional provider output. It is **not** the native Pi footer factory.
 
@@ -250,9 +262,11 @@ reached a later selection with the same pitch and Tab inserted `/model clover-pl
 OMP-only `modelpreset` and hints without a Pi equivalent are not invented; the moving-window DOM has
 different offscreen nodes from OMP, though the tested rendering and access to later completions agree.
 
-## Hover task popover (headless check)
+## Hover task popover (historical, removed)
 
-An isolated five-task fixture (`/tmp/trebol-taskhover/fixture.mjs`) in
+The composer's `pi.tasks` card and its hover `pi.tasks.pop` were removed; these
+measurements describe the surface that no longer exists and are kept only as a
+record. An isolated five-task fixture (`/tmp/trebol-taskhover/fixture.mjs`) in
 `tern serve` at 800×650 measured `pi.tasks.focus` at 10.5px, weight 600.
 At idle `pi.tasks.pop` was hidden. After `hover [data-role='pi.tasks.next']`
 it was `visible: true` at `[29,278,743,140]`, with background

@@ -54,11 +54,11 @@ export default function bgStopProbe(pi: any) {
   assert.ok(item, "the command is in the running-work store");
   assert.ok(alive(), "pgrep sees the live process before stop");
   const bar = writes.join("");
-  assert.ok(bar.includes(`"click":"bg.open=${item.id}"`), "row carries the open action");
-  assert.ok(bar.includes(`"click":"bg.stop=${item.id}"`), "running row carries the x");
+  assert.ok(bar.includes('"click":"bg.open=all"'), "the pulse opens the work sheet");
 
   let from = writes.length;
-  action("bg.open", item.id, `bg-work-${item.id}`);
+  // The sheet's own first row is the live job; opening it is what the pulse's card used to do per item.
+  action("bg.open", "all", "work");
   const firstTicks = writes.slice(from).join("").match(/tick (\d+)/g) ?? [];
   assert.ok(firstTicks.length > 0, "the output sheet shows the command's output");
   const firstMax = Math.max(...firstTicks.map((t) => Number(t.split(" ")[1])));
@@ -78,7 +78,7 @@ export default function bgStopProbe(pi: any) {
   assert.equal(settled?.stop, undefined, "settled work offers no stop");
   const after = writes.join("");
   assert.ok(after.includes(`"head":"Stop probe · cancelled"`) || after.includes("· cancelled"), "the sheet shows the cancelled state");
-  assert.ok(after.includes('["del","background-work"'), "the bar drops the stopped work");
+  assert.ok(after.includes('["del","work"'), "the pulse drops the stopped work");
   console.log(`PASS tern background stop: live output tick ${firstMax}→${laterMax}, x killed the process (pgrep empty), store=cancelled`);
 } catch (error) {
   console.error(`FAIL ${error instanceof Error ? error.message : String(error)}`);

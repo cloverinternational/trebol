@@ -79,10 +79,10 @@ export default function backgroundBashProbe(pi: any) {
   assert.equal(result.status, "running", "the command keeps running");
   assert.equal(runningWorkSnapshot().find((w) => w.id === live.id)?.foreground, false, "the item left the turn");
 
-  // 4. The button went away because its state did, and the background card took the row.
+  // 4. The button went away because its state did, and the composer's work pulse took the job.
   await sleep(120);
   assert.ok(frames().includes('["del","composer-background"]'), "the button is removed once nothing is foreground");
-  assert.ok(frames().includes('"role":"pi.background"'), "the background card draws the moved work");
+  assert.ok(frames().includes('"role":"pi.composer.work"'), "the composer pulse draws the moved work");
   runningWorkSnapshot().find((w) => w.id === live.id)?.stop?.();
   console.log("PASS tern Background button: drawn only for a live foreground call, one click detaches it");
 } catch (error) {

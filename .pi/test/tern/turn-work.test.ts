@@ -416,7 +416,7 @@ describe("turn-work properties", () => {
 describe("turn line and running-work bar announce each piece of work once", () => {
 	afterEach(() => removeRunningWork("bash-1"));
 
-	it("a foreground call is only on the turn line; once backgrounded it is only in the bar", () => {
+	it("a foreground call is only on the turn line; once backgrounded it is only on the composer pulse", () => {
 		const session = fakeSession();
 		const writes: string[] = [];
 		const bridge = new PiTernBridge(session, { write: (d) => writes.push(d), surfaceId: "pi", credits: 1_000_000 });
@@ -426,7 +426,9 @@ describe("turn line and running-work bar announce each piece of work once", () =
 			const main = applyFrames(writes, state);
 			return {
 				line: main.filter((n) => n.p?.role === "tern.work-live").map((n) => String(n.p?.text)),
-				bar: [...state.nodes.values()].filter((n) => n.parent === "background-work").map((n) => n.id),
+				// The dock carries no work card any more: one pulse, and the jobs listed inside its hover card.
+				count: (state.nodes.get("work-count") as { p?: { text?: unknown } } | undefined)?.p?.text ?? null,
+				named: (state.nodes.get("work-now") as { p?: { text?: unknown } } | undefined)?.p?.text ?? null,
 			};
 		};
 		session.emit({ type: "agent_start" });
@@ -434,12 +436,13 @@ describe("turn line and running-work bar announce each piece of work once", () =
 		session.emit({ type: "tool_execution_start", toolCallId: "c1", toolName: "Bash", args: { command: "make" } });
 		// Bash registers foreground work in the shared store as it starts (swarm-bgprocess.ts).
 		setRunningWork({ id: "bash-1", kind: "bash", label: "make", status: "running", startedAt: Date.now(), detail: "", foreground: true });
-		expect(view()).toEqual({ line: ["1 running · build"], bar: [] });
+		expect(view()).toEqual({ line: ["1 running · build"], count: null, named: null });
 
 		// Ctrl+B / auto-background: the call returns, so the turn line no longer counts it, and the bar shows it.
 		patchRunningWork("bash-1", { foreground: false });
 		session.emit({ type: "tool_execution_end", toolCallId: "c1", toolName: "Bash", result: { content: [{ type: "text", text: "moved to background" }] }, isError: false });
-		expect(view()).toEqual({ line: ["working · build"], bar: ["bg-work-bash-1-line", "bg-work-more"] });
+		// This fixture's store item has an empty detail, so the pulse counts it and invents no name for it.
+		expect(view()).toEqual({ line: ["working · build"], count: "1", named: null });
 		bridge.close?.();
 	});
 });

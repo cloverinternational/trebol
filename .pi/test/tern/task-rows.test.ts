@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { projectTaskView } from "../../lib/tern/task-view.ts";
-import { buildTaskRows, TASK_ROW_QUESTIONS, TASK_ROW_TARGET_CHARS, TASK_ROWS_MAX } from "../../lib/tern/task-rows.ts";
+import { buildTaskRows, taskRowCounts, TASK_ROW_QUESTIONS, TASK_ROW_TARGET_CHARS, TASK_ROWS_MAX } from "../../lib/tern/task-rows.ts";
 
 const snapshotEntry = (state: Record<string, unknown>) => ({
 	type: "custom",
@@ -84,5 +84,39 @@ describe("buildTaskRows", () => {
 	it("gives every card a stable id Tern can key its fold state on", () => {
 		const { rows: cards } = buildTaskRows(view([task({ id: "7", subject: "A" }), task({ id: "8", subject: "B" })]));
 		expect(cards.map(c => c.id)).toEqual(["task-row-7", "task-row-8"]);
+	});
+
+	it("keeps only live work when the transcript asks for it, and only its open questions", () => {
+		const projection = view([
+			task({ id: "1", subject: "Focused", status: "in_progress", active: true,
+				questions: [{ id: "q1", text: "Tests pass?" }, { id: "q2", text: "Docs updated?" }],
+				answers: [{ question: "q1", answer: "yes", evidence: "src/a.ts#L1-L2" }] }),
+			task({ id: "2", subject: "Stuck", dependsOn: ["1"] }),
+			task({ id: "3", subject: "Later" }),
+			task({ id: "4", subject: "Done", status: "completed" }),
+		]);
+		const { rows, hidden } = buildTaskRows(projection, { liveOnly: true, maxQuestions: 3 });
+		expect(rows.map(row => row.taskId)).toEqual(["1", "2"]);
+		expect(hidden).toBe(0);
+		// The answered question is gone; the open one remains, as the only thing the task still needs.
+		expect(rows[0]!.questions).toEqual([{ id: "q2", mark: "?", text: "Docs updated?", status: "pending" }]);
+		expect(rows[1]!.title).toBe("Blocked");
+	});
+
+	it("counts every state for the block's head, so omitted work is still accounted for", () => {
+		const counts = taskRowCounts(view([
+			task({ id: "1", subject: "Focused", status: "in_progress", active: true }),
+			task({ id: "2", subject: "Stuck", dependsOn: ["1"] }),
+			task({ id: "3", subject: "Later" }),
+			task({ id: "4", subject: "Done", status: "completed" }),
+		]));
+		expect(counts).toEqual({ active: 1, pending: 2, done: 1, blocked: 1 });
+	});
+
+	it("bounds live rows separately from the full list", () => {
+		const tasks = Array.from({ length: 6 }, (_, i) => task({ id: String(i + 1), subject: `S${i}`, status: "in_progress" }));
+		const { rows, hidden } = buildTaskRows(view(tasks), { liveOnly: true, maxRows: 4 });
+		expect(rows).toHaveLength(4);
+		expect(hidden).toBe(2);
 	});
 });

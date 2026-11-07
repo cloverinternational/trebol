@@ -26,13 +26,20 @@ published API is already available locally.
 Background commands and agents use `background-panel.ts` for a unified native
 manager and `background-format.ts` for bounded presentation: safe ANSI, complete
 JSON formatting, diagnostic badges and stable-ID visible agent messages/tool
-results. The live shelf distinguishes queued/running, links to all work and
-retains access to recent work for 15 minutes while the runtime still tracks it.
+results. The dock carries no work card: the composer bar holds one pulse
+(`composer-view.ts` `workChip`) — a Tern-clocked `spinner`, the live count, and the
+newest job's name revealed on hover/focus — which opens the work sheet on click
+and disappears the moment nothing is live. The status band clips its own children,
+so never put a floating panel in the bar; the list belongs in that sheet. Finished
+work stays readable there for 15 minutes while the runtime still tracks it, reached
+by clicking the pulse or typing `/work`, never as a standing composer row.
 Follow live/Pause viewing affects only the display. Stop requests are single-flight
 and do not claim cancellation before runtime settlement. Agent reasoning is not
 projected. Raw text is sanitized, not a byte-for-byte terminal escape replay.
-Tests: background-panel, dock, background-button under `.pi/test/tern/`.
+Tests: background-panel, dock, composer-view, background-button under `.pi/test/tern/`.
 Native fixture harness: `node tools/e2e/tern-background-manager.mjs`.
+Rendered-box measurement (real `tern serve`, not our own CSS):
+`node tools/e2e/tern-composer-work-chip.mjs`.
 
 Tern work groups offer All / Active / Failed filters and Search & inspect.
 `work-inspector.ts` provides pure counts/filtering and a native selected-step

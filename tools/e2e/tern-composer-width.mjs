@@ -1,5 +1,5 @@
 #!/usr/bin/env -S node --experimental-strip-types
-/** Real Pi session + Tern bridge: the task block is emitted inside the composer column, so it shares the input's bounds. */
+/** Real Pi session + Tern bridge: the composer column is the input box, and it carries no task list inside it. */
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -52,11 +52,16 @@ try {
   await new Promise((r) => setTimeout(r, 300));
 
   const adds = tspAdds(writes);
-  const task = adds.find((a) => a.node?.id === "task-top");
-  assert.ok(task, "task block is rendered");
-  assert.equal(task.parent, "composer-col", "task block is nested in the composer column, so it takes the input's bounds");
-  assert.equal(adds.find((a) => a.node?.id === "composer-col")?.parent, "dock", "composer column stays a direct dock child");
-  console.log("PASS tern composer width: task block shares the composer column bounds");
+  const composer = adds.find((a) => a.node?.id === "composer-col");
+  assert.ok(composer, "the composer column is rendered");
+  assert.equal(composer.parent, "dock", "composer column stays a direct dock child");
+  // The input box holds only its own parts: context meter, input line, bar. The session really has tasks,
+  // so this is the task case, not an empty one.
+  const inside = adds.filter((a) => a.parent === "composer-col").map((a) => a.node?.id);
+  assert.deepEqual(inside, ["ctx", "composer-line", "composer-bar"], "the composer column carries no task block");
+  assert.equal(adds.some((a) => a.node?.id === "task-top" || a.node?.id === "task-pop"), false, "no task card is built");
+  assert.equal(adds.some((a) => a.node?.p?.role === "pi.tasks"), false, "no pi.tasks region is added anywhere");
+  console.log("PASS tern composer width: the input box carries no task list, only its own parts");
 } finally {
   clearTimeout(deadline);
   cleanup();

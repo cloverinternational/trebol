@@ -20,7 +20,7 @@ import type { Model } from "@earendil-works/pi-ai";
 import { editingBanner, imageAttachments, MESSAGE_EDIT, MESSAGE_EDIT_CANCEL, MESSAGE_FOCUS, MESSAGE_RESEND, messageActionRow, messageItemFromNode, resolveUserEntry, userEntriesOf, type EditState, type UserEntry } from "./message-actions.ts";
 import { buildTreeModel, DEFAULT_TREE_FILTER, nextFilter, sessionTreePickerNode, TREE_FILTERS, type TreeFilter, type TreeModel, type TreeRow } from "./session-tree.ts";
 import { encodeTspBlob, projectTranscript, type TspMessage, type TspNode, type TspWriter, TernInlineSurface } from "./tsp.ts";
-import { composerNodes, modelDisplayName, type GitFacts } from "./composer-view.ts";
+import { composerNodes, modelDisplayName, type GitFacts, type WorkFacts } from "./composer-view.ts";
 import { artifactNodes, previewFile, type ArtifactPreview } from "./artifact-previews.ts";
 import { readMcpStatus, subscribeMcpStatus } from "../tools/mcp-status.ts";
 import type { McpToolDefinitionLike } from "../tools/mcp-inventory.ts";
@@ -39,9 +39,8 @@ import { PI_COMPOSER_CSS } from "./composer-style.ts";
 import { TERN_WORK_CSS } from "./work-style.ts";
 import { PI_CONTEXT_CSS } from "./context-style.ts";
 import { TERN_MARKDOWN_CSS } from "./markdown-style.ts";
-import { projectTaskView, type TaskView, type TaskViewRow, type TaskViewSessionManager } from "./task-view.ts";
-import { buildBoard } from "./task-board.ts";
-import { buildTaskRows } from "./task-rows.ts";
+import { projectTaskView, type TaskView, type TaskViewSessionManager } from "./task-view.ts";
+import { buildTaskRows, taskRowCounts, TASK_LIVE_QUESTIONS, TASK_LIVE_ROWS } from "./task-rows.ts";
 import { ASK_OPTIONS_ID, TernAskDialog, type AskEventBus } from "./ask-dialog.ts";
 import { TernBtwCard } from "./btw-card.ts";
 import { TernExtensionUI, UI_PROMPT_INPUT_ID, UI_PROMPT_LIST_ID } from "./ext-ui.ts";
@@ -161,24 +160,6 @@ interface Item {
 }
 
 const OUTPUT_LIMIT = 4000;
-
-function taskGlyph(t: Pick<TaskViewRow, "status" | "active" | "blocked">): string {
-	if (t.status === "completed") return "✓";
-	if (t.blocked) return "⚠";
-	return t.active || t.status === "in_progress" ? "●" : "○";
-}
-
-function taskTone(t: Pick<TaskViewRow, "status" | "active" | "blocked">): string {
-	if (t.status === "completed") return "success";
-	if (t.blocked) return "warning";
-	return t.active ? "accent" : t.status === "in_progress" ? "info" : "muted";
-}
-
-function taskStatusLabel(t: TaskViewRow): string {
-	if (t.status === "completed") return "completed";
-	if (t.blocked) return "blocked";
-	return t.active ? "focused" : t.status === "in_progress" ? "in progress" : "pending";
-}
 
 function messageText(message: unknown): string {
 	if (typeof message !== "object" || message === null) return "";
@@ -1060,7 +1041,6 @@ export interface BridgeOptions {
 }
 
 
-const BACKGROUND_WORK_MAX_ROWS = 5;
 // A running step stays open, so its body is a bounded tail of what it printed: Tern's own `preview` gives way
 // inside an open tool, and an unbounded body would push the rest of the turn off screen.
 const STEP_LIVE_LINES = 12;
@@ -1079,12 +1059,6 @@ const BACKGROUND_WORK_LABEL_CHARS = 80;
 const boundedChars = (value: string, limit: number) => { const chars = Array.from(value.replace(/\s+/g, " ").trim()); return chars.length > limit ? `${chars.slice(0, limit - 1).join("")}…` : chars.join(""); };
 /** Bash shows its command; a subagent shows its task. Full text stays in the row title. */
 const backgroundWorkLabel = (item: RunningWorkItem) => boundedChars(safeWorkText((item.kind === "bash" ? item.detail : `${item.label} · ${item.detail}`).slice(0, 1000)), BACKGROUND_WORK_LABEL_CHARS);
-/** Latest non-empty output line for bash, read without changing the process (readOutput only drains buffers). */
-function backgroundWorkTitle(item: RunningWorkItem): string {
-	let latest = "";
-	try { latest = (item.readOutput?.() ?? item.output ?? "").split("\n").filter((line) => line.trim()).at(-1) ?? ""; } catch { latest = ""; }
-	return [safeWorkText(item.label), safeWorkText(item.detail.slice(0, 1000)), latest ? `last output: ${boundedChars(safeWorkText(latest.slice(-1000)), 120)}` : ""].filter(Boolean).join("\n");
-}
 const BACKGROUND_OUTPUT_LINES = 200;
 const BACKGROUND_OUTPUT_STEPS = 8;
 // While the output view is open its body is re-read on this cadence: output growth does not touch the store.
@@ -1209,9 +1183,6 @@ export class PiTernBridge {
 	#modelCatalogLoading = false;
 	#modelCatalogError: string | undefined;
 	#modelCatalogRequest = 0;
-	#taskQuestionsCollapsed = false;
-	/** Task popover layout: the flat list (default) or the Hoja-style board. */
-	#taskPopMode: "list" | "board" = "list";
 	#toolOutputExpanded = false;
 	readonly #kinds: readonly string[];
 	#git: GitFacts | undefined;
@@ -1441,9 +1412,8 @@ export class PiTernBridge {
 	// level, git status of Pi's cwd, session cost. OMP's tok/s, focus crumbs and shell mode have no Pi source.
 	#dock(): TspNode[] {
 		// An open ask or /btw flow takes over the input slot: its inline card replaces the composer.
-		if (this.#dialog?.active) return [...this.#taskTop(), ...this.#dialog.nodes(this.#columns)];
-		if (this.#btw?.active) return [...this.#taskTop(), ...this.#btw.nodes()];
-		const work = this.#backgroundWork();
+		if (this.#dialog?.active) return this.#dialog.nodes(this.#columns);
+		if (this.#btw?.active) return this.#btw.nodes();
 		// Tern-only affordance: the bar draws ctrl+b as a button only while that chord would really move work
 		// off the turn — one foreground item is live and a writer published its detach.
 		const backgroundable = hasRunningWorkDetach()
@@ -1454,7 +1424,7 @@ export class PiTernBridge {
 		const compactAt = window !== undefined ? compactionPercent(this.#session, window) : undefined;
 		const typed = (text: string) => this.#queuedTyped.get(text) ?? text;
 		const queue = queueNodes(queueGroups(this.#queuedSteering.map(typed), this.#queuedFollowUp.map(typed)));
-		return [...work, ...queue, ...this.#ui.widgetNodes("aboveEditor"), ...composerNodes({
+		return [...queue, ...this.#ui.widgetNodes("aboveEditor"), ...composerNodes({
 			draft: this.#draft,
 			cursor: this.#editor.cursor,
 			anchor: this.#editor.anchor,
@@ -1470,12 +1440,13 @@ export class PiTernBridge {
 			thinking: thinkingOf(this.#session),
 			effortKind: this.#kinds.includes("effort"),
 			git: this.#git,
+			work: this.#workFacts(),
 			cost: costOf(this.#session),
 			backgroundable,
 			// A phone-width bar gives Send a real touch target and keeps secondary facts from crowding it.
 			compact: this.#columns < 56,
 			...(this.#attachments.length ? { chips: attachmentChips(this.#attachments) } : {}),
-		}, [...(this.#editing ? [editingBanner(this.#editing)] : []), ...this.#taskTop()]), ...this.#ui.widgetNodes("belowEditor")];
+		}, this.#editing ? [editingBanner(this.#editing)] : []), ...this.#ui.widgetNodes("belowEditor")];
 	}
 
 	// The bar's facts are clickable in OMP (it opens panels). The context meter opens OMP's own context card
@@ -2012,34 +1983,16 @@ export class PiTernBridge {
 		};
 	}
 
-	// Hoja-style kanban inside the task popover: status columns, one card per task, click to reference.
-	// Same grouping as the TUI overlay (task-board.ts); rendering only, no task state here.
-	#taskBoardNodes(tasks: TaskViewRow[]): TspNode[] {
-		const marks: Record<string, string> = { todo: "○", in_progress: "◐", done: "●" };
-		const model = buildBoard(tasks);
-		return [{ id: "task-board", k: "row", p: { role: "pi.board" }, c: model.columns.map((col) => ({
-			id: `task-board-${col.id}`, k: "col", p: { role: "pi.board.column", "data-status": col.id }, c: [
-				{ id: `task-board-${col.id}-head`, k: "text", p: { role: "pi.board.head", text: `${marks[col.id] ?? "○"} ${col.title}  ${col.tasks.length}` } },
-				...(col.tasks.length ? col.tasks.flatMap((t) => {
-					const meta = [t.active ? "active" : "", t.blocked ? "blocked" : ""].filter(Boolean).join(" · ");
-					return [{ id: `task-board-card-${t.id}`, k: "text", p: {
-						role: "pi.board.card", tone: taskTone(t), text: `#${t.id} ${t.subject}`,
-						title: `#${t.id} ${t.subject} · ${taskStatusLabel(t)}`, actions: { click: `tasks.reference=${t.id}` },
-					} }, ...(meta ? [{ id: `task-board-meta-${t.id}`, k: "text", p: { role: "pi.board.meta", text: `  ${meta}` } }] : [])];
-				}) : [{ id: `task-board-${col.id}-empty`, k: "text", p: { role: "pi.board.empty", text: "No tasks" } }]),
-			],
-		})) }];
-	}
-
 	#taskView(): TaskView | undefined {
 		const manager = this.#session.sessionManager;
 		if (!manager || typeof manager.getEntries !== "function") return undefined;
 		return projectTaskView(manager as TaskViewSessionManager, { questionRows: 12 });
 	}
 
-	// Tasks live in the transcript, not in a hover panel: one inline row per task with its acceptance
-	// questions under it and the evidence indented below an answered one - the same rows a work step
-	// uses. `frame: "inline"` is what keeps a row a row: no ring, no tint, no status bar.
+	// Tasks live in the transcript, not in a hover panel: one inline row per live task with its open
+	// acceptance questions under it - the same row a work step uses. `frame: "inline"` is what keeps a
+	// row a row: no ring, no tint, no status bar. Questions are plain text, not rows: a question is a
+	// line the reader should notice, and a tool head per question cost three times the height for it.
 	#taskRowNodes(rows: ReturnType<typeof buildTaskRows>["rows"]): TspNode[] {
 		return rows.map((row) => ({
 			id: row.id, k: "tool",
@@ -2052,67 +2005,56 @@ export class PiTernBridge {
 				frame: "inline", collapsible: true, collapsed: false,
 			},
 			c: row.questions.map((question): TspNode => ({
-				id: `${row.id}-q-${question.id}`, k: "tool",
+				id: `${row.id}-q-${question.id}`, k: "text",
 				p: {
-					role: "pi.tasks.line-q", name: question.status === "done" ? "check" : "help", title: question.mark,
-					target: question.text, targetKind: "text", status: question.status, frame: "inline",
+					role: "pi.tasks.line-q", tone: question.status === "done" ? "success" : "warning",
+					wrap: "none", truncate: "end", text: `  ${question.mark} ${question.id}: ${question.text}`,
+					title: `${question.id} · ${question.status === "done" ? "answered" : "open"}\n${question.text}`,
 				},
-				...(question.evidence
-					? { c: [{ id: `${row.id}-q-${question.id}-e`, k: "text", p: { role: "pi.tasks.line-e", tone: "muted", wrap: "none", truncate: "end", text: question.evidence } }] }
-					: {}),
 			})),
 		}));
 	}
 
 	// The transcript's task block, keyed so it updates in place instead of being re-added each render.
+	// It shows live work only - what is being worked and what is stuck - because a transcript that keeps
+	// every finished and not-yet-started task on screen spends the reader's attention on history. Those
+	// tasks stay in the head as counts, so nothing disappears silently.
 	#transcriptTasks(): TspNode[] {
 		const view = this.#taskView();
 		if (!view || view.status !== "ready" || !(view.tasks ?? []).length) return [];
-		const { rows, hidden } = buildTaskRows(view);
-		const blocked = view.summary.blocked ? ` · ${view.summary.blocked} blocked` : "";
+		const counts = taskRowCounts(view);
+		const { rows, hidden } = buildTaskRows(view, { liveOnly: true, maxRows: TASK_LIVE_ROWS, maxQuestions: TASK_LIVE_QUESTIONS });
+		const head = [
+			"Tasks",
+			counts.active ? `${counts.active} active` : "",
+			counts.pending ? `${counts.pending} pending` : "",
+			counts.done ? `${counts.done} done` : "",
+			counts.blocked ? `${counts.blocked} blocked` : "",
+		].filter(Boolean).join(" · ");
 		return [{
 			id: "tasks-block", k: "col", p: { role: "pi.tasks.block" },
 			c: [
-				{ id: "tasks-block-head", k: "text", p: { role: "pi.tasks.block-head", tone: "muted", wrap: "none", text: `Tasks · ${view.summary.open} open · ${view.summary.completed} done${blocked}` } },
+				{ id: "tasks-block-head", k: "text", p: { role: "pi.tasks.block-head", tone: "muted", wrap: "none", text: head } },
 				...this.#taskRowNodes(rows),
-				...(hidden ? [{ id: "tasks-block-more", k: "text", p: { role: "pi.tasks.lines-more", tone: "muted", wrap: "none", text: `+${hidden} more task${hidden === 1 ? "" : "s"}` } }] : []),
+				...(hidden ? [{ id: "tasks-block-more", k: "text", p: { role: "pi.tasks.lines-more", tone: "muted", wrap: "none", text: `+${hidden} more live task${hidden === 1 ? "" : "s"}` } }] : []),
 			],
 		}];
 	}
 
-	#backgroundWork(now = Date.now()): TspNode[] {
+	// The composer's running-work pulse (composer-view.ts workChip) reads only these facts. Live work used to
+	// be a card prepended to the dock, which cost three to seven rows of the pane for as long as anything ran
+	// and kept a "Recent background work" button for fifteen minutes after it settled. Now the bar carries one
+	// spinner while work is live, and nothing at all once it settles: the list, per-job output and stop live in
+	// the work sheet (click the pulse, or /work), which is otherwise unchanged.
+	#workFacts(now = Date.now()): WorkFacts | undefined {
 		const live = runningWorkSnapshot().filter((item) => (item.status === "queued" || item.status === "running") && item.foreground !== true);
-		if (!live.length) return this.#backgroundItems().length ? [{ id: "background-recent", k: "button", p: { text: "Recent background work", variant: "quiet", size: "sm", actions: { click: "bg.open=all" } } }] : [];
-		// Clicking a row opens its output sheet. The x stops work that still runs; it is a sibling of the
-		// clickable part, never nested in it, so one click runs exactly one action.
-		const stopNode = (item: RunningWorkItem): TspNode[] => item.stop
-			? [{ id: `bg-work-${item.id}-stop`, k: "text", p: { role: "pi.background.stop", spans: [{ t: "×", s: "error" }], aria: `Stop ${item.label}`, title: "Stop", wrap: "none", actions: { click: `bg.stop=${item.id}` } } }]
-			: [];
-		const rows: TspNode[] = live.slice(0, BACKGROUND_WORK_MAX_ROWS).map((item): TspNode => ({ id: `bg-work-${item.id}-line`, k: "row", p: { role: "pi.background.line", gap: "sm", align: "center" }, c: [item.kind === "subagent"
-			// A subagent is a worker, so Tern draws it as one: a live pulse, its assignment, its own clock and its
-			// token count. Only fields the running-work store really carries are sent.
-			? {
-				id: `bg-work-${item.id}`, k: "agent",
-				p: {
-					role: "pi.background.agent",
-					name: boundedChars(safeWorkText(item.label), BACKGROUND_WORK_LABEL_CHARS),
-					task: safeWorkText(item.detail.slice(0, 500)),
-					status: item.status === "queued" ? "pending" : "running",
-					stats: { age: Math.max(0, now - item.startedAt), ...(item.tokens ? { tokens: item.tokens } : {}) },
-					grow: 1,
-					actions: { click: `bg.open=${item.id}` },
-				},
-			}
-			: {
-				id: `bg-work-${item.id}`, k: "row", p: { role: "pi.background.row", gap: "sm", align: "center", grow: 1, title: backgroundWorkTitle(item), actions: { click: `bg.open=${item.id}` } }, c: [
-					{ id: `bg-work-${item.id}-mark`, k: "text", p: { role: "pi.background.mark", text: "$", tone: "accent", wrap: "none" } },
-					{ id: `bg-work-${item.id}-label`, k: "text", p: { text: backgroundWorkLabel(item), wrap: "none" } },
-					{ id: `bg-work-${item.id}-time`, k: "elapsed", p: { age: Math.max(0, now - item.startedAt) } },
-				],
-			}, ...stopNode(item)] }));
-		rows.push({ id: "bg-work-more", k: "button", p: { role: "pi.background.more", text: live.length > BACKGROUND_WORK_MAX_ROWS ? `View all · ${live.length - BACKGROUND_WORK_MAX_ROWS} more` : "View all work", variant: "quiet", size: "sm", actions: { click: "bg.open=all" } } });
-		const queued = live.filter((i) => i.status === "queued").length;
-		return [{ id: "background-work", k: "card", p: { head: `Background work · ${live.length - queued} running${queued ? ` · ${queued} queued` : ""}`, status: "running", tone: "accent", role: "pi.background" }, c: rows }];
+		if (!live.length) return undefined;
+		return {
+			running: live.filter((item) => item.status === "running").length,
+			queued: live.filter((item) => item.status === "queued").length,
+			// The store is ordered by start time, so the last one is the newest.
+			newest: backgroundWorkLabel(live[live.length - 1]),
+		};
 	}
 
 	#backgroundItems(): RunningWorkItem[] {
@@ -2124,58 +2066,6 @@ export class PiTernBridge {
 	#currentTask(): CurrentTask | undefined {
 		const view = this.#taskView();
 		return view?.status === "ready" && view.focus ? { id: view.focus.id, subject: view.focus.subject } : undefined;
-	}
-
-	#taskTop(): TspNode[] {
-		const view = this.#taskView();
-		if (!view || view.status !== "ready" || !view.focus) return [];
-		const focus = view.focus;
-		const q = focus.questions;
-		const fold = this.#taskQuestionsCollapsed ? "tasks.expand" : "tasks.collapse";
-		const ref = (id: string) => ({ click: `tasks.reference=${id}`, menu: [`tasks.reference=${id}`, fold, "copy"] });
-		const questionRows: TspNode[] = this.#taskQuestionsCollapsed ? [] : q.state === "missing"
-			? [{ id: "task-question-missing", k: "text", p: { role: "pi.tasks.question", tone: "warning", text: "  ! Acceptance questions missing — repair required" } }]
-			: q.rows.map((row, i) => ({ id: `task-question-${i}`, k: "text", p: {
-				role: "pi.tasks.question", tone: row.answered ? "success" : "warning",
-				text: `  ${row.answered ? "✓" : "?"} ${row.id}: ${row.text}`,
-				title: `${row.id} · ${row.answered ? "answered" : "unanswered"}\n${row.text}`,
-			} }));
-		const tasks = view.tasks ?? [];
-		const popRows: TspNode[] = tasks.flatMap((t) => [
-			{ id: `task-pop-${t.id}`, k: "text", p: {
-				role: "pi.tasks.row", tone: taskTone(t),
-				text: `${taskGlyph(t)} #${t.id} ${t.subject}${t.questions.total ? `  Q ${t.questions.answered}/${t.questions.total}` : ""}`,
-				title: `#${t.id} ${t.subject} · ${taskStatusLabel(t)} · click to reference in the prompt`,
-				actions: ref(t.id),
-			} },
-			...(t.status === "completed" || t.active ? [] : t.questions.rows.filter((r) => !r.answered).map((r, i) => ({
-				id: `task-pop-${t.id}-q${i}`, k: "text", p: { role: "pi.tasks.pq", text: `    ? ${r.text}`, title: r.text },
-			}))),
-		]);
-		const open = tasks.filter((t) => t.status !== "completed").length;
-		return [{ id: "task-top", k: "col", p: { role: "pi.tasks", actions: { menu: [fold] } }, c: [
-			{ id: "task-pop", k: "col", p: { role: "pi.tasks.pop" }, c: [
-				{ id: "task-pop-head", k: "text", p: { role: "pi.tasks.head", text: `All tasks · ${open} open · ${tasks.length - open} done · ${this.#taskPopMode} (click to switch)`, actions: { click: "tasks.view" } } },
-				...(this.#taskPopMode === "board" ? this.#taskBoardNodes(tasks) : popRows),
-			] },
-			{ id: "task-head", k: "text", p: { role: "pi.tasks.head", text: `Tasks  ${view.summary.completed}/${view.summary.completed + view.summary.open} done${view.summary.blocked ? ` · ${view.summary.blocked} blocked` : ""}  ·  hover for all` } },
-			{ id: "task-focus", k: "text", p: {
-				role: "pi.tasks.focus", tone: "accent",
-				text: `● #${focus.id} ${focus.subject}  Q ${q.answered}/${q.total}${this.#taskQuestionsCollapsed && q.total ? " ▸" : ""}`,
-				title: `#${focus.id} ${focus.subject}\n${q.answered} of ${q.total} acceptance questions answered`,
-				actions: ref(focus.id),
-			} },
-			...questionRows,
-			view.next
-				? { id: "task-next", k: "text", p: { role: "pi.tasks.next", text: `  ↳ Next #${view.next.id} ${view.next.subject}`, actions: ref(view.next.id) } }
-				: { id: "task-next", k: "text", p: { role: "pi.tasks.next", text: "  ↳ No unblocked next task" } },
-		] }];
-	}
-
-	// Puts a reference to a task into the draft; never sends it.
-	#referenceTask(id: string): void {
-		const sep = this.#draft && !this.#draft.endsWith(" ") ? " " : "";
-		this.setDraft(`${this.#draft}${sep}task #${id} `);
 	}
 
 	#render(): void {
@@ -3016,11 +2906,6 @@ export class PiTernBridge {
 			this.#render();
 			return undefined;
 		}
-		if (act === "tasks.reference" && typeof msg.body.value === "string") this.#referenceTask(msg.body.value);
-		if (act === "tasks.view") {
-			this.#taskPopMode = this.#taskPopMode === "list" ? "board" : "list";
-			this.#render();
-		}
 		if (act === "git.open") { this.#openGitView(); return undefined; }
 		if (typeof act === "string" && act.startsWith("git.")) return this.#gitAct(act, typeof msg.body.value === "string" ? msg.body.value : undefined);
 		if (act === "bg.open" && typeof msg.body.value === "string") { this.#openWorkView(msg.body.value); return undefined; }
@@ -3031,10 +2916,6 @@ export class PiTernBridge {
 		if (act === "context.close") { this.#closeContextView(); return undefined; }
 		// OMP's composer meter opens the context card on click; the same card is `/context` in the composer.
 		if (act === "status.context") { this.#openContextView(); return undefined; }
-		if (act === "tasks.collapse" || act === "tasks.expand") {
-			this.#taskQuestionsCollapsed = act === "tasks.collapse";
-			this.#render();
-		}
 		if (typeof act === "string" && act.startsWith("status.")) {
 			const fact = this.#statusFact(act);
 			if (fact) {
@@ -3222,6 +3103,7 @@ export class PiTernBridge {
 			// A bridge command is a local view: it runs here, clears the composer and never reaches the model.
 			this.#draft = "";
 			if (route.name === "context") this.#openContextView();
+			else if (route.name === "work") this.#openWorkView("all");
 			else this.#render();
 			return Promise.resolve();
 		}

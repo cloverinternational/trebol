@@ -241,7 +241,7 @@ function childrenOf(writes: Writes, parentId: string): string[] {
 }
 
 describe("Tern regions and dock structure", () => {
-	it("renders focused task and acceptance questions above composer from session journal", () => {
+	it("keeps the task list out of the composer, leaving the transcript block as the only one", () => {
 		const entry = { type: "custom", customType: "pi-swarm-task-state", data: {
 			schemaVersion: 2, revision: 1, savedAt: "2026-01-01T00:00:00Z", nextId: 2, keys: {}, tasks: [{
 				id: "1", subject: "Inspect renderer", status: "in_progress", active: true, priority: "medium", dependsOn: [], notes: [],
@@ -249,21 +249,26 @@ describe("Tern regions and dock structure", () => {
 			}],
 		} };
 		const { writes } = make(fakeSession({ entries: [entry] }));
+		const nodes = replay(writes);
+		// The composer column is the input box: no task card, header, focus line, question rows or hover popover.
 		expect(childrenOf(writes, "dock")).toEqual(["composer-col"]);
-		expect(childrenOf(writes, "composer-col")[0]).toBe("task-top");
-		expect(replay(writes).get("task-top")?.k).toBe("col");
-		expect(replay(writes).get("task-top")?.p?.role).toBe("pi.tasks");
-		expect(replay(writes).get("task-question-0")?.p?.role).toBe("pi.tasks.question");
-		expect(textsUnder(writes, "task-top").join(" ")).toContain("Full width?");
-		expect(PI_COMPOSER_CSS).toContain("[data-role='pi.tasks.question'] { display: none; }");
-		expect(PI_COMPOSER_CSS).toContain("[data-role='pi.tasks']:hover [data-role='pi.tasks.question']");
-		expect(PI_COMPOSER_CSS).toContain("[data-role='pi.tasks']:focus-within [data-role='pi.tasks.question']");
+		for (const id of ["task-top", "task-pop", "task-pop-head", "task-head", "task-focus", "task-next", "task-question-0"]) {
+			expect(nodes.has(id), `${id} must not be in the composer`).toBe(false);
+		}
+		expect(textsUnder(writes, "composer-col").join(" ")).not.toContain("Tasks");
+		// The rows stay where they belong: the transcript block above the composer.
+		expect(nodes.get("tasks-block")?.parent).toBe("main");
+		expect(textsUnder(writes, "tasks-block").join(" ")).toContain("Tasks · 1 active");
+		// No stylesheet rule is left behind for a card the composer no longer draws.
+		expect(PI_COMPOSER_CSS).not.toMatch(/\[data-role='pi\.tasks'\]/);
+		expect(PI_COMPOSER_CSS).not.toContain("pi.tasks.pop");
 	});
 
-	it("keeps the task region absent for a fresh Pi session with no task journal", () => {
+	it("keeps both task surfaces absent for a fresh Pi session with no task journal", () => {
 		const { writes } = make(fakeSession({ entries: [] }));
 		expect(childrenOf(writes, "dock")).toEqual(["composer-col"]);
 		expect(replay(writes).has("task-top")).toBe(false);
+		expect(replay(writes).has("tasks-block")).toBe(false);
 	});
 
 	const taskEntry = () => {
@@ -279,60 +284,52 @@ describe("Tern regions and dock structure", () => {
 		} };
 	};
 
-	it("renders the task header like Pi's: one focused task, every question, the next task; no status chip", () => {
-		const { writes } = make(fakeSession({ entries: [taskEntry()] }));
-		const nodes = replay(writes);
-		expect(nodes.get("task-top")?.k).toBe("col");
-		expect(nodes.get("task-top")?.p?.status).toBeUndefined();
-		expect(nodes.get("task-head")?.p?.text).toContain("Tasks  1/3 done");
-		expect(nodes.get("task-focus")?.p?.text).toBe("● #1 Inspect renderer  Q 1/2");
-		expect(nodes.get("task-focus")?.p?.title).toContain("1 of 2 acceptance questions answered");
-		expect(nodes.get("task-question-0")?.p?.text).toBe("  ? q2: Hover works?");
-		expect(nodes.get("task-question-0")?.p?.tone).toBe("warning");
-		expect(nodes.get("task-question-1")?.p?.text).toBe("  ✓ q1: Full width?");
-		expect(nodes.get("task-question-1")?.p?.tone).toBe("success");
-		expect(nodes.get("task-next")?.p?.text).toBe("  ↳ Next #2 Write tests");
-	});
-
-	it("carries every task in a hover popover whose visibility is owned by the stylesheet, not program state", () => {
-		const { writes } = make(fakeSession({ entries: [taskEntry()] }));
-		expect(childrenOf(writes, "task-top")[0]).toBe("task-pop");
-		expect(replay(writes).get("task-pop")?.p?.role).toBe("pi.tasks.pop");
-		expect(childrenOf(writes, "task-pop")).toEqual(["task-pop-head", "task-pop-1", "task-pop-2", "task-pop-2-q0", "task-pop-3"]);
-		const nodes = replay(writes);
-		expect(nodes.get("task-pop-1")?.p?.tone).toBe("accent");
-		expect(nodes.get("task-pop-2")?.p?.text).toBe("○ #2 Write tests  Q 0/1");
-		expect(nodes.get("task-pop-3")?.p?.tone).toBe("success");
-		expect(PI_COMPOSER_CSS).toMatch(/\[data-role='pi\.tasks\.pop'\] \{[^}]*display: none;/);
-		expect(PI_COMPOSER_CSS).toContain("[data-role='pi.tasks']:hover [data-role='pi.tasks.pop'] { display: flex; }");
-		expect(PI_COMPOSER_CSS).toContain(".sf-col[data-role='pi.assistant']:last-child .sf-md .md { font-family: var(--sans); }");
-		expect(PI_COMPOSER_CSS).toContain("[data-role='pi.user'] .sf-md .md { font-family: var(--sans); }");
-		expect(PI_COMPOSER_CSS).toMatch(/\[data-role='pi\.tasks\.pop'\] \{[^}]*background: var\(--card\);/);
-	});
-
-	it("renders the tasks in the transcript as rows, not in a floating panel", () => {
+	it("renders only live work in the transcript, with open questions as plain small lines", () => {
 		const { writes } = make(fakeSession({ entries: [taskEntry()] }));
 		const nodes = replay(writes);
 		// The block belongs to the main region and is keyed, so a render updates it instead of re-adding it.
 		expect(nodes.get("tasks-block")?.k).toBe("col");
 		expect(nodes.get("tasks-block")?.parent).toBe("main");
-		expect(nodes.get("tasks-block-head")?.p?.text).toBe("Tasks · 2 open · 1 done");
-		expect(childrenOf(writes, "tasks-block")).toEqual(["tasks-block-head", "task-row-1", "task-row-2", "task-row-3"]);
-		// One inline row per task: verb + target + counter, no frame.
+		// One small head accounts for everything; only the active task earns a row.
+		expect(nodes.get("tasks-block-head")?.p?.text).toBe("Tasks · 1 active · 1 pending · 1 done");
+		expect(childrenOf(writes, "tasks-block")).toEqual(["tasks-block-head", "task-row-1"]);
+		expect(nodes.get("task-row-2"), "a pending task is a count, not a row").toBeUndefined();
+		expect(nodes.get("task-row-3"), "a done task is a count, not a row").toBeUndefined();
+		// The live row keeps Tern's own drawing: verb + target + counter, no frame.
 		expect(nodes.get("task-row-1")?.k).toBe("tool");
 		expect(nodes.get("task-row-1")?.p).toMatchObject({
 			role: "pi.tasks.line", title: "Task", status: "running",
 			target: "Inspect renderer", targetKind: "text", meta: ["Q 1/2"], frame: "inline", collapsed: false,
 		});
-		expect(nodes.get("task-row-2")?.p).toMatchObject({ title: "Task", status: "pending", target: "Write tests" });
-		expect(nodes.get("task-row-3")?.p).toMatchObject({ status: "done" });
-		// Questions sit under their task, unanswered first; evidence sits under the answered one.
-		expect(childrenOf(writes, "task-row-1")).toEqual(["task-row-1-q-q2", "task-row-1-q-q1"]);
-		expect(nodes.get("task-row-1-q-q2")?.p).toMatchObject({ role: "pi.tasks.line-q", title: "?", target: "Hover works?", frame: "inline" });
-		expect(nodes.get("task-row-1-q-q1")?.p).toMatchObject({ title: "✓", target: "Full width?" });
-		expect(nodes.get("task-row-1-q-q1-e")?.p?.text).toBe("tool:Bash#1");
-		// The hover popover keeps its own flat list; the transcript block is not a second copy of it.
-		expect(nodes.get("task-pop-1")?.p?.role).toBe("pi.tasks.row");
+		// Only the open question is a line; the answered one is already in the counter, and evidence is
+		// not re-stated in the transcript. A question is text, not a tool row with an icon and a chevron.
+		expect(childrenOf(writes, "task-row-1")).toEqual(["task-row-1-q-q2"]);
+		expect(nodes.get("task-row-1-q-q2")?.k).toBe("text");
+		expect(nodes.get("task-row-1-q-q2")?.p).toMatchObject({
+			role: "pi.tasks.line-q", tone: "warning", text: "  ? q2: Hover works?",
+		});
+		expect(nodes.get("task-row-1-q-q1"), "an answered question is not a line").toBeUndefined();
+		expect(nodes.get("task-row-1-q-q1-e"), "evidence is not re-stated").toBeUndefined();
+		// The type is one step down the scale from a work step, and the questions are smaller still.
+		expect(PI_COMPOSER_CSS).toContain("[data-role='pi.tasks.block'] .sf-tool-target");
+		expect(PI_COMPOSER_CSS).toMatch(/\[data-role='pi\.tasks\.block'\] \.sf-tool-target[^}]*font-size: calc\(var\(--sf-fs, 13px\) \* 11 \/ 13\)/);
+		expect(PI_COMPOSER_CSS).toMatch(/\[data-role='pi\.tasks\.line-q'\] \{[^}]*font-size: calc\(var\(--sf-fs, 13px\) \* 10 \/ 13\)/);
+		// The block is the only task list in the pane: the composer no longer carries a second copy.
+		expect(nodes.get("task-pop-1")).toBeUndefined();
+	});
+
+	it("shows a finished task list as one count line, with no rows left behind", () => {
+		const base = { priority: "medium", dependsOn: [] as string[], notes: [], createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" };
+		const entry = { type: "custom", customType: "pi-swarm-task-state", data: {
+			schemaVersion: 2, revision: 1, savedAt: "2026-01-01T00:00:00Z", nextId: 3, keys: {}, tasks: [
+				{ ...base, id: "1", subject: "First", status: "completed" },
+				{ ...base, id: "2", subject: "Second", status: "completed" },
+			],
+		} };
+		const { writes } = make(fakeSession({ entries: [entry] }));
+		const nodes = replay(writes);
+		expect(nodes.get("tasks-block-head")?.p?.text).toBe("Tasks · 2 done");
+		expect(childrenOf(writes, "tasks-block")).toEqual(["tasks-block-head"]);
 	});
 
 	it("omits the transcript task block when the session has no tasks", () => {
@@ -425,27 +422,7 @@ describe("Tern regions and dock structure", () => {
 		expect(PI_COMPOSER_CSS).not.toContain("${");
 	});
 
-	it("clicking a task references it in the draft without sending a prompt", () => {
-		const session = fakeSession({ entries: [taskEntry()] });
-		let prompted = 0;
-		session.prompt = () => { prompted++; return new Promise<void>(() => {}); };
-		const { bridge, writes } = make(session);
-		expect(replay(writes).get("task-pop-2")?.p?.actions).toMatchObject({ click: "tasks.reference=2" });
-		bridge.handle({ verb: "e", body: { ev: "action", id: "task-pop-2", act: "tasks.reference", value: "2" } });
-		expect(textsUnder(writes, "dock").join(" ")).toContain("task #2 ");
-		expect(prompted).toBe(0);
-	});
-
-	it("folds and unfolds the questions from the header's context menu", () => {
-		const { bridge, writes } = make(fakeSession({ entries: [taskEntry()] }));
-		bridge.handle({ verb: "e", body: { ev: "action", id: "task-top", act: "tasks.collapse" } });
-		expect(replay(writes).has("task-question-0")).toBe(false);
-		expect(replay(writes).get("task-focus")?.p?.text).toContain("▸");
-		bridge.handle({ verb: "e", body: { ev: "action", id: "task-top", act: "tasks.expand" } });
-		expect(replay(writes).has("task-question-0")).toBe(true);
-	});
-
-	it("draws a running subagent as Tern's agent row, and shows the turn clock only while busy", async () => {
+	it("draws live work as one composer pulse instead of a card in the dock", async () => {
 		const writes: Writes = [];
 		const fake = fakeSession();
 		const bridge = new PiTernBridge(fake, { write: (d) => writes.push(d), surfaceId: "pi", credits: 1000 });
@@ -455,12 +432,20 @@ describe("Tern regions and dock structure", () => {
 			setRunningWork({ id: "agent-1", kind: "subagent", label: "Agent agent-1", status: "running", startedAt: Date.now() - 9000, detail: "Review the parser", tokens: 18400, foreground: false });
 			fake.emit({ type: "agent_start" } as never);
 			const nodes = replay(writes);
-			const agent = nodes.get("bg-work-agent-1");
-			expect(agent).toMatchObject({ k: "agent", p: { role: "pi.background.agent", name: "Agent agent-1", task: "Review the parser", status: "running" } });
-			// The label already names the agent, so the task is not repeated inside it.
-			expect(String(agent?.p?.name)).not.toContain("Review the parser");
-			expect((agent?.p?.stats as Record<string, unknown>).age).toBeGreaterThanOrEqual(9000);
-			expect((agent?.p?.stats as Record<string, unknown>).tokens).toBe(18400);
+			// Nothing is prepended to the dock any more: the bar itself carries the state.
+			expect(nodes.has("background-work")).toBe(false);
+			expect(nodes.has("bg-work-agent-1")).toBe(false);
+			expect(nodes.get("work")?.p).toMatchObject({ role: "pi.composer.work", actions: { click: "bg.open=all" } });
+			expect(nodes.get("work")?.parent).toBe("extras");
+			// One spinner, drawn and clocked by Tern in the info (blue) tone.
+			expect(nodes.get("work-pulse")?.k).toBe("spinner");
+			expect(nodes.get("work-pulse")?.p).toMatchObject({ role: "pi.composer.work.pulse", style: "orbit", tone: "info" });
+			expect(nodes.get("work-count")?.p?.text).toBe("2");
+			// The newest job's name is the only extra fact the bar carries, and the stylesheet reveals it on hover.
+			// Newest by start time, which is the store's order: bg-1 started last.
+			expect(nodes.get("work-now")?.p?.text).toBe(" · make -j8");
+			// No floating card: the status band clips its children, so the list lives in the work sheet.
+			expect(nodes.has("work-card")).toBe(false);
 			// The dock's own clock: an `elapsed` next to Stop while the turn runs, and nothing once it settles.
 			expect(nodes.get("composer-turn")?.p).toMatchObject({ role: "omp.composer.turn", format: "short" });
 			fake.emit({ type: "agent_end" } as never);
@@ -472,7 +457,7 @@ describe("Tern regions and dock structure", () => {
 		}
 	});
 
-	it("opens a background item's live output on click and stops only running work from its x", () => {
+	it("opens a job from the pulse, stops only running work from its x, and leaves nothing behind", () => {
 		const writes: Writes = [];
 		const bridge = new PiTernBridge(fakeSession(), { write: (d) => writes.push(d), surfaceId: "pi", credits: 1000 });
 		bridge.start();
@@ -482,13 +467,11 @@ describe("Tern regions and dock structure", () => {
 			setRunningWork({ id: "bg-1", kind: "bash", label: "Tail", status: "running", startedAt: Date.now(), detail: "tail -f log", readOutput: () => output, stop: () => stopped.push("bg-1"), foreground: false });
 			setRunningWork({ id: "agent-1", kind: "subagent", label: "Agent agent-1", status: "running", startedAt: Date.now(), detail: "Review", stop: () => stopped.push("agent-1"), foreground: false });
 			let nodes = replay(writes);
-			expect(nodes.get("bg-work-bg-1")?.p?.actions).toEqual({ click: "bg.open=bg-1" });
-			expect(nodes.get("bg-work-agent-1")?.p?.actions).toEqual({ click: "bg.open=agent-1" });
-			// The x is a sibling of the clickable part, not nested in it.
-			expect(nodes.get("bg-work-bg-1-stop")).toMatchObject({ parent: "bg-work-bg-1-line", p: { actions: { click: "bg.stop=bg-1" } } });
-			expect(nodes.get("bg-work-agent-1-stop")?.parent).toBe("bg-work-agent-1-line");
+			// One pulse, one action: it opens the sheet, where per-job rows and stops live.
+			expect(nodes.get("work")?.p?.actions).toEqual({ click: "bg.open=all" });
+			expect([...nodes.values()].filter((n) => String(n.p?.role ?? "").startsWith("pi.composer.work.open"))).toHaveLength(0);
 
-			bridge.handle({ verb: "e", body: { ev: "action", id: "bg-work-bg-1", act: "bg.open", value: "bg-1" } });
+			bridge.handle({ verb: "e", body: { ev: "action", id: "work", act: "bg.open", value: "all" } });
 			bridge.setDraft("preserve draft");
 			bridge.applyWorkKey({ kind: "text", text: "Tail" });
 			bridge.pasteText(" search");
@@ -503,7 +486,7 @@ describe("Tern regions and dock structure", () => {
 			// Output growth does not touch the store; the open sheet re-reads it on its own clock.
 			output = "line 1\nline 2";
 			vi.useFakeTimers();
-			try { bridge.handle({ verb: "e", body: { ev: "action", id: "bg-work-bg-1", act: "bg.open", value: "bg-1" } }); output = "line 1\nline 2\nline 3"; vi.advanceTimersByTime(600); } finally { vi.useRealTimers(); }
+			try { bridge.handle({ verb: "e", body: { ev: "action", id: "work", act: "bg.open", value: "all" } }); output = "line 1\nline 2\nline 3"; vi.advanceTimersByTime(600); } finally { vi.useRealTimers(); }
 			expect(replay(writes).get("bg-output-text")?.p?.text).toBe("line 1\nline 2\nline 3");
 
 			bridge.handle({ verb: "e", body: { ev: "action", id: "bg-output-stop", act: "bg.stop", value: "bg-1" } });
@@ -511,10 +494,10 @@ describe("Tern regions and dock structure", () => {
 			expect(stopped).toEqual(["bg-1"]);
 			expect(replay(writes).get("bg-stop-pending")?.p?.text).toContain("awaiting runtime settlement");
 
-			// Settled work has no stop, in the bar or the sheet, and a stale stop event does nothing.
+			// The pulse counts only what is still live.
 			setRunningWork({ id: "bg-1", kind: "bash", label: "Tail", status: "cancelled", startedAt: Date.now(), endedAt: Date.now(), detail: "tail -f log", output: "line 1\nline 2\nline 3" });
 			nodes = replay(writes);
-			expect(nodes.has("bg-work-bg-1-stop")).toBe(false);
+			expect(nodes.get("work-count")?.p?.text).toBe("1");
 			expect(nodes.get("bg-output")?.p?.head).toBe("Tail · cancelled");
 			expect(nodes.has("bg-output-stop")).toBe(false);
 			bridge.handle({ verb: "e", body: { ev: "action", id: "x", act: "bg.stop", value: "bg-1" } });
@@ -522,10 +505,17 @@ describe("Tern regions and dock structure", () => {
 
 			bridge.handle({ verb: "e", body: { ev: "action", id: "bg-output-close", act: "bg.close" } });
 			expect(replay(writes).has("bg-output")).toBe(false);
-			bridge.handle({ verb: "e", body: { ev: "action", id: "bg-work-agent-1", act: "bg.open", value: "agent-1" } });
+			// /work and the pulse both open the sheet with "all"; the sheet's own rows carry per-job opens.
+			bridge.handle({ verb: "e", body: { ev: "action", id: "work", act: "bg.open", value: "all" } });
 			expect(replay(writes).get("bg-output")?.p?.head).toBe("Agent agent-1 · running");
 			expect(bridge.escape()).toBe(false);
 			expect(replay(writes).has("bg-output")).toBe(false);
+
+			// Once nothing is live the bar carries no work chrome at all — not even a "recent" button.
+			removeRunningWork("agent-1");
+			nodes = replay(writes);
+			expect(nodes.has("work")).toBe(false);
+			expect(nodes.has("background-recent")).toBe(false);
 		} finally {
 			removeRunningWork("bg-1");
 			removeRunningWork("agent-1");

@@ -18,6 +18,17 @@ export interface GitFacts {
 	untracked: number;
 }
 
+/**
+ * Live background work as the composer bar sees it. Absent when nothing is queued or running, so the bar
+ * spends no space and draws no chrome for finished work.
+ */
+export interface WorkFacts {
+	running: number;
+	queued: number;
+	/** The newest live job's name, revealed while the pointer or the keyboard is on the pulse. */
+	newest?: string;
+}
+
 export interface ComposerFacts {
 	draft: string;
 	cursor?: number;
@@ -37,6 +48,12 @@ export interface ComposerFacts {
 	thinking?: string;
 	effortKind: boolean;
 	git?: GitFacts;
+	/**
+	 * Live background jobs. Rendered as one inline pulse next to the git facts: a spinner Tern clocks itself,
+	 * a count, and a card that the stylesheet reveals on hover or keyboard focus. Clicking it opens the work
+	 * sheet, which is also where a finished job is inspected (`/work`).
+	 */
+	work?: WorkFacts;
 	cost?: number;
 	/** Attachment chips (attachments.ts), drawn above the editor line. */
 	chips?: TspNode;
@@ -122,6 +139,38 @@ function gitSeg(g: GitFacts): TspNode | undefined {
 	return { id: "git", k: "seg", p: { role: "omp.composer.fact", priority: 1004, actions: { click: "git.open" }, spans, icon: g.branch ? "branch" : "git", ...(dirty ? { tone: "warning" } : {}) } };
 }
 
+/**
+ * The running-work pulse: one spinner, the count, and — only while hovered or focused — the newest job's
+ * name.
+ *
+ * Tern animates the `spinner` itself, so Pi sends one node and no frames for it. Visibility of the name is
+ * the stylesheet's business and it is `display: none` at rest, never faded, so it is gone the instant the
+ * pointer leaves. There is deliberately no floating card: the composer bar's status band clips its own
+ * children (measured — an absolutely positioned panel inside it paints only the 18px that fit the band),
+ * so a hover panel there would be a promise the surface cannot keep. The sheet behind the click is the
+ * place for the list, per-job output and stop; `/work` is its keyboard route.
+ */
+function workChip(w: WorkFacts): TspNode {
+	const count = w.running + w.queued;
+	const summary = `${count} ${count === 1 ? "job" : "jobs"} running${w.queued ? ` · ${w.queued} queued` : ""}`;
+	return {
+		id: "work", k: "row",
+		p: {
+			role: "pi.composer.work", gap: "xs", align: "center",
+			title: `${summary}${w.newest ? ` · ${w.newest}` : ""}\nClick to inspect, or /work`,
+			aria: summary,
+			actions: { click: "bg.open=all" },
+		},
+		c: [
+			{ id: "work-pulse", k: "spinner", p: { role: "pi.composer.work.pulse", style: "orbit", tone: "info", aria: summary } },
+			{ id: "work-count", k: "text", p: { role: "pi.composer.work.count", text: String(count), tone: "muted", wrap: "none" } },
+			// The separator is part of the label: Tern lays adjacent text nodes flush, so a flex gap would
+			// put the name on top of the count.
+			...(w.newest ? [{ id: "work-now", k: "text", p: { role: "pi.composer.work.now", text: ` · ${w.newest}`, tone: "muted", wrap: "none" } }] : []),
+		],
+	};
+}
+
 export function composerNodes(f: ComposerFacts, above: TspNode[] = []): TspNode[] {
 	const level = f.thinking;
 	const effortInModel = level !== undefined && f.effortKind;
@@ -154,6 +203,9 @@ export function composerNodes(f: ComposerFacts, above: TspNode[] = []): TspNode[
 		}
 		: undefined;
 	const git = f.git && !f.compact ? gitSeg(f.git) : undefined;
+	// The pulse sits immediately after the git facts in the same growing slot, so it reads as one status
+	// line and never pushes Stop or the cost around.
+	const work = f.work && !f.compact ? workChip(f.work) : undefined;
 	const usage = f.cost !== undefined && f.cost > 0 ? `$${f.cost.toFixed(2)}` : "";
 	// The turn's own clock while it runs: Tern counts it, so an idle or busy bar costs the same frames.
 	const turn: TspNode | undefined = f.busy && f.turnAgeMs !== undefined
@@ -186,7 +238,7 @@ export function composerNodes(f: ComposerFacts, above: TspNode[] = []): TspNode[
 		c: [
 			...(model ? [model] : []),
 			...(effort ? [effort] : []),
-			{ id: "extras", k: "status", p: { role: "omp.composer.extras", transparent: true, grow: 1 }, c: git ? [git] : [] },
+			{ id: "extras", k: "status", p: { role: "omp.composer.extras", transparent: true, grow: 1 }, c: [...(git ? [git] : []), ...(work ? [work] : [])] },
 			...(turn ? [turn] : []),
 			...(!f.compact ? [{ id: "usage", k: "text", p: { role: "omp.composer.usage", text: usage, wrap: "none", ...(usage ? { title: `Session cost ${usage}` } : {}), actions: { click: "status.cost" } } }] : []),
 			...(background ? [background] : []),
