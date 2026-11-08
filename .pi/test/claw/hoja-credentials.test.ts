@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
-	credentialValue, HOJA_URL_DEFAULT, HOJA_URL_VARS, HOJA_TOKEN_VARS, HojaClient, HojaRequestError,
+	credentialValue, HOJA_ENDPOINT_HINT, HOJA_URL_VARS, HOJA_TOKEN_VARS, HojaClient, HojaRequestError,
 	MISSING_HOJA_TOKEN,
 } from "../../lib/claw/hoja.ts";
 
@@ -81,11 +81,13 @@ describe("Hoja credentials", () => {
 		expect(credentialValue(HOJA_TOKEN_VARS)).toBe("lin_legacy_token");
 	});
 
-	it("falls back to the default endpoint when neither URL variable is exported", async () => {
+	// No endpoint default on purpose: both former candidates are wrong (clover4 answers 404, app.hoja.work
+	// answers 401 for a valid token), so an unset URL must name the variable rather than reach a dead host.
+	it("fails closed with the endpoint hint when no URL variable is exported", async () => {
 		process.env.HOJA_TOKEN = "hoja_canonical_token";
-		const { calls, fetch } = recorder();
-		await new HojaClient({ fetch: fetch as any }).gql("{ viewer { id } }");
-		expect(calls[0].url).toBe(HOJA_URL_DEFAULT);
+		const client = new HojaClient({ fetch: recorder().fetch as any });
+		const error = await client.gql("{ viewer { id } }").catch((e: Error) => e);
+		expect(String((error as Error).message)).toBe(HOJA_ENDPOINT_HINT);
 	});
 
 	// Acceptance case 2 from the issue: with no credentials at all the error must name HOJA_TOKEN first and

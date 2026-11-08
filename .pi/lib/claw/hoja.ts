@@ -8,10 +8,35 @@ export type FetchLike = (url: string, init: { method: string; headers: Record<st
  *  canonical value falls through to the alias, so a session that exports only `HOJA_*` is never left unconfigured. */
 export const HOJA_TOKEN_VARS = ["HOJA_TOKEN", "LINEAR_TOKEN"] as const;
 export const HOJA_URL_VARS = ["HOJA_API_URL", "LINEAR_API_URL"] as const;
-/** Live default; `HOJA_API_URL` (or the deprecated `LINEAR_API_URL`) overrides it. The previous default,
- *  `https://hoja.clover4.app/graphql`, now answers 404 for every path — including `/` — so an unset URL
- *  produced a misleading `Hoja HTTP 404` instead of reaching the API. */
-export const HOJA_URL_DEFAULT = "https://app.hoja.work/graphql";
+/** There is deliberately no default endpoint. The former default `https://hoja.clover4.app/graphql` answers
+ *  404 for every path, and the obvious replacement `https://app.hoja.work/graphql` answers 401
+ *  "Authentication required" for a *valid* API token (measured 2026-11-08) — tokens authenticate against the
+ *  tenant host, which is a deployment fact rather than a code constant. An unset URL therefore fails with a
+ *  message naming the variable instead of reaching a host that looks like a credential problem. */
+export const HOJA_ENDPOINT_HINT =
+	"No Hoja endpoint configured. Set HOJA_API_URL (e.g. https://workspace.hoja.work/graphql) or HOJA_MCP_URL; " +
+	"LINEAR_API_URL is honoured only as a deprecated alias.";
+/** GraphQL endpoint: explicit option, then HOJA_API_URL / LINEAR_API_URL, then the host of HOJA_MCP_URL rewritten
+ *  to /graphql. Returns "" when nothing is configured so the caller fails closed. */
+export function resolveHojaUrl(env: Env = process.env, override?: string): string {
+	const direct = override?.trim() || credentialValue(HOJA_URL_VARS, env);
+	if (direct) return direct;
+	const mcp = env.HOJA_MCP_URL?.trim();
+	if (!mcp) return "";
+	try {
+		const parsed = new URL(mcp);
+		parsed.pathname = "/graphql";
+		parsed.search = "";
+		parsed.hash = "";
+		return parsed.toString();
+	} catch {
+		return "";
+	}
+}
+/** Token: explicit option, then HOJA_TOKEN, then the deprecated LINEAR_TOKEN. */
+export function resolveHojaToken(env: Env = process.env, override?: string): string {
+	return override ?? credentialValue(HOJA_TOKEN_VARS, env) ?? "";
+}
 /** Names every variable that was consulted, canonical first. The deprecated alias is reported as a fallback
  *  only, never as the primary credential (issue #415: the message used to name only `LINEAR_TOKEN`). */
 export const MISSING_HOJA_TOKEN =
@@ -63,15 +88,18 @@ export class HojaClient {
 	private readonly fetchImpl: FetchLike;
 	private readonly timeoutMs: number;
 	constructor(options: { url?: string; token?: string; fetch?: FetchLike; timeoutMs?: number } = {}) {
-		this.url = options.url ?? credentialValue(HOJA_URL_VARS) ?? HOJA_URL_DEFAULT;
-		this.token = options.token ?? credentialValue(HOJA_TOKEN_VARS) ?? "";
+		this.url = options.url ?? resolveHojaUrl(process.env);
+		this.token = options.token ?? resolveHojaToken(process.env);
 		this.fetchImpl = options.fetch ?? (globalThis.fetch as unknown as FetchLike);
 		this.timeoutMs = options.timeoutMs ?? 15_000;
 		if (!Number.isFinite(this.timeoutMs) || this.timeoutMs <= 0) throw new Error("Invalid Hoja timeout");
 	}
 
 	async gql<T>(query: string, variables: Record<string, unknown> = {}): Promise<T> {
+		// Token first: issue #415 pins the "name HOJA_TOKEN before LINEAR_TOKEN" message as the
+		// no-credentials case, so an unset endpoint must not shadow it.
 		if (!this.token) throw new HojaRequestError(MISSING_HOJA_TOKEN);
+		if (!this.url) throw new HojaRequestError(HOJA_ENDPOINT_HINT);
 		const controller = new AbortController();
 		let timer: ReturnType<typeof setTimeout> | undefined;
 		const deadline = new Promise<never>((_, reject) => {
