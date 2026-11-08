@@ -1,7 +1,8 @@
 /**
  * The work card's own styles. Tern draws every step head (`tool`, muted/strong/path/command spans, the
- * half-second timer, the spinner) from its built-in sheets, so this only styles the small amount of text the
- * bridge itself contributes: the group's control chips, its heading, and the compact activity lines.
+ * half-second timer, the spinner) from its built-in sheets, so this only styles the few things the bridge
+ * contributes: the one Inspect affordance, the tracked-task line, and the rule that the card head owns the
+ * glyph while its steps are named by verb and target.
  *
  * Stick to the selector subset Tern supports (docs/reference/tern-site/styles/css.md): no `:has()`, no `~`
  * combinator, and no leading region element — a program sheet is prefixed with `[data-scope]`.
@@ -9,35 +10,15 @@
  * region zoom (see composer-style.ts).
  */
 export const TERN_WORK_CSS = `
-[data-role='tern.work-controls'] { display: flex; align-items: center; gap: 6px; margin: 0 0 8px; }
-[data-role='tern.work-mode'],
-[data-role='tern.work-collapse'] {
-  display: inline-flex;
-  align-items: center;
-  padding: 1px 8px;
-  border: 1px solid var(--l2);
-  border-radius: 999px;
-  background: var(--l1);
-  color: var(--t3);
-  font-size: calc(var(--sf-fs, 13px) * 10 / 13);
-  line-height: 1.6;
-  letter-spacing: 0.02em;
-  white-space: nowrap;
-  cursor: pointer;
-}
-[data-role='tern.work-mode']:hover,
-[data-role='tern.work-collapse']:hover { color: var(--t1); border-color: var(--accent); }
-[data-role='tern.work-focus'] { color: var(--accent); font-size: calc(var(--sf-fs, 13px) * 11 / 13); margin: 0 0 8px; }
-/* Rhythm: one step per line of thought, so steps sit apart instead of stacking into a wall. */
-[data-role='tern.work-live'] .sf-tool-body > .sf-tool + .sf-tool,
-[data-role='tern.work'] .sf-tool-body > .sf-tool + .sf-tool { margin-top: 10px; }
-/* The run box carries a command, its output and a state foot: three things want three gaps. */
-[data-role='omp.run'] { margin: 6px 0 2px; }
-/* A patch draws its hunks: keep them off the head and off the next step. */
-[data-role='tern.work-patch'] { margin: 6px 0 2px; }
-[data-role='tern.work-patch.diff'] { margin-top: 4px; }
-[data-role='tern.work-latest'],
-[data-role='tern.work-failed'],
-[data-role='tern.work-overflow'] { color: var(--t3); font-size: calc(var(--sf-fs, 13px) * 10.5 / 13); margin-top: 4px; }
-[data-role='tern.work-preparing'] { color: var(--t3); font-size: calc(var(--sf-fs, 13px) * 10.5 / 13); margin-top: 4px; }
+/* The card head carries the turn's glyph; a step is a verb and a target, never the same icon again. */
+[data-role='tern.work-body'] { margin-top: 2px; }
+[data-role='tern.work-body'] .sf-tool-ic { display: none; }
+/* The tree is read by depth: each step sits clearly inside the card, with no rails or rules to say so. */
+[data-role='tern.work-body'] .sf-tool { padding-left: 18px; }
+/* A step's own body sits one level further in, so the tree reads as card > step > output. */
+[data-role='tern.work-body'] .sf-tool-body { padding-left: 12px; }
+/* The one affordance in the tree: quiet text, no pill, no border, no background. */
+[data-role='tern.work-inspect'] { color: var(--t3); font-size: calc(var(--sf-fs, 13px) * 10 / 13); letter-spacing: 0.02em; }
+[data-role='tern.work-inspect']:hover { color: var(--t1); }
+[data-role='tern.work-focus'] { color: var(--accent); font-size: calc(var(--sf-fs, 13px) * 11 / 13); }
 `;

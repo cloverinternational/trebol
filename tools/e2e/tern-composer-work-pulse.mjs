@@ -1,5 +1,6 @@
 #!/usr/bin/env -S node --experimental-strip-types
-/** Real Pi session + Tern bridge: live background work renders as a TSP card, caps at five rows, and is removed on completion. */
+/** Real Pi session + Tern bridge: live background work is one composer pulse (spinner, count, ≤3 jobs in the
+ * hover card) and nothing at all once it settles. The pulse replaced the dock card this file used to assert. */
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -10,10 +11,10 @@ import { PiTernBridge } from "../../.pi/lib/tern/bridge.ts";
 import { setRunningWork, removeRunningWork } from "../../.pi/lib/ui/running-work-store.ts";
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-const root = mkdtempSync(join(tmpdir(), "trebol-tern-bgcard-"));
+const root = mkdtempSync(join(tmpdir(), "trebol-tern-work-pulse-"));
 let session;
 const cleanup = () => { session?.dispose(); rmSync(root, { recursive: true, force: true }); };
-const deadline = setTimeout(() => { console.error("FAIL tern background card timed out"); cleanup(); process.exit(1); }, 60_000);
+const deadline = setTimeout(() => { console.error("FAIL tern composer work pulse timed out"); cleanup(); process.exit(1); }, 60_000);
 
 try {
   const agentDir = join(root, "agent");
@@ -43,39 +44,41 @@ export default function bgCardProbe(pi: any) {
   bridge.start("pi");
   await session.bindExtensions({ mode: "tui", uiContext: bridge.uiContext() });
   await new Promise((r) => setTimeout(r, 300));
-  assert.ok(!writes.join("").includes('"role":"pi.background"'), "no background card when nothing is running");
+  assert.ok(!writes.join("").includes('"role":"pi.composer.work"'), "no work pulse when nothing is running");
+  assert.ok(!writes.join("").includes('"role":"pi.background"'), "the dock card is gone for good");
 
   const launch = await globalThis.__bgCardLaunch();
   assert.ok(launch.text.includes('"backgrounded":true'), "background Bash launches");
   await new Promise((r) => setTimeout(r, 400));
   const during = writes.join("");
-  assert.ok(during.includes('"role":"pi.background"'), "a live background command renders as a card");
-  assert.ok(during.includes("Background work · 1 running"), "card head counts running work");
-  assert.ok(during.includes('"text":"sleep 2"'), "bash row shows its command");
-  assert.ok(during.includes('"k":"elapsed"'), "row shows a live elapsed timer");
+  assert.ok(during.includes('"role":"pi.composer.work"'), "a live background command renders as one pulse");
+  assert.ok(during.includes('"role":"pi.composer.work.pulse"'), "the pulse draws Tern's own spinner");
+  assert.ok(during.includes('"k":"spinner"'), "the spinner is a node Tern clocks, not text we redraw");
+  assert.ok(during.includes('"role":"pi.composer.work.count","text":"1"'), "the pulse counts the live job");
+  assert.ok(during.includes('"text":"sleep 2"'), "the hover card names the command");
+  assert.ok(during.includes('"k":"elapsed"'), "each card row carries a Tern-clocked timer");
 
   const frames = writes.length;
   await new Promise((r) => setTimeout(r, 3000));
   const after = writes.slice(frames).join("");
-  assert.ok(after.includes('["del","background-work"'), "the card is removed once the command finishes");
+  assert.ok(after.includes('["del","work"'), "the pulse is removed once the command finishes");
 
-  // Six live items: rows cap at five and the card points to /work for the rest.
+  // Six live items: the count sees all six and no list is drawn in the bar.
   const manyFrames = writes.length;
   await globalThis.__bgCardLaunchMany();
   await new Promise((r) => setTimeout(r, 400));
   const many = writes.slice(manyFrames).join("");
-  assert.ok(many.includes("Background work · 6 running"), "card head counts all six live items");
-  assert.ok(many.includes("+1 more · /work"), "card reports the one row over the five-row cap");
-  assert.equal(new Set(many.match(/"id":"bg-work-[^"]+","k":"row","p":\{"role":"pi\.background\.row"/g) ?? []).size, 5, "card renders exactly five rows");
-  // Subagent rows come from the same store the agent runtime writes (swarm-agent-tools.ts setRunningWork); this checks the card, not a model run.
+  assert.ok(many.includes('"role":"pi.composer.work.count","text":"6"'), "the pulse counts all six live jobs");
+  assert.ok(!many.includes("pi.composer.work.item"), "no per-job rows are drawn in the bar");
+  assert.ok(!many.includes("pi.composer.work.card"), "no hover card is drawn: the bar's band would clip it");
+  // Subagent rows come from the same store the agent runtime writes (swarm-agent-tools.ts setRunningWork).
   setRunningWork({ id: "agent-probe", kind: "subagent", label: "Agent agent-probe", status: "running", startedAt: Date.now() - 4000, detail: "Review the parser" });
   await new Promise((r) => setTimeout(r, 300));
   const agentRow = writes.slice(manyFrames).join("");
-  assert.ok(agentRow.includes('"id":"bg-work-agent-probe","k":"agent"'), "a subagent renders as Tern's agent row, not a text row");
-  assert.ok(agentRow.includes('"task":"Review the parser"'), "agent row carries the assignment");
-  assert.ok(agentRow.includes('"role":"pi.background.agent"'), "agent row keeps its own role");
+  assert.ok(agentRow.includes("Agent agent-probe"), "the pulse names the newest job");
+  assert.ok(agentRow.includes('"role":"pi.composer.work.now"'), "that name is the hover/focus reveal");
   removeRunningWork("agent-probe");
-  console.log("PASS tern background card: one item shown and removed on completion; six items capped at five rows");
+  console.log("PASS tern composer work pulse: one pulse while work runs, removed on completion, six jobs counted, no list in the bar");
 } catch (error) {
   console.error(`FAIL ${error instanceof Error ? error.message : String(error)}`);
   process.exitCode = 1;

@@ -102,12 +102,6 @@ export function goalLine(text: string): string {
 	return line.replace(/\s+/g, " ");
 }
 
-/** The single live line. The count leads so an end-truncated line never loses it. */
-export function liveLineText(goal: string, active: number): string {
-	const state = active > 0 ? `${active} running` : "working";
-	return goal ? `${state} · ${goal}` : state;
-}
-
 export const SETTLED_LABEL: Record<Exclude<GroupStatus, "running">, string> = { done: "Done", failed: "Failed", interrupted: "Interrupted" };
 
 /**

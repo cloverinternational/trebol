@@ -44,60 +44,6 @@ export const PI_COMPOSER_CSS = `
 .sf-col[data-role='pi.assistant']:last-child .sf-md .md { font-family: var(--sans); }
 .sf-card[data-role='pi.user']:not(:first-child) { margin-top: 8px; }
 .sf-card[data-role='pi.user'] .sf-md .md { font-family: var(--sans); }
-[data-role='pi.tasks'] {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  margin: 0 12px 4px;
-  padding: 5px 10px 6px;
-  border-radius: 8px;
-  border: 1px solid var(--l2);
-  border-left: 2px solid var(--accent);
-  background: var(--card);
-  font-family: var(--tv-font, var(--mono));
-  font-size: calc(var(--sf-fs, 13px) * 10.5 / 13);
-  line-height: 1.5;
-  color: var(--t2);
-  cursor: default;
-}
-[data-role='pi.tasks'] .sf-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-[data-role='omp.editor'] > [data-role='pi.tasks'] { margin: 0 0 4px; }
-[data-role='pi.tasks.head'] { color: var(--t3); font-size: calc(var(--sf-fs, 13px) * 9.5 / 13); letter-spacing: 0.06em; text-transform: uppercase; }
-[data-role='pi.tasks.focus'] { color: var(--accent); font-weight: 600; cursor: pointer; }
-[data-role='pi.tasks.question'] { display: none; }
-[data-role='pi.tasks']:hover [data-role='pi.tasks.question'],
-[data-role='pi.tasks']:focus-within [data-role='pi.tasks.question'] { display: flex; }
-[data-role='pi.tasks.question'] { color: var(--warn); }
-[data-role='pi.tasks.question'][data-tone='success'] { color: var(--ok); }
-[data-role='pi.tasks.next'] { color: var(--t3); cursor: pointer; }
-[data-role='pi.tasks.next']:hover, [data-role='pi.tasks.focus']:hover { text-decoration: underline; }
-[data-role='pi.tasks.pop'] {
-  display: none;
-  position: absolute;
-  left: -1px;
-  right: -1px;
-  bottom: 100%;
-  z-index: 50;
-  flex-direction: column;
-  gap: 1px;
-  max-height: 320px;
-  overflow-y: auto;
-  padding: 6px 10px 8px;
-  border-radius: 8px;
-  border: 1px solid var(--l2);
-  background: var(--card);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
-}
-[data-role='pi.tasks']:hover [data-role='pi.tasks.pop'] { display: flex; }
-[data-role='pi.tasks.row'] { color: var(--t2); padding: 1px 4px; border-radius: 4px; cursor: pointer; }
-[data-role='pi.tasks.row']:hover { background: var(--l1); color: var(--t1); }
-[data-role='pi.tasks.row'][data-tone='accent'] { color: var(--accent); font-weight: 600; }
-[data-role='pi.tasks.row'][data-tone='info'] { color: var(--a1); }
-[data-role='pi.tasks.row'][data-tone='warning'] { color: var(--warn); }
-[data-role='pi.tasks.row'][data-tone='success'] { color: var(--ok); }
-[data-role='pi.tasks.row'][data-tone='muted'] { color: var(--t2); }
-[data-role='pi.tasks.pq'] { color: var(--t3); font-size: calc(var(--sf-fs, 13px) * 10 / 13); }
 [data-role='pi.ask'] [data-role='pi.ask.question'] { gap: 8px; margin-bottom: 16px; }
 [data-role='pi.ask'] [data-role='pi.ask.option'] {
   border: 1px solid var(--l2);
@@ -151,29 +97,45 @@ export const PI_COMPOSER_CSS = `
   cursor: pointer;
 }
 [data-role='pi.composer.send']:hover { background: var(--l1); }
-[data-role='pi.board'] { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 4px; }
 /* /btw card, inline in the composer slot: the newest exchange reads as body text, the input row is the boundary. */
 [data-role='pi.btw.question'] { color: var(--t2); }
 [data-role='pi.btw.answer'] { color: var(--t1); overflow-wrap: anywhere; }
 [data-role='pi.btw.input'] { padding: 6px 0 2px; margin-top: 6px; border-top: 1px solid var(--l2); }
 [data-role='pi.btw.hint'] { gap: 12px; align-items: center; margin-top: 2px; color: var(--t3); }
-[data-role='pi.board.column'] { display: flex; flex-direction: column; gap: 4px; min-width: 0; padding: 6px; border-radius: 8px; border: 1px solid var(--l2); background: color-mix(in srgb, var(--l1) 55%, transparent); }
-[data-role='pi.board.head'] { color: var(--t2); font-size: calc(var(--sf-fs, 13px) * 10 / 13); font-weight: 600; letter-spacing: 0.02em; padding: 0 2px 4px; border-bottom: 1px solid var(--l2); }
-[data-role='pi.board.card'] { padding: 5px 7px; border-radius: 6px; border: 1px solid var(--l2); background: var(--card); color: var(--t1); cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-[data-role='pi.board.card']:hover { border-color: var(--accent); }
-[data-role='pi.board.card'][data-tone='accent'] { border-color: var(--accent); }
-[data-role='pi.board.meta'] { color: var(--t3); font-size: calc(var(--sf-fs, 13px) * 9.5 / 13); padding-left: 2px; }
-[data-role='pi.board.empty'] { color: var(--t3); font-size: calc(var(--sf-fs, 13px) * 10 / 13); text-align: center; padding: 8px 0; border: 1px dashed var(--l2); border-radius: 6px; }
-/* Task block: the transcript carries the task rows, so only its head and evidence line need a size -
-   a row's verb, target, facts and status are Tern's own drawing, not restated here. */
-[data-role='pi.tasks.block'] { margin-top: 10px; }
-[data-role='pi.tasks.block-head'] { color: var(--t3); font-size: calc(var(--sf-fs, 13px) * 10 / 13); letter-spacing: 0.02em; padding-bottom: 2px; }
-[data-role='pi.tasks.line-e'] { font-size: calc(var(--sf-fs, 13px) * 9.5 / 13); padding-left: 2px; }
+/* Task block: the transcript carries the live task rows only. The row keeps Tern's own drawing (icon,
+   verb, target, facts, status), one step down the type scale from a work step; the open questions are
+   small lines under their task, not a tool head each. */
+[data-role='pi.tasks.block'] { margin-top: 6px; }
+[data-role='pi.tasks.block-head'] { color: var(--t3); font-size: calc(var(--sf-fs, 13px) * 9.5 / 13); letter-spacing: 0.02em; padding-bottom: 1px; }
+[data-role='pi.tasks.block'] .sf-tool-title,
+[data-role='pi.tasks.block'] .sf-tool-target,
+[data-role='pi.tasks.block'] .sf-tool-meta { font-size: calc(var(--sf-fs, 13px) * 11 / 13); }
+[data-role='pi.tasks.line-q'] { color: var(--warn); font-size: calc(var(--sf-fs, 13px) * 10 / 13); padding-left: 2px; }
+[data-role='pi.tasks.line-q'][data-tone='success'] { color: var(--ok); }
 [data-role='pi.tasks.lines-more'] { color: var(--t3); font-size: calc(var(--sf-fs, 13px) * 9.5 / 13); padding-top: 2px; }
-[data-role='pi.tasks.head'][data-action='tasks.view'] { cursor: pointer; }
 [data-role='tasks.call'] { font-family: var(--tv-font, var(--mono)); }
 [data-role='tasks.body'] { gap: 3px; padding: 4px 2px; }
 [data-role='tasks.state'] { color: var(--t3); font-size: calc(var(--sf-fs, 13px) * 10 / 13); padding: 2px 4px 0; }
 /* The composer's Background button: the bar's other facts are clickable too, so it takes the pointer. */
 [data-role='omp.composer.background'] { cursor: pointer; }
+/* Running background work, as one pulse in the bar. No card, no ring: a blue spinner Tern clocks itself,
+   the count, and the newest job's name only while the pointer or the keyboard is on it. The sheet owns
+   every bit of visibility, so nothing here needs a frame from Pi. */
+[data-role='pi.composer.work'] { cursor: pointer; }
+[data-role='pi.composer.work'] [data-role='pi.composer.work.count'] { font-size: calc(var(--sf-fs, 13px) * 10.5 / 13); }
+/* Hidden, not faded: display:none makes the name vanish the moment the pointer leaves. A floating panel
+   is not an option here — the status band clips its children, so the list lives in the work sheet. */
+[data-role='pi.composer.work'] [data-role='pi.composer.work.now'] {
+  display: none;
+  /* Tern lays sibling text nodes flush (the row's gap is not applied to them), so the name spaces itself. */
+  margin-left: 6px;
+  max-width: 180px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: calc(var(--sf-fs, 13px) * 10.5 / 13);
+  color: var(--t3);
+}
+[data-role='pi.composer.work']:hover [data-role='pi.composer.work.now'],
+[data-role='pi.composer.work']:focus-within [data-role='pi.composer.work.now'] { display: inline; }
 `;

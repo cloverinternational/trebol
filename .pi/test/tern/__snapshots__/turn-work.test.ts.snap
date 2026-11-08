@@ -3,488 +3,488 @@
 exports[`replay through the bridge: emitted TSP frames > 2026-10-18T19-18-23-235Z: the visible work rows after every event match the snapshot 1`] = `
 [
   "",
-  "LIVE working · x",
+  "LIVE working",
   "",
-  "LIVE working · 修復ログイン 🚀 テスト修復ログイン 🚀 テスト確認 — run two bash commands in parallel: \`sleep 6; echo a\` and \`sleep 8; echo b\`, then reply ok",
-  "LIVE 1 running · 修復ログイン 🚀 テスト修復ログイン 🚀 テスト確認 — run two bash commands in parallel: \`sleep 6; echo a\` and \`sleep 8; echo b\`, then reply ok",
-  "LIVE 2 running · 修復ログイン 🚀 テスト修復ログイン 🚀 テスト確認 — run two bash commands in parallel: \`sleep 6; echo a\` and \`sleep 8; echo b\`, then reply ok",
-  "LIVE 1 running · 修復ログイン 🚀 テスト修復ログイン 🚀 テスト確認 — run two bash commands in parallel: \`sleep 6; echo a\` and \`sleep 8; echo b\`, then reply ok",
-  "LIVE working · 修復ログイン 🚀 テスト修復ログイン 🚀 テスト確認 — run two bash commands in parallel: \`sleep 6; echo a\` and \`sleep 8; echo b\`, then reply ok",
-  "SUMMARY Done · 修復ログイン 🚀 テスト修復ログイン 🚀 テスト確認 — run two bash commands in parallel: \`sleep 6; echo a\` and \`sleep 8; echo b\`, then reply ok · 2 steps",
-  "SUMMARY Done · 修復ログイン 🚀 テスト修復ログイン 🚀 テスト確認 — run two bash commands in parallel: \`sleep 6; echo a\` and \`sleep 8; echo b\`, then reply ok · 2 steps
-LIVE working · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok.",
-  "SUMMARY Done · 修復ログイン 🚀 テスト修復ログイン 🚀 テスト確認 — run two bash commands in parallel: \`sleep 6; echo a\` and \`sleep 8; echo b\`, then reply ok · 2 steps
-LIVE 1 running · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok.",
-  "SUMMARY Done · 修復ログイン 🚀 テスト修復ログイン 🚀 テスト確認 — run two bash commands in parallel: \`sleep 6; echo a\` and \`sleep 8; echo b\`, then reply ok · 2 steps
-LIVE 2 running · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok.",
-  "SUMMARY Done · 修復ログイン 🚀 テスト修復ログイン 🚀 テスト確認 — run two bash commands in parallel: \`sleep 6; echo a\` and \`sleep 8; echo b\`, then reply ok · 2 steps
-LIVE 1 running · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok.",
-  "SUMMARY Done · 修復ログイン 🚀 テスト修復ログイン 🚀 テスト確認 — run two bash commands in parallel: \`sleep 6; echo a\` and \`sleep 8; echo b\`, then reply ok · 2 steps
-LIVE working · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok.",
-  "SUMMARY Done · 修復ログイン 🚀 テスト修復ログイン 🚀 テスト確認 — run two bash commands in parallel: \`sleep 6; echo a\` and \`sleep 8; echo b\`, then reply ok · 2 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 2 steps",
-  "SUMMARY Done · 修復ログイン 🚀 テスト修復ログイン 🚀 テスト確認 — run two bash commands in parallel: \`sleep 6; echo a\` and \`sleep 8; echo b\`, then reply ok · 2 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 2 steps
-LIVE working · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok.",
-  "SUMMARY Done · 修復ログイン 🚀 テスト修復ログイン 🚀 テスト確認 — run two bash commands in parallel: \`sleep 6; echo a\` and \`sleep 8; echo b\`, then reply ok · 2 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 2 steps
-LIVE 1 running · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok.",
-  "SUMMARY Done · 修復ログイン 🚀 テスト修復ログイン 🚀 テスト確認 — run two bash commands in parallel: \`sleep 6; echo a\` and \`sleep 8; echo b\`, then reply ok · 2 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 2 steps
-LIVE working · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok.",
-  "SUMMARY Done · 修復ログイン 🚀 テスト修復ログイン 🚀 テスト確認 — run two bash commands in parallel: \`sleep 6; echo a\` and \`sleep 8; echo b\`, then reply ok · 2 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 2 steps
-LIVE 1 running · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok.",
-  "SUMMARY Done · 修復ログイン 🚀 テスト修復ログイン 🚀 テスト確認 — run two bash commands in parallel: \`sleep 6; echo a\` and \`sleep 8; echo b\`, then reply ok · 2 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 2 steps
-LIVE working · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok.",
-  "SUMMARY Done · 修復ログイン 🚀 テスト修復ログイン 🚀 テスト確認 — run two bash commands in parallel: \`sleep 6; echo a\` and \`sleep 8; echo b\`, then reply ok · 2 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 2 steps
-LIVE 1 running · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok.",
-  "SUMMARY Done · 修復ログイン 🚀 テスト修復ログイン 🚀 テスト確認 — run two bash commands in parallel: \`sleep 6; echo a\` and \`sleep 8; echo b\`, then reply ok · 2 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 2 steps
-LIVE working · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok.",
-  "SUMMARY Done · 修復ログイン 🚀 テスト修復ログイン 🚀 テスト確認 — run two bash commands in parallel: \`sleep 6; echo a\` and \`sleep 8; echo b\`, then reply ok · 2 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 2 steps
-LIVE 1 running · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok.",
-  "SUMMARY Done · 修復ログイン 🚀 テスト修復ログイン 🚀 テスト確認 — run two bash commands in parallel: \`sleep 6; echo a\` and \`sleep 8; echo b\`, then reply ok · 2 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 2 steps
-LIVE working · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok.",
-  "SUMMARY Done · 修復ログイン 🚀 テスト修復ログイン 🚀 テスト確認 — run two bash commands in parallel: \`sleep 6; echo a\` and \`sleep 8; echo b\`, then reply ok · 2 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 2 steps
-LIVE 1 running · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok.",
-  "SUMMARY Done · 修復ログイン 🚀 テスト修復ログイン 🚀 テスト確認 — run two bash commands in parallel: \`sleep 6; echo a\` and \`sleep 8; echo b\`, then reply ok · 2 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 2 steps
-LIVE working · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok.",
-  "SUMMARY Done · 修復ログイン 🚀 テスト修復ログイン 🚀 テスト確認 — run two bash commands in parallel: \`sleep 6; echo a\` and \`sleep 8; echo b\`, then reply ok · 2 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 2 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok. · 5 steps",
-  "SUMMARY Done · 修復ログイン 🚀 テスト修復ログイン 🚀 テスト確認 — run two bash commands in parallel: \`sleep 6; echo a\` and \`sleep 8; echo b\`, then reply ok · 2 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 2 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok. · 5 steps
-LIVE working · 復ログイン 🚀 テスト確認 ✅ 文字幅 w100: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a100\` and \`sleep 9; echo b100\`. Then reply with the single word ok.",
-  "SUMMARY Done · 修復ログイン 🚀 テスト修復ログイン 🚀 テスト確認 — run two bash commands in parallel: \`sleep 6; echo a\` and \`sleep 8; echo b\`, then reply ok · 2 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 2 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok. · 5 steps",
-  "SUMMARY Done · 修復ログイン 🚀 テスト修復ログイン 🚀 テスト確認 — run two bash commands in parallel: \`sleep 6; echo a\` and \`sleep 8; echo b\`, then reply ok · 2 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 2 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok. · 5 steps
-LIVE working · 復ログイン 🚀 テスト確認 ✅ 文字幅 w140: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a140\` and \`sleep 9; echo b140\`. Then reply with the single word ok.",
-  "SUMMARY Done · 修復ログイン 🚀 テスト修復ログイン 🚀 テスト確認 — run two bash commands in parallel: \`sleep 6; echo a\` and \`sleep 8; echo b\`, then reply ok · 2 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 2 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok. · 5 steps
-LIVE 1 running · 復ログイン 🚀 テスト確認 ✅ 文字幅 w140: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a140\` and \`sleep 9; echo b140\`. Then reply with the single word ok.",
-  "SUMMARY Done · 修復ログイン 🚀 テスト修復ログイン 🚀 テスト確認 — run two bash commands in parallel: \`sleep 6; echo a\` and \`sleep 8; echo b\`, then reply ok · 2 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 2 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok. · 5 steps
-LIVE working · 復ログイン 🚀 テスト確認 ✅ 文字幅 w140: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a140\` and \`sleep 9; echo b140\`. Then reply with the single word ok.",
-  "SUMMARY Done · 修復ログイン 🚀 テスト修復ログイン 🚀 テスト確認 — run two bash commands in parallel: \`sleep 6; echo a\` and \`sleep 8; echo b\`, then reply ok · 2 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 2 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok. · 5 steps
-LIVE 1 running · 復ログイン 🚀 テスト確認 ✅ 文字幅 w140: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a140\` and \`sleep 9; echo b140\`. Then reply with the single word ok.",
-  "SUMMARY Done · 修復ログイン 🚀 テスト修復ログイン 🚀 テスト確認 — run two bash commands in parallel: \`sleep 6; echo a\` and \`sleep 8; echo b\`, then reply ok · 2 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 2 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok. · 5 steps
-LIVE working · 復ログイン 🚀 テスト確認 ✅ 文字幅 w140: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a140\` and \`sleep 9; echo b140\`. Then reply with the single word ok.",
-  "SUMMARY Done · 修復ログイン 🚀 テスト修復ログイン 🚀 テスト確認 — run two bash commands in parallel: \`sleep 6; echo a\` and \`sleep 8; echo b\`, then reply ok · 2 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 2 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok. · 5 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w140: run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a140\` and \`sleep 9; echo b140\`. Then reply with the single word ok. · 2 steps",
+  "LIVE working",
+  "LIVE 1 running · Sleep 6 seconds then echo a",
+  "LIVE 2 running · Sleep 8 seconds then echo b",
+  "LIVE 1 running · Sleep 8 seconds then echo b",
+  "LIVE working · Sleep 8 seconds then echo b",
+  "SUMMARY Done · Sleep 8 seconds then echo b · 2 steps",
+  "SUMMARY Done · Sleep 8 seconds then echo b · 2 steps
+LIVE working",
+  "SUMMARY Done · Sleep 8 seconds then echo b · 2 steps
+LIVE 1 running · Sleep 7 seconds then echo a40",
+  "SUMMARY Done · Sleep 8 seconds then echo b · 2 steps
+LIVE 2 running · Sleep 9 seconds then echo b40",
+  "SUMMARY Done · Sleep 8 seconds then echo b · 2 steps
+LIVE 1 running · Sleep 9 seconds then echo b40",
+  "SUMMARY Done · Sleep 8 seconds then echo b · 2 steps
+LIVE working · Sleep 9 seconds then echo b40",
+  "SUMMARY Done · Sleep 8 seconds then echo b · 2 steps
+SUMMARY Done · Sleep 9 seconds then echo b40 · 2 steps",
+  "SUMMARY Done · Sleep 8 seconds then echo b · 2 steps
+SUMMARY Done · Sleep 9 seconds then echo b40 · 2 steps
+LIVE working",
+  "SUMMARY Done · Sleep 8 seconds then echo b · 2 steps
+SUMMARY Done · Sleep 9 seconds then echo b40 · 2 steps
+LIVE 1 running · Sleep 7 seconds then echo a65",
+  "SUMMARY Done · Sleep 8 seconds then echo b · 2 steps
+SUMMARY Done · Sleep 9 seconds then echo b40 · 2 steps
+LIVE working · Sleep 7 seconds then echo a65",
+  "SUMMARY Done · Sleep 8 seconds then echo b · 2 steps
+SUMMARY Done · Sleep 9 seconds then echo b40 · 2 steps
+LIVE 1 running · Sleep 9 seconds then echo b65",
+  "SUMMARY Done · Sleep 8 seconds then echo b · 2 steps
+SUMMARY Done · Sleep 9 seconds then echo b40 · 2 steps
+LIVE working · Sleep 9 seconds then echo b65",
+  "SUMMARY Done · Sleep 8 seconds then echo b · 2 steps
+SUMMARY Done · Sleep 9 seconds then echo b40 · 2 steps
+LIVE 1 running · Tasks 2 ops",
+  "SUMMARY Done · Sleep 8 seconds then echo b · 2 steps
+SUMMARY Done · Sleep 9 seconds then echo b40 · 2 steps
+LIVE working · Tasks 2 ops",
+  "SUMMARY Done · Sleep 8 seconds then echo b · 2 steps
+SUMMARY Done · Sleep 9 seconds then echo b40 · 2 steps
+LIVE 1 running · Sleep 7 seconds then echo a65",
+  "SUMMARY Done · Sleep 8 seconds then echo b · 2 steps
+SUMMARY Done · Sleep 9 seconds then echo b40 · 2 steps
+LIVE working · Sleep 7 seconds then echo a65",
+  "SUMMARY Done · Sleep 8 seconds then echo b · 2 steps
+SUMMARY Done · Sleep 9 seconds then echo b40 · 2 steps
+LIVE 1 running · Sleep 9 seconds then echo b65",
+  "SUMMARY Done · Sleep 8 seconds then echo b · 2 steps
+SUMMARY Done · Sleep 9 seconds then echo b40 · 2 steps
+LIVE working · Sleep 9 seconds then echo b65",
+  "SUMMARY Done · Sleep 8 seconds then echo b · 2 steps
+SUMMARY Done · Sleep 9 seconds then echo b40 · 2 steps
+SUMMARY Done · Sleep 9 seconds then echo b65 · 5 steps",
+  "SUMMARY Done · Sleep 8 seconds then echo b · 2 steps
+SUMMARY Done · Sleep 9 seconds then echo b40 · 2 steps
+SUMMARY Done · Sleep 9 seconds then echo b65 · 5 steps
+LIVE working",
+  "SUMMARY Done · Sleep 8 seconds then echo b · 2 steps
+SUMMARY Done · Sleep 9 seconds then echo b40 · 2 steps
+SUMMARY Done · Sleep 9 seconds then echo b65 · 5 steps",
+  "SUMMARY Done · Sleep 8 seconds then echo b · 2 steps
+SUMMARY Done · Sleep 9 seconds then echo b40 · 2 steps
+SUMMARY Done · Sleep 9 seconds then echo b65 · 5 steps
+LIVE working",
+  "SUMMARY Done · Sleep 8 seconds then echo b · 2 steps
+SUMMARY Done · Sleep 9 seconds then echo b40 · 2 steps
+SUMMARY Done · Sleep 9 seconds then echo b65 · 5 steps
+LIVE 1 running · Sleep 7 seconds then echo a140",
+  "SUMMARY Done · Sleep 8 seconds then echo b · 2 steps
+SUMMARY Done · Sleep 9 seconds then echo b40 · 2 steps
+SUMMARY Done · Sleep 9 seconds then echo b65 · 5 steps
+LIVE working · Sleep 7 seconds then echo a140",
+  "SUMMARY Done · Sleep 8 seconds then echo b · 2 steps
+SUMMARY Done · Sleep 9 seconds then echo b40 · 2 steps
+SUMMARY Done · Sleep 9 seconds then echo b65 · 5 steps
+LIVE 1 running · Sleep 9 seconds then echo b140",
+  "SUMMARY Done · Sleep 8 seconds then echo b · 2 steps
+SUMMARY Done · Sleep 9 seconds then echo b40 · 2 steps
+SUMMARY Done · Sleep 9 seconds then echo b65 · 5 steps
+LIVE working · Sleep 9 seconds then echo b140",
+  "SUMMARY Done · Sleep 8 seconds then echo b · 2 steps
+SUMMARY Done · Sleep 9 seconds then echo b40 · 2 steps
+SUMMARY Done · Sleep 9 seconds then echo b65 · 5 steps
+SUMMARY Done · Sleep 9 seconds then echo b140 · 2 steps",
 ]
 `;
 
 exports[`replay through the bridge: emitted TSP frames > 2026-10-18T19-29-42-211Z: the visible work rows after every event match the snapshot 1`] = `
 [
   "",
-  "LIVE working · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok.",
-  "LIVE 1 running · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok.",
-  "LIVE working · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok.",
-  "LIVE 1 running · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok.",
-  "LIVE working · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok.",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-LIVE working · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok.",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-LIVE 1 running · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok.",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-LIVE working · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok.",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-LIVE working · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok.",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-LIVE 1 running · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok.",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-LIVE working · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok.",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-LIVE 1 running · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok.",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-LIVE working · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok.",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-LIVE 1 running · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok.",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-LIVE working · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok.",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-LIVE 1 running · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok.",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-LIVE working · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok.",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-LIVE 1 running · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok.",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-LIVE working · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok.",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-LIVE 1 running · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok.",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-LIVE working · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok.",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 6 steps",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 6 steps
-LIVE working · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok.",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 6 steps
-LIVE 1 running · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok.",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 6 steps
-LIVE working · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok.",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 6 steps
-LIVE 1 running · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok.",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 6 steps
-LIVE working · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok.",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 6 steps
-LIVE 1 running · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok.",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 6 steps
-LIVE working · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok.",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 6 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok. · 3 steps",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 6 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok. · 3 steps
-LIVE working · 復ログイン 🚀 テスト確認 ✅ 文字幅 w100: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a100\` and \`sleep 9; echo b100\`. Then reply with the single word ok.",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 6 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok. · 3 steps
-LIVE 1 running · 復ログイン 🚀 テスト確認 ✅ 文字幅 w100: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a100\` and \`sleep 9; echo b100\`. Then reply with the single word ok.",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 6 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok. · 3 steps
-LIVE working · 復ログイン 🚀 テスト確認 ✅ 文字幅 w100: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a100\` and \`sleep 9; echo b100\`. Then reply with the single word ok.",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 6 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok. · 3 steps
-LIVE 1 running · 復ログイン 🚀 テスト確認 ✅ 文字幅 w100: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a100\` and \`sleep 9; echo b100\`. Then reply with the single word ok.",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 6 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok. · 3 steps
-LIVE working · 復ログイン 🚀 テスト確認 ✅ 文字幅 w100: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a100\` and \`sleep 9; echo b100\`. Then reply with the single word ok.",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 6 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok. · 3 steps
-LIVE 1 running · 復ログイン 🚀 テスト確認 ✅ 文字幅 w100: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a100\` and \`sleep 9; echo b100\`. Then reply with the single word ok.",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 6 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok. · 3 steps
-LIVE working · 復ログイン 🚀 テスト確認 ✅ 文字幅 w100: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a100\` and \`sleep 9; echo b100\`. Then reply with the single word ok.",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 6 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok. · 3 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w100: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a100\` and \`sleep 9; echo b100\`. Then reply with the single word ok. · 3 steps",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 6 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok. · 3 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w100: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a100\` and \`sleep 9; echo b100\`. Then reply with the single word ok. · 3 steps
-LIVE working · 復ログイン 🚀 テスト確認 ✅ 文字幅 w140: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a140\` and \`sleep 9; echo b140\`. Then reply with the single word ok.",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 6 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok. · 3 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w100: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a100\` and \`sleep 9; echo b100\`. Then reply with the single word ok. · 3 steps
-LIVE 1 running · 復ログイン 🚀 テスト確認 ✅ 文字幅 w140: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a140\` and \`sleep 9; echo b140\`. Then reply with the single word ok.",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 6 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok. · 3 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w100: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a100\` and \`sleep 9; echo b100\`. Then reply with the single word ok. · 3 steps
-LIVE working · 復ログイン 🚀 テスト確認 ✅ 文字幅 w140: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a140\` and \`sleep 9; echo b140\`. Then reply with the single word ok.",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 6 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok. · 3 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w100: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a100\` and \`sleep 9; echo b100\`. Then reply with the single word ok. · 3 steps
-LIVE 1 running · 復ログイン 🚀 テスト確認 ✅ 文字幅 w140: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a140\` and \`sleep 9; echo b140\`. Then reply with the single word ok.",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 6 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok. · 3 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w100: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a100\` and \`sleep 9; echo b100\`. Then reply with the single word ok. · 3 steps
-LIVE working · 復ログイン 🚀 テスト確認 ✅ 文字幅 w140: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a140\` and \`sleep 9; echo b140\`. Then reply with the single word ok.",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 6 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok. · 3 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w100: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a100\` and \`sleep 9; echo b100\`. Then reply with the single word ok. · 3 steps
-SUMMARY Interrupted · 復ログイン 🚀 テスト確認 ✅ 文字幅 w140: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a140\` and \`sleep 9; echo b140\`. Then reply with the single word ok. · 2 steps",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 6 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok. · 3 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w100: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a100\` and \`sleep 9; echo b100\`. Then reply with the single word ok. · 3 steps
-SUMMARY Interrupted · 復ログイン 🚀 テスト確認 ✅ 文字幅 w140: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a140\` and \`sleep 9; echo b140\`. Then reply with the single word ok. · 2 steps
-LIVE working · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w40: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a40\` and \`cat /tmp/tw/fifo-b40\`. Then reply with the single word ok.",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 6 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok. · 3 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w100: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a100\` and \`sleep 9; echo b100\`. Then reply with the single word ok. · 3 steps
-SUMMARY Interrupted · 復ログイン 🚀 テスト確認 ✅ 文字幅 w140: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a140\` and \`sleep 9; echo b140\`. Then reply with the single word ok. · 2 steps
-LIVE 1 running · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w40: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a40\` and \`cat /tmp/tw/fifo-b40\`. Then reply with the single word ok.",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 6 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok. · 3 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w100: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a100\` and \`sleep 9; echo b100\`. Then reply with the single word ok. · 3 steps
-SUMMARY Interrupted · 復ログイン 🚀 テスト確認 ✅ 文字幅 w140: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a140\` and \`sleep 9; echo b140\`. Then reply with the single word ok. · 2 steps
-LIVE 2 running · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w40: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a40\` and \`cat /tmp/tw/fifo-b40\`. Then reply with the single word ok.",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 6 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok. · 3 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w100: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a100\` and \`sleep 9; echo b100\`. Then reply with the single word ok. · 3 steps
-SUMMARY Interrupted · 復ログイン 🚀 テスト確認 ✅ 文字幅 w140: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a140\` and \`sleep 9; echo b140\`. Then reply with the single word ok. · 2 steps
-LIVE 1 running · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w40: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a40\` and \`cat /tmp/tw/fifo-b40\`. Then reply with the single word ok.",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 6 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok. · 3 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w100: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a100\` and \`sleep 9; echo b100\`. Then reply with the single word ok. · 3 steps
-SUMMARY Interrupted · 復ログイン 🚀 テスト確認 ✅ 文字幅 w140: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a140\` and \`sleep 9; echo b140\`. Then reply with the single word ok. · 2 steps
-LIVE working · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w40: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a40\` and \`cat /tmp/tw/fifo-b40\`. Then reply with the single word ok.",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 6 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok. · 3 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w100: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a100\` and \`sleep 9; echo b100\`. Then reply with the single word ok. · 3 steps
-SUMMARY Interrupted · 復ログイン 🚀 テスト確認 ✅ 文字幅 w140: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a140\` and \`sleep 9; echo b140\`. Then reply with the single word ok. · 2 steps
-SUMMARY Done · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w40: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a40\` and \`cat /tmp/tw/fifo-b40\`. Then reply with the single word ok. · 2 steps",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 6 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok. · 3 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w100: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a100\` and \`sleep 9; echo b100\`. Then reply with the single word ok. · 3 steps
-SUMMARY Interrupted · 復ログイン 🚀 テスト確認 ✅ 文字幅 w140: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a140\` and \`sleep 9; echo b140\`. Then reply with the single word ok. · 2 steps
-SUMMARY Done · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w40: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a40\` and \`cat /tmp/tw/fifo-b40\`. Then reply with the single word ok. · 2 steps
-LIVE working · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w65: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a65\` and \`cat /tmp/tw/fifo-b65\`. Then reply with the single word ok.",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 6 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok. · 3 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w100: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a100\` and \`sleep 9; echo b100\`. Then reply with the single word ok. · 3 steps
-SUMMARY Interrupted · 復ログイン 🚀 テスト確認 ✅ 文字幅 w140: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a140\` and \`sleep 9; echo b140\`. Then reply with the single word ok. · 2 steps
-SUMMARY Done · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w40: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a40\` and \`cat /tmp/tw/fifo-b40\`. Then reply with the single word ok. · 2 steps
-LIVE 1 running · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w65: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a65\` and \`cat /tmp/tw/fifo-b65\`. Then reply with the single word ok.",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 6 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok. · 3 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w100: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a100\` and \`sleep 9; echo b100\`. Then reply with the single word ok. · 3 steps
-SUMMARY Interrupted · 復ログイン 🚀 テスト確認 ✅ 文字幅 w140: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a140\` and \`sleep 9; echo b140\`. Then reply with the single word ok. · 2 steps
-SUMMARY Done · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w40: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a40\` and \`cat /tmp/tw/fifo-b40\`. Then reply with the single word ok. · 2 steps
-LIVE 2 running · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w65: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a65\` and \`cat /tmp/tw/fifo-b65\`. Then reply with the single word ok.",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 6 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok. · 3 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w100: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a100\` and \`sleep 9; echo b100\`. Then reply with the single word ok. · 3 steps
-SUMMARY Interrupted · 復ログイン 🚀 テスト確認 ✅ 文字幅 w140: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a140\` and \`sleep 9; echo b140\`. Then reply with the single word ok. · 2 steps
-SUMMARY Done · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w40: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a40\` and \`cat /tmp/tw/fifo-b40\`. Then reply with the single word ok. · 2 steps
-LIVE 1 running · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w65: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a65\` and \`cat /tmp/tw/fifo-b65\`. Then reply with the single word ok.",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 6 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok. · 3 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w100: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a100\` and \`sleep 9; echo b100\`. Then reply with the single word ok. · 3 steps
-SUMMARY Interrupted · 復ログイン 🚀 テスト確認 ✅ 文字幅 w140: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a140\` and \`sleep 9; echo b140\`. Then reply with the single word ok. · 2 steps
-SUMMARY Done · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w40: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a40\` and \`cat /tmp/tw/fifo-b40\`. Then reply with the single word ok. · 2 steps
-LIVE working · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w65: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a65\` and \`cat /tmp/tw/fifo-b65\`. Then reply with the single word ok.",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 6 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok. · 3 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w100: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a100\` and \`sleep 9; echo b100\`. Then reply with the single word ok. · 3 steps
-SUMMARY Interrupted · 復ログイン 🚀 テスト確認 ✅ 文字幅 w140: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a140\` and \`sleep 9; echo b140\`. Then reply with the single word ok. · 2 steps
-SUMMARY Done · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w40: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a40\` and \`cat /tmp/tw/fifo-b40\`. Then reply with the single word ok. · 2 steps
-SUMMARY Done · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w65: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a65\` and \`cat /tmp/tw/fifo-b65\`. Then reply with the single word ok. · 2 steps",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 6 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok. · 3 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w100: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a100\` and \`sleep 9; echo b100\`. Then reply with the single word ok. · 3 steps
-SUMMARY Interrupted · 復ログイン 🚀 テスト確認 ✅ 文字幅 w140: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a140\` and \`sleep 9; echo b140\`. Then reply with the single word ok. · 2 steps
-SUMMARY Done · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w40: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a40\` and \`cat /tmp/tw/fifo-b40\`. Then reply with the single word ok. · 2 steps
-SUMMARY Done · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w65: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a65\` and \`cat /tmp/tw/fifo-b65\`. Then reply with the single word ok. · 2 steps
-LIVE working · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w100: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a100\` and \`cat /tmp/tw/fifo-b100\`. Then reply with the single word ok.",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 6 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok. · 3 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w100: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a100\` and \`sleep 9; echo b100\`. Then reply with the single word ok. · 3 steps
-SUMMARY Interrupted · 復ログイン 🚀 テスト確認 ✅ 文字幅 w140: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a140\` and \`sleep 9; echo b140\`. Then reply with the single word ok. · 2 steps
-SUMMARY Done · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w40: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a40\` and \`cat /tmp/tw/fifo-b40\`. Then reply with the single word ok. · 2 steps
-SUMMARY Done · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w65: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a65\` and \`cat /tmp/tw/fifo-b65\`. Then reply with the single word ok. · 2 steps
-LIVE 1 running · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w100: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a100\` and \`cat /tmp/tw/fifo-b100\`. Then reply with the single word ok.",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 6 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok. · 3 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w100: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a100\` and \`sleep 9; echo b100\`. Then reply with the single word ok. · 3 steps
-SUMMARY Interrupted · 復ログイン 🚀 テスト確認 ✅ 文字幅 w140: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a140\` and \`sleep 9; echo b140\`. Then reply with the single word ok. · 2 steps
-SUMMARY Done · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w40: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a40\` and \`cat /tmp/tw/fifo-b40\`. Then reply with the single word ok. · 2 steps
-SUMMARY Done · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w65: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a65\` and \`cat /tmp/tw/fifo-b65\`. Then reply with the single word ok. · 2 steps
-LIVE 2 running · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w100: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a100\` and \`cat /tmp/tw/fifo-b100\`. Then reply with the single word ok.",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 6 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok. · 3 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w100: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a100\` and \`sleep 9; echo b100\`. Then reply with the single word ok. · 3 steps
-SUMMARY Interrupted · 復ログイン 🚀 テスト確認 ✅ 文字幅 w140: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a140\` and \`sleep 9; echo b140\`. Then reply with the single word ok. · 2 steps
-SUMMARY Done · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w40: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a40\` and \`cat /tmp/tw/fifo-b40\`. Then reply with the single word ok. · 2 steps
-SUMMARY Done · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w65: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a65\` and \`cat /tmp/tw/fifo-b65\`. Then reply with the single word ok. · 2 steps
-LIVE 1 running · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w100: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a100\` and \`cat /tmp/tw/fifo-b100\`. Then reply with the single word ok.",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 6 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok. · 3 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w100: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a100\` and \`sleep 9; echo b100\`. Then reply with the single word ok. · 3 steps
-SUMMARY Interrupted · 復ログイン 🚀 テスト確認 ✅ 文字幅 w140: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a140\` and \`sleep 9; echo b140\`. Then reply with the single word ok. · 2 steps
-SUMMARY Done · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w40: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a40\` and \`cat /tmp/tw/fifo-b40\`. Then reply with the single word ok. · 2 steps
-SUMMARY Done · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w65: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a65\` and \`cat /tmp/tw/fifo-b65\`. Then reply with the single word ok. · 2 steps
-LIVE working · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w100: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a100\` and \`cat /tmp/tw/fifo-b100\`. Then reply with the single word ok.",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 6 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok. · 3 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w100: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a100\` and \`sleep 9; echo b100\`. Then reply with the single word ok. · 3 steps
-SUMMARY Interrupted · 復ログイン 🚀 テスト確認 ✅ 文字幅 w140: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a140\` and \`sleep 9; echo b140\`. Then reply with the single word ok. · 2 steps
-SUMMARY Done · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w40: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a40\` and \`cat /tmp/tw/fifo-b40\`. Then reply with the single word ok. · 2 steps
-SUMMARY Done · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w65: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a65\` and \`cat /tmp/tw/fifo-b65\`. Then reply with the single word ok. · 2 steps
-SUMMARY Done · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w100: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a100\` and \`cat /tmp/tw/fifo-b100\`. Then reply with the single word ok. · 2 steps",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 6 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok. · 3 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w100: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a100\` and \`sleep 9; echo b100\`. Then reply with the single word ok. · 3 steps
-SUMMARY Interrupted · 復ログイン 🚀 テスト確認 ✅ 文字幅 w140: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a140\` and \`sleep 9; echo b140\`. Then reply with the single word ok. · 2 steps
-SUMMARY Done · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w40: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a40\` and \`cat /tmp/tw/fifo-b40\`. Then reply with the single word ok. · 2 steps
-SUMMARY Done · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w65: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a65\` and \`cat /tmp/tw/fifo-b65\`. Then reply with the single word ok. · 2 steps
-SUMMARY Done · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w100: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a100\` and \`cat /tmp/tw/fifo-b100\`. Then reply with the single word ok. · 2 steps
-LIVE working · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w140: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a140\` and \`cat /tmp/tw/fifo-b140\`. Then reply with the single word ok.",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 6 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok. · 3 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w100: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a100\` and \`sleep 9; echo b100\`. Then reply with the single word ok. · 3 steps
-SUMMARY Interrupted · 復ログイン 🚀 テスト確認 ✅ 文字幅 w140: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a140\` and \`sleep 9; echo b140\`. Then reply with the single word ok. · 2 steps
-SUMMARY Done · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w40: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a40\` and \`cat /tmp/tw/fifo-b40\`. Then reply with the single word ok. · 2 steps
-SUMMARY Done · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w65: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a65\` and \`cat /tmp/tw/fifo-b65\`. Then reply with the single word ok. · 2 steps
-SUMMARY Done · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w100: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a100\` and \`cat /tmp/tw/fifo-b100\`. Then reply with the single word ok. · 2 steps
-LIVE 1 running · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w140: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a140\` and \`cat /tmp/tw/fifo-b140\`. Then reply with the single word ok.",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 6 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok. · 3 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w100: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a100\` and \`sleep 9; echo b100\`. Then reply with the single word ok. · 3 steps
-SUMMARY Interrupted · 復ログイン 🚀 テスト確認 ✅ 文字幅 w140: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a140\` and \`sleep 9; echo b140\`. Then reply with the single word ok. · 2 steps
-SUMMARY Done · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w40: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a40\` and \`cat /tmp/tw/fifo-b40\`. Then reply with the single word ok. · 2 steps
-SUMMARY Done · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w65: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a65\` and \`cat /tmp/tw/fifo-b65\`. Then reply with the single word ok. · 2 steps
-SUMMARY Done · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w100: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a100\` and \`cat /tmp/tw/fifo-b100\`. Then reply with the single word ok. · 2 steps
-LIVE 2 running · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w140: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a140\` and \`cat /tmp/tw/fifo-b140\`. Then reply with the single word ok.",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 6 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok. · 3 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w100: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a100\` and \`sleep 9; echo b100\`. Then reply with the single word ok. · 3 steps
-SUMMARY Interrupted · 復ログイン 🚀 テスト確認 ✅ 文字幅 w140: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a140\` and \`sleep 9; echo b140\`. Then reply with the single word ok. · 2 steps
-SUMMARY Done · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w40: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a40\` and \`cat /tmp/tw/fifo-b40\`. Then reply with the single word ok. · 2 steps
-SUMMARY Done · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w65: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a65\` and \`cat /tmp/tw/fifo-b65\`. Then reply with the single word ok. · 2 steps
-SUMMARY Done · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w100: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a100\` and \`cat /tmp/tw/fifo-b100\`. Then reply with the single word ok. · 2 steps
-LIVE 1 running · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w140: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a140\` and \`cat /tmp/tw/fifo-b140\`. Then reply with the single word ok.",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 6 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok. · 3 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w100: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a100\` and \`sleep 9; echo b100\`. Then reply with the single word ok. · 3 steps
-SUMMARY Interrupted · 復ログイン 🚀 テスト確認 ✅ 文字幅 w140: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a140\` and \`sleep 9; echo b140\`. Then reply with the single word ok. · 2 steps
-SUMMARY Done · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w40: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a40\` and \`cat /tmp/tw/fifo-b40\`. Then reply with the single word ok. · 2 steps
-SUMMARY Done · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w65: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a65\` and \`cat /tmp/tw/fifo-b65\`. Then reply with the single word ok. · 2 steps
-SUMMARY Done · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w100: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a100\` and \`cat /tmp/tw/fifo-b100\`. Then reply with the single word ok. · 2 steps
-LIVE working · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w140: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a140\` and \`cat /tmp/tw/fifo-b140\`. Then reply with the single word ok.",
-  "SUMMARY Done · テスト 🚀 live: first call TaskManage to create one in_progress task with one question, then run bash sleep 8 then echo z. Reply ok. · 2 steps
-SUMMARY Done · 再テスト 🚀: run bash sleep 6 then echo y (task 1 is active already). Reply ok. · 1 step
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w40: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a40\` and \`sleep 9; echo b40\`. Then reply with the single word ok. · 6 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w65: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a65\` and \`sleep 9; echo b65\`. Then reply with the single word ok. · 3 steps
-SUMMARY Done · 復ログイン 🚀 テスト確認 ✅ 文字幅 w100: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a100\` and \`sleep 9; echo b100\`. Then reply with the single word ok. · 3 steps
-SUMMARY Interrupted · 復ログイン 🚀 テスト確認 ✅ 文字幅 w140: if no task is in_progress, first create one with TaskManage (status in_progress, one question). Then run these two bash commands in parallel as two separate tool calls: \`sleep 7; echo a140\` and \`sleep 9; echo b140\`. Then reply with the single word ok. · 2 steps
-SUMMARY Done · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w40: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a40\` and \`cat /tmp/tw/fifo-b40\`. Then reply with the single word ok. · 2 steps
-SUMMARY Done · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w65: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a65\` and \`cat /tmp/tw/fifo-b65\`. Then reply with the single word ok. · 2 steps
-SUMMARY Done · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w100: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a100\` and \`cat /tmp/tw/fifo-b100\`. Then reply with the single word ok. · 2 steps
-SUMMARY Interrupted · 修復ログイン 🚀 テスト確認 ✅ 文字幅 w140: run these two bash commands in parallel as two separate tool calls in one message, with no other tools: \`cat /tmp/tw/fifo-a140\` and \`cat /tmp/tw/fifo-b140\`. Then reply with the single word ok. · 2 steps",
+  "LIVE working",
+  "LIVE 1 running · Tasks 1 op",
+  "LIVE working · Tasks 1 op",
+  "LIVE 1 running · sleep 8 && echo z",
+  "LIVE working · sleep 8 && echo z",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+LIVE working",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+LIVE 1 running · sleep 6 && echo y",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+LIVE working · sleep 6 && echo y",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+LIVE working",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+LIVE 1 running · Tasks 1 op",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+LIVE working · Tasks 1 op",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+LIVE 1 running · sleep 7; echo a40",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+LIVE working · sleep 7; echo a40",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+LIVE 1 running · sleep 9; echo b40",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+LIVE working · sleep 9; echo b40",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+LIVE 1 running · Tasks 1 op",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+LIVE working · Tasks 1 op",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+LIVE 1 running · sleep 7; echo a40",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+LIVE working · sleep 7; echo a40",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+LIVE 1 running · sleep 9; echo b40",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+LIVE working · sleep 9; echo b40",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+SUMMARY Done · sleep 9; echo b40 · 6 steps",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+SUMMARY Done · sleep 9; echo b40 · 6 steps
+LIVE working",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+SUMMARY Done · sleep 9; echo b40 · 6 steps
+LIVE 1 running · Tasks 1 op",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+SUMMARY Done · sleep 9; echo b40 · 6 steps
+LIVE working · Tasks 1 op",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+SUMMARY Done · sleep 9; echo b40 · 6 steps
+LIVE 1 running · sleep 7; echo a65",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+SUMMARY Done · sleep 9; echo b40 · 6 steps
+LIVE working · sleep 7; echo a65",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+SUMMARY Done · sleep 9; echo b40 · 6 steps
+LIVE 1 running · sleep 9; echo b65",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+SUMMARY Done · sleep 9; echo b40 · 6 steps
+LIVE working · sleep 9; echo b65",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+SUMMARY Done · sleep 9; echo b40 · 6 steps
+SUMMARY Done · sleep 9; echo b65 · 3 steps",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+SUMMARY Done · sleep 9; echo b40 · 6 steps
+SUMMARY Done · sleep 9; echo b65 · 3 steps
+LIVE working",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+SUMMARY Done · sleep 9; echo b40 · 6 steps
+SUMMARY Done · sleep 9; echo b65 · 3 steps
+LIVE 1 running · Tasks 1 op",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+SUMMARY Done · sleep 9; echo b40 · 6 steps
+SUMMARY Done · sleep 9; echo b65 · 3 steps
+LIVE working · Tasks 1 op",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+SUMMARY Done · sleep 9; echo b40 · 6 steps
+SUMMARY Done · sleep 9; echo b65 · 3 steps
+LIVE 1 running · sleep 7; echo a100",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+SUMMARY Done · sleep 9; echo b40 · 6 steps
+SUMMARY Done · sleep 9; echo b65 · 3 steps
+LIVE working · sleep 7; echo a100",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+SUMMARY Done · sleep 9; echo b40 · 6 steps
+SUMMARY Done · sleep 9; echo b65 · 3 steps
+LIVE 1 running · sleep 9; echo b100",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+SUMMARY Done · sleep 9; echo b40 · 6 steps
+SUMMARY Done · sleep 9; echo b65 · 3 steps
+LIVE working · sleep 9; echo b100",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+SUMMARY Done · sleep 9; echo b40 · 6 steps
+SUMMARY Done · sleep 9; echo b65 · 3 steps
+SUMMARY Done · sleep 9; echo b100 · 3 steps",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+SUMMARY Done · sleep 9; echo b40 · 6 steps
+SUMMARY Done · sleep 9; echo b65 · 3 steps
+SUMMARY Done · sleep 9; echo b100 · 3 steps
+LIVE working",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+SUMMARY Done · sleep 9; echo b40 · 6 steps
+SUMMARY Done · sleep 9; echo b65 · 3 steps
+SUMMARY Done · sleep 9; echo b100 · 3 steps
+LIVE 1 running · sleep 7; echo a140",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+SUMMARY Done · sleep 9; echo b40 · 6 steps
+SUMMARY Done · sleep 9; echo b65 · 3 steps
+SUMMARY Done · sleep 9; echo b100 · 3 steps
+LIVE working · sleep 7; echo a140",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+SUMMARY Done · sleep 9; echo b40 · 6 steps
+SUMMARY Done · sleep 9; echo b65 · 3 steps
+SUMMARY Done · sleep 9; echo b100 · 3 steps
+LIVE 1 running · sleep 9; echo b140",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+SUMMARY Done · sleep 9; echo b40 · 6 steps
+SUMMARY Done · sleep 9; echo b65 · 3 steps
+SUMMARY Done · sleep 9; echo b100 · 3 steps
+LIVE working · sleep 9; echo b140",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+SUMMARY Done · sleep 9; echo b40 · 6 steps
+SUMMARY Done · sleep 9; echo b65 · 3 steps
+SUMMARY Done · sleep 9; echo b100 · 3 steps
+SUMMARY Interrupted · sleep 9; echo b140 · 2 steps",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+SUMMARY Done · sleep 9; echo b40 · 6 steps
+SUMMARY Done · sleep 9; echo b65 · 3 steps
+SUMMARY Done · sleep 9; echo b100 · 3 steps
+SUMMARY Interrupted · sleep 9; echo b140 · 2 steps
+LIVE working",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+SUMMARY Done · sleep 9; echo b40 · 6 steps
+SUMMARY Done · sleep 9; echo b65 · 3 steps
+SUMMARY Done · sleep 9; echo b100 · 3 steps
+SUMMARY Interrupted · sleep 9; echo b140 · 2 steps
+LIVE 1 running · cat /tmp/tw/fifo-a40",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+SUMMARY Done · sleep 9; echo b40 · 6 steps
+SUMMARY Done · sleep 9; echo b65 · 3 steps
+SUMMARY Done · sleep 9; echo b100 · 3 steps
+SUMMARY Interrupted · sleep 9; echo b140 · 2 steps
+LIVE 2 running · cat /tmp/tw/fifo-b40",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+SUMMARY Done · sleep 9; echo b40 · 6 steps
+SUMMARY Done · sleep 9; echo b65 · 3 steps
+SUMMARY Done · sleep 9; echo b100 · 3 steps
+SUMMARY Interrupted · sleep 9; echo b140 · 2 steps
+LIVE 1 running · cat /tmp/tw/fifo-b40",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+SUMMARY Done · sleep 9; echo b40 · 6 steps
+SUMMARY Done · sleep 9; echo b65 · 3 steps
+SUMMARY Done · sleep 9; echo b100 · 3 steps
+SUMMARY Interrupted · sleep 9; echo b140 · 2 steps
+LIVE working · cat /tmp/tw/fifo-b40",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+SUMMARY Done · sleep 9; echo b40 · 6 steps
+SUMMARY Done · sleep 9; echo b65 · 3 steps
+SUMMARY Done · sleep 9; echo b100 · 3 steps
+SUMMARY Interrupted · sleep 9; echo b140 · 2 steps
+SUMMARY Done · cat /tmp/tw/fifo-b40 · 2 steps",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+SUMMARY Done · sleep 9; echo b40 · 6 steps
+SUMMARY Done · sleep 9; echo b65 · 3 steps
+SUMMARY Done · sleep 9; echo b100 · 3 steps
+SUMMARY Interrupted · sleep 9; echo b140 · 2 steps
+SUMMARY Done · cat /tmp/tw/fifo-b40 · 2 steps
+LIVE working",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+SUMMARY Done · sleep 9; echo b40 · 6 steps
+SUMMARY Done · sleep 9; echo b65 · 3 steps
+SUMMARY Done · sleep 9; echo b100 · 3 steps
+SUMMARY Interrupted · sleep 9; echo b140 · 2 steps
+SUMMARY Done · cat /tmp/tw/fifo-b40 · 2 steps
+LIVE 1 running · cat /tmp/tw/fifo-a65",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+SUMMARY Done · sleep 9; echo b40 · 6 steps
+SUMMARY Done · sleep 9; echo b65 · 3 steps
+SUMMARY Done · sleep 9; echo b100 · 3 steps
+SUMMARY Interrupted · sleep 9; echo b140 · 2 steps
+SUMMARY Done · cat /tmp/tw/fifo-b40 · 2 steps
+LIVE 2 running · cat /tmp/tw/fifo-b65",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+SUMMARY Done · sleep 9; echo b40 · 6 steps
+SUMMARY Done · sleep 9; echo b65 · 3 steps
+SUMMARY Done · sleep 9; echo b100 · 3 steps
+SUMMARY Interrupted · sleep 9; echo b140 · 2 steps
+SUMMARY Done · cat /tmp/tw/fifo-b40 · 2 steps
+LIVE 1 running · cat /tmp/tw/fifo-b65",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+SUMMARY Done · sleep 9; echo b40 · 6 steps
+SUMMARY Done · sleep 9; echo b65 · 3 steps
+SUMMARY Done · sleep 9; echo b100 · 3 steps
+SUMMARY Interrupted · sleep 9; echo b140 · 2 steps
+SUMMARY Done · cat /tmp/tw/fifo-b40 · 2 steps
+LIVE working · cat /tmp/tw/fifo-b65",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+SUMMARY Done · sleep 9; echo b40 · 6 steps
+SUMMARY Done · sleep 9; echo b65 · 3 steps
+SUMMARY Done · sleep 9; echo b100 · 3 steps
+SUMMARY Interrupted · sleep 9; echo b140 · 2 steps
+SUMMARY Done · cat /tmp/tw/fifo-b40 · 2 steps
+SUMMARY Done · cat /tmp/tw/fifo-b65 · 2 steps",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+SUMMARY Done · sleep 9; echo b40 · 6 steps
+SUMMARY Done · sleep 9; echo b65 · 3 steps
+SUMMARY Done · sleep 9; echo b100 · 3 steps
+SUMMARY Interrupted · sleep 9; echo b140 · 2 steps
+SUMMARY Done · cat /tmp/tw/fifo-b40 · 2 steps
+SUMMARY Done · cat /tmp/tw/fifo-b65 · 2 steps
+LIVE working",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+SUMMARY Done · sleep 9; echo b40 · 6 steps
+SUMMARY Done · sleep 9; echo b65 · 3 steps
+SUMMARY Done · sleep 9; echo b100 · 3 steps
+SUMMARY Interrupted · sleep 9; echo b140 · 2 steps
+SUMMARY Done · cat /tmp/tw/fifo-b40 · 2 steps
+SUMMARY Done · cat /tmp/tw/fifo-b65 · 2 steps
+LIVE 1 running · cat /tmp/tw/fifo-a100",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+SUMMARY Done · sleep 9; echo b40 · 6 steps
+SUMMARY Done · sleep 9; echo b65 · 3 steps
+SUMMARY Done · sleep 9; echo b100 · 3 steps
+SUMMARY Interrupted · sleep 9; echo b140 · 2 steps
+SUMMARY Done · cat /tmp/tw/fifo-b40 · 2 steps
+SUMMARY Done · cat /tmp/tw/fifo-b65 · 2 steps
+LIVE 2 running · cat /tmp/tw/fifo-b100",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+SUMMARY Done · sleep 9; echo b40 · 6 steps
+SUMMARY Done · sleep 9; echo b65 · 3 steps
+SUMMARY Done · sleep 9; echo b100 · 3 steps
+SUMMARY Interrupted · sleep 9; echo b140 · 2 steps
+SUMMARY Done · cat /tmp/tw/fifo-b40 · 2 steps
+SUMMARY Done · cat /tmp/tw/fifo-b65 · 2 steps
+LIVE 1 running · cat /tmp/tw/fifo-b100",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+SUMMARY Done · sleep 9; echo b40 · 6 steps
+SUMMARY Done · sleep 9; echo b65 · 3 steps
+SUMMARY Done · sleep 9; echo b100 · 3 steps
+SUMMARY Interrupted · sleep 9; echo b140 · 2 steps
+SUMMARY Done · cat /tmp/tw/fifo-b40 · 2 steps
+SUMMARY Done · cat /tmp/tw/fifo-b65 · 2 steps
+LIVE working · cat /tmp/tw/fifo-b100",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+SUMMARY Done · sleep 9; echo b40 · 6 steps
+SUMMARY Done · sleep 9; echo b65 · 3 steps
+SUMMARY Done · sleep 9; echo b100 · 3 steps
+SUMMARY Interrupted · sleep 9; echo b140 · 2 steps
+SUMMARY Done · cat /tmp/tw/fifo-b40 · 2 steps
+SUMMARY Done · cat /tmp/tw/fifo-b65 · 2 steps
+SUMMARY Done · cat /tmp/tw/fifo-b100 · 2 steps",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+SUMMARY Done · sleep 9; echo b40 · 6 steps
+SUMMARY Done · sleep 9; echo b65 · 3 steps
+SUMMARY Done · sleep 9; echo b100 · 3 steps
+SUMMARY Interrupted · sleep 9; echo b140 · 2 steps
+SUMMARY Done · cat /tmp/tw/fifo-b40 · 2 steps
+SUMMARY Done · cat /tmp/tw/fifo-b65 · 2 steps
+SUMMARY Done · cat /tmp/tw/fifo-b100 · 2 steps
+LIVE working",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+SUMMARY Done · sleep 9; echo b40 · 6 steps
+SUMMARY Done · sleep 9; echo b65 · 3 steps
+SUMMARY Done · sleep 9; echo b100 · 3 steps
+SUMMARY Interrupted · sleep 9; echo b140 · 2 steps
+SUMMARY Done · cat /tmp/tw/fifo-b40 · 2 steps
+SUMMARY Done · cat /tmp/tw/fifo-b65 · 2 steps
+SUMMARY Done · cat /tmp/tw/fifo-b100 · 2 steps
+LIVE 1 running · cat /tmp/tw/fifo-a140",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+SUMMARY Done · sleep 9; echo b40 · 6 steps
+SUMMARY Done · sleep 9; echo b65 · 3 steps
+SUMMARY Done · sleep 9; echo b100 · 3 steps
+SUMMARY Interrupted · sleep 9; echo b140 · 2 steps
+SUMMARY Done · cat /tmp/tw/fifo-b40 · 2 steps
+SUMMARY Done · cat /tmp/tw/fifo-b65 · 2 steps
+SUMMARY Done · cat /tmp/tw/fifo-b100 · 2 steps
+LIVE 2 running · cat /tmp/tw/fifo-b140",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+SUMMARY Done · sleep 9; echo b40 · 6 steps
+SUMMARY Done · sleep 9; echo b65 · 3 steps
+SUMMARY Done · sleep 9; echo b100 · 3 steps
+SUMMARY Interrupted · sleep 9; echo b140 · 2 steps
+SUMMARY Done · cat /tmp/tw/fifo-b40 · 2 steps
+SUMMARY Done · cat /tmp/tw/fifo-b65 · 2 steps
+SUMMARY Done · cat /tmp/tw/fifo-b100 · 2 steps
+LIVE 1 running · cat /tmp/tw/fifo-b140",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+SUMMARY Done · sleep 9; echo b40 · 6 steps
+SUMMARY Done · sleep 9; echo b65 · 3 steps
+SUMMARY Done · sleep 9; echo b100 · 3 steps
+SUMMARY Interrupted · sleep 9; echo b140 · 2 steps
+SUMMARY Done · cat /tmp/tw/fifo-b40 · 2 steps
+SUMMARY Done · cat /tmp/tw/fifo-b65 · 2 steps
+SUMMARY Done · cat /tmp/tw/fifo-b100 · 2 steps
+LIVE working · cat /tmp/tw/fifo-b140",
+  "SUMMARY Done · sleep 8 && echo z · 2 steps
+SUMMARY Done · sleep 6 && echo y · 1 step
+SUMMARY Done · sleep 9; echo b40 · 6 steps
+SUMMARY Done · sleep 9; echo b65 · 3 steps
+SUMMARY Done · sleep 9; echo b100 · 3 steps
+SUMMARY Interrupted · sleep 9; echo b140 · 2 steps
+SUMMARY Done · cat /tmp/tw/fifo-b40 · 2 steps
+SUMMARY Done · cat /tmp/tw/fifo-b65 · 2 steps
+SUMMARY Done · cat /tmp/tw/fifo-b100 · 2 steps
+SUMMARY Interrupted · cat /tmp/tw/fifo-b140 · 2 steps",
 ]
 `;
 
 exports[`replay through the bridge: emitted TSP frames > 2026-10-18T20-18-16-017Z: the visible work rows after every event match the snapshot 1`] = `
 [
   "",
-  "LIVE working · agent-spill repro: first call TaskManage to create one in_progress task with one question. Then call the Subagent tool once in the foreground with task: reply with the word alpha. Then call the Subagent tool once with run_in_background true and task: reply with the word beta. Then say done.",
-  "LIVE 1 running · agent-spill repro: first call TaskManage to create one in_progress task with one question. Then call the Subagent tool once in the foreground with task: reply with the word alpha. Then call the Subagent tool once with run_in_background true and task: reply with the word beta. Then say done.",
-  "LIVE working · agent-spill repro: first call TaskManage to create one in_progress task with one question. Then call the Subagent tool once in the foreground with task: reply with the word alpha. Then call the Subagent tool once with run_in_background true and task: reply with the word beta. Then say done.",
-  "LIVE 1 running · agent-spill repro: first call TaskManage to create one in_progress task with one question. Then call the Subagent tool once in the foreground with task: reply with the word alpha. Then call the Subagent tool once with run_in_background true and task: reply with the word beta. Then say done.",
-  "LIVE working · agent-spill repro: first call TaskManage to create one in_progress task with one question. Then call the Subagent tool once in the foreground with task: reply with the word alpha. Then call the Subagent tool once with run_in_background true and task: reply with the word beta. Then say done.",
-  "LIVE 1 running · agent-spill repro: first call TaskManage to create one in_progress task with one question. Then call the Subagent tool once in the foreground with task: reply with the word alpha. Then call the Subagent tool once with run_in_background true and task: reply with the word beta. Then say done.",
-  "LIVE working · agent-spill repro: first call TaskManage to create one in_progress task with one question. Then call the Subagent tool once in the foreground with task: reply with the word alpha. Then call the Subagent tool once with run_in_background true and task: reply with the word beta. Then say done.",
-  "SUMMARY Done · agent-spill repro: first call TaskManage to create one in_progress task with one question. Then call the Subagent tool once in the foreground with task: reply with the word alpha. Then call the Subagent tool once with run_in_background true and task: reply with the word beta. Then say done. · 3 steps",
-  "SUMMARY Done · agent-spill repro: first call TaskManage to create one in_progress task with one question. Then call the Subagent tool once in the foreground with task: reply with the word alpha. Then call the Subagent tool once with run_in_background true and task: reply with the word beta. Then say done. · 3 steps
-LIVE working · [agent completed] id=subagent-toolu_01Cm2kDMhAMdWxDuEnbQYnf3 status=failed",
-  "SUMMARY Done · agent-spill repro: first call TaskManage to create one in_progress task with one question. Then call the Subagent tool once in the foreground with task: reply with the word alpha. Then call the Subagent tool once with run_in_background true and task: reply with the word beta. Then say done. · 3 steps
-LIVE 1 running · [agent completed] id=subagent-toolu_01Cm2kDMhAMdWxDuEnbQYnf3 status=failed",
-  "SUMMARY Done · agent-spill repro: first call TaskManage to create one in_progress task with one question. Then call the Subagent tool once in the foreground with task: reply with the word alpha. Then call the Subagent tool once with run_in_background true and task: reply with the word beta. Then say done. · 3 steps
-LIVE working · [agent completed] id=subagent-toolu_01Cm2kDMhAMdWxDuEnbQYnf3 status=failed",
-  "SUMMARY Done · agent-spill repro: first call TaskManage to create one in_progress task with one question. Then call the Subagent tool once in the foreground with task: reply with the word alpha. Then call the Subagent tool once with run_in_background true and task: reply with the word beta. Then say done. · 3 steps
-SUMMARY Done · [agent completed] id=subagent-toolu_01Cm2kDMhAMdWxDuEnbQYnf3 status=failed · 1 step",
+  "LIVE working",
+  "LIVE 1 running · Tasks 1 op",
+  "LIVE working · Tasks 1 op",
+  "LIVE 1 running · Subagent",
+  "LIVE working · Subagent",
+  "LIVE 1 running · Subagent",
+  "LIVE working · Subagent",
+  "SUMMARY Done · Subagent · 3 steps",
+  "SUMMARY Done · Subagent · 3 steps
+LIVE working",
+  "SUMMARY Done · Subagent · 3 steps
+LIVE 1 running · TaskOutput",
+  "SUMMARY Done · Subagent · 3 steps
+LIVE working · TaskOutput",
+  "SUMMARY Done · Subagent · 3 steps
+SUMMARY Done · TaskOutput · 1 step",
 ]
 `;

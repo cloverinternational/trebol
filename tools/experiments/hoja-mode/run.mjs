@@ -72,6 +72,8 @@ for (const scenario of scenarios) {
 		const env = { ...process.env, HOJA_FIXTURE: fixturePath, HOJA_LOG: logPath };
 		delete env.LINEAR_API_URL;
 		delete env.LINEAR_TOKEN;
+		delete env.HOJA_API_URL;
+		delete env.HOJA_TOKEN;
 		const started = Date.now();
 		const child = spawnSync(pi, args, { cwd: repo, env, encoding: "utf8", timeout: 240_000, maxBuffer: 64 * 1024 * 1024 });
 		const seconds = (Date.now() - started) / 1000;

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { TernAskDialog, type AskEventBus, ASK_SUBMIT_ID, ASK_CANCEL_ID } from "../../lib/tern/ask-dialog.ts";
+import { PI_ASK_CSS } from "../../lib/tern/ask-style.ts";
 import { createRemoteAskRuntime, PI_ASK_STARTED_EVENT, PI_ASK_SUBMIT_EVENT, PI_ASK_SUBMIT_RESULT_EVENT, PI_ASK_COMPLETED_EVENT } from "../../../extensions/ask-user/src/remote-ask.ts";
 
 function bus(): AskEventBus & { sent: Array<{ channel: string; data: any }> } {
@@ -336,5 +337,25 @@ describe("TernAskDialog", () => {
 			answers: { scope: { customText: "mine" }, tags: { values: ["a"] } },
 			mode: "submit",
 		});
+	});
+});
+
+// The card's solid fill lives in ask-style.ts and is keyed by the role this dialog emits. The two files are
+// coupled through a CSS attribute selector, which no compiler checks, so the coupling is asserted here; the
+// rendered result is measured by tools/e2e/tern-ask-card-surface.mjs.
+describe("ask card surface", () => {
+	it("paints the role the card really carries, so a rename cannot silently bring the transparency back", () => {
+		const { events, dialog } = setup();
+		events.emit(PI_ASK_STARTED_EVENT, started());
+		const [card] = dialog.nodes();
+		const role = card?.p?.role;
+		expect(role).toBe("pi.ask");
+		expect(PI_ASK_CSS).toContain(`.sf-card[data-role='${role}']`);
+	});
+
+	it("feeds Tern's card token rather than painting a background of its own", () => {
+		expect(PI_ASK_CSS).toMatch(/--sf-card-bg:\s*var\(--card/);
+		// A literal `background:` would outrank a tone fill and hard-code a theme colour.
+		expect(PI_ASK_CSS).not.toMatch(/[^-]background:/);
 	});
 });

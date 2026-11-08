@@ -33,8 +33,11 @@ export interface TernCapabilities {
 export type TspWriter = (data: string) => void;
 
 export function encodeTsp(verb: string, body: unknown): string {
-	const json = JSON.stringify(body);
-	const bytes = new TextEncoder().encode(json).length;
+	return encodeTspJson(verb, JSON.stringify(body));
+}
+
+function encodeTspJson(verb: string, json: string): string {
+	const bytes = utf8Length(json);
 	if (bytes > APC_LIMIT) {
 		throw new RangeError(`TSP ${verb} body is ${bytes} bytes; chunking is not implemented (limit ${APC_LIMIT})`);
 	}
@@ -47,7 +50,8 @@ let chunkCounter = 0;
 // Splits only where the next byte cannot begin a parameter-shaped segment, per transport.md.
 export function encodeTspChunks(verb: string, body: unknown, limit: number = APC_LIMIT): string[] {
 	const json = JSON.stringify(body);
-	if (utf8Length(json) <= limit) return [encodeTsp(verb, body)];
+	// Stringified once: a resumed session's first frame is megabytes, and every pass over it is felt.
+	if (utf8Length(json) <= limit) return [encodeTspJson(verb, json)];
 	const id = `k${++chunkCounter}`;
 	const pieces = splitJson(json, limit);
 	return pieces.map((piece, i) => {
@@ -72,7 +76,20 @@ export function encodeTspBlob(id: string, mime: string, base64: string, limit: n
 }
 
 function utf8Length(s: string): number {
-	return new TextEncoder().encode(s).length;
+	return Buffer.byteLength(s, "utf8");
+}
+
+// UTF-8 size of the code point starting at `i` and how many UTF-16 units it spans, without allocating. A lone
+// surrogate encodes as U+FFFD (3 bytes), as TextEncoder does.
+function codePointBytes(s: string, i: number): [bytes: number, units: number] {
+	const c = s.charCodeAt(i);
+	if (c < 0x80) return [1, 1];
+	if (c < 0x800) return [2, 1];
+	if (c >= 0xd800 && c <= 0xdbff && i + 1 < s.length) {
+		const d = s.charCodeAt(i + 1);
+		if (d >= 0xdc00 && d <= 0xdfff) return [4, 2];
+	}
+	return [3, 1];
 }
 
 // A chunk body must not begin with a parameter-shaped segment (`name=value;`), since the
@@ -93,12 +110,10 @@ function splitJson(json: string, limit: number): string[] {
 		let end = start;
 		let bytes = 0;
 		while (end < json.length) {
-			const cp = json.codePointAt(end) as number;
-			const ch = String.fromCodePoint(cp);
-			const size = utf8Length(ch);
+			const [size, units] = codePointBytes(json, end);
 			if (bytes + size > limit) break;
 			bytes += size;
-			end += ch.length;
+			end += units;
 		}
 		if (end < json.length) {
 			let e = end;
@@ -253,6 +268,8 @@ export function diffChildren(parent: string, prev: TspNode[], next: TspNode[]): 
 		ops.push(["add", child.id, parent, null, child]);
 		order.push(child.id);
 	}
+	// Usually nothing moved; checking that is O(n), while the placement loop below is O(n²) on indexOf.
+	if (order.length === next.length && order.every((id, i) => id === next[i]!.id)) return ops;
 	// Place from the end, so each move's `before` sibling is already final.
 	for (let i = next.length - 1; i >= 0; i -= 1) {
 		const id = next[i]!.id;
@@ -267,6 +284,9 @@ export function diffChildren(parent: string, prev: TspNode[], next: TspNode[]): 
 }
 
 function diffNode(prev: TspNode, next: TspNode): unknown[] {
+	// Projections reuse unchanged subtrees by reference (settled transcript segments), so an identical object
+	// means an identical subtree and costs nothing to diff.
+	if (prev === next) return [];
 	// Compare this node's own kind and props, never the whole subtree: JSON of a
 	// node includes its children, so the old early return re-serialised every
 	// descendant at every level — quadratic in transcript size on every render
@@ -359,13 +379,20 @@ export class TernInlineSurface {
 		this.#opened = false;
 	}
 
+	/** The view the last frame was diffed to (what Tern holds once it applies every sent frame). Test oracle. */
+	get sent(): TspView | null {
+		return this.#sent;
+	}
+
 	#flush(force: boolean): void {
 		if (!this.#pending) return;
 		if (!force && this.#seq - this.#acked >= this.#credits) return;
 		const view = this.#pending;
 		this.#pending = null;
 		const ops = this.#ops(view);
-		if (ops.length === 0) return;
+		// An empty frame still advances the baseline, so the next diff compares against the current objects and
+		// its reference-equality skip applies.
+		if (ops.length === 0) { this.#sent = view; return; }
 		this.#seq += 1;
 		for (const chunk of encodeTspChunks("f", { sf: this.#id, s: this.#seq, ops }, this.#apc)) this.#write(chunk);
 		this.#sent = view;

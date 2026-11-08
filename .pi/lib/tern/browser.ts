@@ -78,6 +78,41 @@ export const TERN_TOOL = {
 	},
 } as const;
 
+/** Everything that needs a signed-in browser. A backend without a browser surface must not
+ *  advertise these: an op that cannot work is worse than an op that is not offered. */
+export const BROWSER_OPS = ["open", "blocks", "goto", "snapshot", "act", "capture"] as const;
+
+/** The pane/tab/terminal half of the contract. A terminal multiplexer can serve this. */
+export const PANE_OPS = ["list", "new_tab", "rename_tab", "close", "split", "focus", "send", "read"] as const;
+
+const PANE_ONLY_DESCRIPTION =
+	"Manage panes, tabs and terminals on this host (no browser surface on this runtime). Panes and tabs: list (tabs and panes you can reach), new_tab (optional cwd absolute directory; answers tab, block), rename_tab (block in a tab you created, name), split (direction right|down, optional block, default this pane; answers the new block), focus (block), close (block you created with new_tab or split; never this pane). Terminals: send (block you created with new_tab or split; text, multi-line allowed and pasted as one unit; enter default true presses Enter after), read (block; answers the terminal's last `lines` lines as text; with `until` it polls until that literal text appears or `timeout` seconds pass, answering matched true|false). Opens and drives terminals only; there is no browser, screenshot or accessibility-tree operation here — those need the native Tern runtime. Typical agent launch: new_tab -> send text 'pi' -> read until a prompt marker -> send the task -> read until done. Only this pane's tab and tabs you created are reachable; send only reaches blocks you created. Commands run with no shell and no arbitrary program.";
+
+/**
+ * The `tern` tool, restricted to `ops`.
+ *
+ * The schema and the dispatcher must agree: offering an op the backend cannot serve is how a
+ * tool ends up "advertised but always failing". With every op this is byte-for-byte the
+ * historical tool; with `PANE_OPS` it is the same tool minus every browser operation.
+ */
+export function ternToolFor(ops: readonly (typeof OPS)[number][] = OPS) {
+	const browser = ops.some((op) => (BROWSER_OPS as readonly string[]).includes(op));
+	return {
+		...TERN_TOOL,
+		description: browser ? TERN_TOOL.description : PANE_ONLY_DESCRIPTION,
+		parameters: {
+			...TERN_TOOL.parameters,
+			properties: { ...TERN_TOOL.parameters.properties, op: { type: "string", enum: [...ops] } },
+		},
+	};
+}
+
+/** True when `op` is something this build offers. Keeps a hand-written call from reaching a
+ *  dispatcher case whose backend is absent. */
+export function offersOp(ops: readonly string[], op: string): boolean {
+	return ops.includes(op);
+}
+
 export type Deps = {
 	paneId: number;
 	owned: Ownership;

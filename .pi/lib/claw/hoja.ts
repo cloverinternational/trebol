@@ -1,29 +1,25 @@
-/** Minimal Hoja (Linear-compatible GraphQL) client for /claw. Endpoint and token are resolved by
- *  resolveHojaUrl/resolveHojaToken below and are never placed in errors, logs or results. Project names
- *  decide the team: every Hoja project belongs to exactly one team, and the assignee must be a member. */
+/** Minimal Hoja (Linear-compatible GraphQL) client for /claw. Credentials are the canonical `HOJA_*` pair
+ *  (`HOJA_TOKEN`, `HOJA_API_URL`); the `LINEAR_*` names are deprecated aliases that are still consulted so
+ *  existing deployments keep working, but they never win over the canonical names. The token is never placed
+ *  in errors, logs or results. Project names decide the team: every Hoja project belongs to exactly one team,
+ *  and the assignee must be a member of that team. */
 export type FetchLike = (url: string, init: { method: string; headers: Record<string, string>; body: string; signal?: AbortSignal; redirect?: "error" }) => Promise<{ status: number; text(): Promise<string> }>;
-/** Only locally authored errors may cross the tool boundary. Never echo server bodies.
- *  `ambiguous` means a write may have been applied even though no usable answer arrived (timeout, dropped connection,
- *  non-200, unreadable body). Only a GraphQL error with no data is a definitive rejection: nothing was committed. */
-export class HojaRequestError extends Error {
-	readonly ambiguous: boolean;
-	constructor(message: string, ambiguous = false) { super(message); this.ambiguous = ambiguous; }
-}
-/** The named project (or its team) could not be resolved. Distinct from an assignee problem so a caller can fall
- *  back to another configured project name without masking a real membership error. */
-export class HojaProjectError extends Error {}
-/** Shared guidance for the two fail-closed errors. Names every accepted variable so a bare install can be fixed
- *  from the message alone, without reading this file. */
-export const HOJA_ENV_HINT =
-	"Set HOJA_API_URL (a GraphQL endpoint such as https://hoja.hoja.work/graphql) and HOJA_TOKEN. " +
-	"HOJA_MCP_URL is also accepted, and its host is used with /graphql. " +
-	"LINEAR_API_URL and LINEAR_TOKEN are honoured as legacy fallbacks.";
-
-/** GraphQL endpoint precedence: explicit option, then HOJA_API_URL, then legacy LINEAR_API_URL, then the host of
- *  HOJA_MCP_URL rewritten to /graphql. There is deliberately no baked-in default: pointing Hoja work at a retired
- *  or guessed host is worse than failing with a message that says what to set. */
-export function resolveHojaUrl(env: Record<string, string | undefined> = process.env, override?: string): string {
-	const direct = override?.trim() || env.HOJA_API_URL?.trim() || env.LINEAR_API_URL?.trim();
+/** Credential names in precedence order: canonical first, deprecated alias second. Only a missing (or blank)
+ *  canonical value falls through to the alias, so a session that exports only `HOJA_*` is never left unconfigured. */
+export const HOJA_TOKEN_VARS = ["HOJA_TOKEN", "LINEAR_TOKEN"] as const;
+export const HOJA_URL_VARS = ["HOJA_API_URL", "LINEAR_API_URL"] as const;
+/** There is deliberately no default endpoint. The former default `https://hoja.clover4.app/graphql` answers
+ *  404 for every path, and the obvious replacement `https://app.hoja.work/graphql` answers 401
+ *  "Authentication required" for a *valid* API token (measured 2026-11-08) — tokens authenticate against the
+ *  tenant host, which is a deployment fact rather than a code constant. An unset URL therefore fails with a
+ *  message naming the variable instead of reaching a host that looks like a credential problem. */
+export const HOJA_ENDPOINT_HINT =
+	"No Hoja endpoint configured. Set HOJA_API_URL (e.g. https://<tenant>.hoja.work/graphql) or HOJA_MCP_URL; " +
+	"LINEAR_API_URL is honoured only as a deprecated alias.";
+/** GraphQL endpoint: explicit option, then HOJA_API_URL / LINEAR_API_URL, then the host of HOJA_MCP_URL rewritten
+ *  to /graphql. Returns "" when nothing is configured so the caller fails closed. */
+export function resolveHojaUrl(env: Env = process.env, override?: string): string {
+	const direct = override?.trim() || credentialValue(HOJA_URL_VARS, env);
 	if (direct) return direct;
 	const mcp = env.HOJA_MCP_URL?.trim();
 	if (!mcp) return "";
@@ -37,11 +33,34 @@ export function resolveHojaUrl(env: Record<string, string | undefined> = process
 		return "";
 	}
 }
-
-/** Token precedence: explicit option, then HOJA_TOKEN, then legacy LINEAR_TOKEN. */
-export function resolveHojaToken(env: Record<string, string | undefined> = process.env, override?: string): string {
-	return override ?? env.HOJA_TOKEN ?? env.LINEAR_TOKEN ?? "";
+/** Token: explicit option, then HOJA_TOKEN, then the deprecated LINEAR_TOKEN. */
+export function resolveHojaToken(env: Env = process.env, override?: string): string {
+	return override ?? credentialValue(HOJA_TOKEN_VARS, env) ?? "";
 }
+/** Names every variable that was consulted, canonical first. The deprecated alias is reported as a fallback
+ *  only, never as the primary credential (issue #415: the message used to name only `LINEAR_TOKEN`). */
+export const MISSING_HOJA_TOKEN =
+	"HOJA_TOKEN is not set (deprecated fallback LINEAR_TOKEN is also unset); Hoja is unavailable";
+type Env = Record<string, string | undefined>;
+/** First non-blank, trimmed value among `names`. A variable exported as an empty string is not a credential, so
+ *  it falls through to the next name instead of authenticating with an empty bearer. */
+export function credentialValue(names: readonly string[], env: Env = process.env): string | undefined {
+	for (const name of names) {
+		const value = env[name]?.trim();
+		if (value) return value;
+	}
+	return undefined;
+}
+/** Only locally authored errors may cross the tool boundary. Never echo server bodies.
+ *  `ambiguous` means a write may have been applied even though no usable answer arrived (timeout, dropped connection,
+ *  non-200, unreadable body). Only a GraphQL error with no data is a definitive rejection: nothing was committed. */
+export class HojaRequestError extends Error {
+	readonly ambiguous: boolean;
+	constructor(message: string, ambiguous = false) { super(message); this.ambiguous = ambiguous; }
+}
+/** The named project (or its team) could not be resolved. Distinct from an assignee problem so a caller can fall
+ *  back to another configured project name without masking a real membership error. */
+export class HojaProjectError extends Error {}
 export type Resolved = {
 	teamId: string; teamKey: string; projectId: string; project: string; assigneeId: string; assignee: string;
 	states: Record<string, string>;
@@ -77,8 +96,10 @@ export class HojaClient {
 	}
 
 	async gql<T>(query: string, variables: Record<string, unknown> = {}): Promise<T> {
-		if (!this.url) throw new HojaRequestError("No Hoja endpoint configured. " + HOJA_ENV_HINT);
-		if (!this.token) throw new HojaRequestError("No Hoja token configured. " + HOJA_ENV_HINT);
+		// Token first: issue #415 pins the "name HOJA_TOKEN before LINEAR_TOKEN" message as the
+		// no-credentials case, so an unset endpoint must not shadow it.
+		if (!this.token) throw new HojaRequestError(MISSING_HOJA_TOKEN);
+		if (!this.url) throw new HojaRequestError(HOJA_ENDPOINT_HINT);
 		const controller = new AbortController();
 		let timer: ReturnType<typeof setTimeout> | undefined;
 		const deadline = new Promise<never>((_, reject) => {

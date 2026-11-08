@@ -1,15 +1,14 @@
 #!/usr/bin/env -S node --experimental-strip-types
 /**
- * Visual harness for the task popover's rows mode, not an assertion test: it drives the real
+ * Visual harness for the transcript task block, not an assertion test: it drives the real
  * PiTernBridge against a seeded `pi-swarm-task-state` entry and writes TSP to its own terminal, so
  * Tern renders the actual tree. Run it inside a Tern pane:
  *
  *   tern new tab --cwd "$PWD" --keep-open -- sh -c 'TERN_TASK_ROWS_DEMO=1 node tools/e2e/tern-task-rows-demo.mjs'
- *   tern ctl css e2e-pin /tmp/pin.css   # pins the hover popover open for the shot
  *   tern ctl shot task-rows
  *
- * The popover is always in the tree and only its visibility is the stylesheet's business, so the
- * pin sheet changes nothing the bridge draws. MODE=list|board|graph picks the layout (default graph).
+ * The rows are the transcript's `tasks-block` above the composer; the composer itself draws no task
+ * state, which is what a tree dump of the composer column shows.
  */
 import { PiTernBridge } from "../../.pi/lib/tern/bridge.ts";
 import { helloQuery, splitInput } from "../../.pi/lib/tern/tsp.ts";

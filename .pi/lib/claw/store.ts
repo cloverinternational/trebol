@@ -1,4 +1,5 @@
-/** File-backed state for /claw. Layout under <workspace>/.swarm/claw:
+/** File-backed state for /claw. Layout under `<PI_SWARM_STATE_DIR>/workspaces/<key>/claw`
+ *  (default `~/.local/state/pi-swarm`), never inside the workspace — see `clawStateDir`:
  *  - runs/<id>.json, runs/<id>.task.md, runs/<id>.events.jsonl (append-only, written by the worker process)
  *  - triggers/<id>.json, requests/<id>.json (clients -> daemon), responses/<id>.json (daemon -> clients)
  *  - inbox.jsonl (append-only, daemon -> orchestrator). Each item carries the `owner` session of the run or trigger it
@@ -13,9 +14,22 @@ import { appendFileSync, closeSync, existsSync, fstatSync, mkdirSync, openSync, 
 import { createHash, randomBytes } from "node:crypto";
 import { join } from "node:path";
 
+import { adoptLegacyDir, workspaceStateDir } from "../state/workspace-state.ts";
 import type { Resolved } from "./hoja.ts";
 import type { ClawGoal, GoalEvent, GoalSpec } from "./goal.ts";
 import type { SourceState } from "./preflight.ts";
+
+/**
+ * Claw's state directory for a workspace. Machine-local (session cursors, daemon lock,
+ * run logs), so it lives under the per-user state root rather than `<workspace>/.swarm/claw`
+ * where it showed up as untracked files in every user's `git status`. The legacy in-repo
+ * directory is adopted once, so in-flight runs and cursors are not orphaned.
+ */
+export function clawStateDir(workspace: string): string {
+  const next = workspaceStateDir(workspace, "claw");
+  adoptLegacyDir(join(workspace, ".swarm", "claw"), next);
+  return next;
+}
 
 /** awaiting_decision: the worker opened its own ask modal and its turn is suspended until a human answers or cancels
  *  in that worker's tab. It is not a report, not a result, and not the terminal `needs_user` outcome (awaiting_user). */
@@ -279,9 +293,9 @@ export class ClawStore {
 		this.noticesPath = join(dir, "notices.jsonl");
 		this.supervisorPath = join(dir, "supervisor.json");
 		this.sessionsDir = join(dir, "sessions");
-		for (const d of [this.runsDir, this.triggersDir, this.requestsDir, this.responsesDir, this.sessionsDir]) mkdirSync(d, { recursive: true });
+		for (const d of [this.runsDir, this.triggersDir, this.requestsDir, this.responsesDir, this.sessionsDir]) mkdirSync(d, { recursive: true, mode: 0o700 });
 	}
-	static forWorkspace(workspace: string): ClawStore { return new ClawStore(join(workspace, ".swarm", "claw")); }
+	static forWorkspace(workspace: string): ClawStore { return new ClawStore(clawStateDir(workspace)); }
 	newId(prefix: "run" | "trg" | "req" | "evt"): string { return `${prefix}-${Date.now().toString(36)}-${randomBytes(3).toString("hex")}`; }
 
 	saveRun(run: Run): Run { run.updatedAt = new Date().toISOString(); writeJson(join(this.runsDir, `${run.id}.json`), run); return run; }

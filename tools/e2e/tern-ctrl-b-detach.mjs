@@ -70,7 +70,7 @@ export default function agentWaitProbe(pi: any) {
   assert.equal(waitResult.wait_status, "backgrounded", "the wait returns instead of staying blocked");
   assert.equal(waitResult.agent.status, "running", "the agent was not cancelled");
   assert.equal(runningWorkSnapshot().find((w) => w.id === waited)?.status, "running", "its item is still live in the store");
-  assert.ok(writes.join("").includes("Background work"), "the bridge draws the background card");
+  assert.ok(writes.join("").includes('"role":"pi.composer.work"'), "the bridge draws the composer's work pulse");
 
   // 2. A foreground Subagent, which used to hold the turn until the worker finished.
   const sub = globalThis.__foregroundSubagent("hold the turn too");
@@ -81,7 +81,7 @@ export default function agentWaitProbe(pi: any) {
   assert.ok(subResult.agent_id, "the envelope names the agent to poll");
   assert.equal(runningWorkSnapshot().find((w) => w.id === subResult.agent_id)?.foreground, false, "the item left the turn");
   const bar = writes.join("");
-  assert.ok(bar.includes('"role":"pi.background.agent"'), "the released subagent is drawn in the bar");
+  assert.ok(bar.includes('"role":"pi.composer.work.count"'), "the pulse counts the released subagent");
 
   // 3. With nothing blocking, the chord is inert: no error, no false "moved" result.
   assert.equal(pressCtrlB(), false, "Ctrl+B reports nothing to move");

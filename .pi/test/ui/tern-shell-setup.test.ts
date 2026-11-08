@@ -10,14 +10,18 @@ const homes: string[] = [];
 async function temp() { const path = await mkdtemp(join(tmpdir(), "trebol-tern-test-")); homes.push(path); return path; }
 afterEach(async () => { for (const path of homes.splice(0)) await rm(path, { recursive: true, force: true }); });
 
-// The dispatch these tests execute must work in both shells the product
-// supports. A missing shell used to surface as "(undefined and string)" from
-// spawnSync's ENOENT result; name the requirement instead, so an environment
-// that lacks zsh (CI installs it) says so.
-const SHELLS = ["bash", "zsh"] as const;
-function requireShells() {
-	const missing = SHELLS.filter((shell) => spawnSync(shell, ["-c", "true"], { stdio: "ignore" }).status !== 0);
-	expect(missing, `${missing.join(", ")} must be installed: the generated dispatch is executed in ${SHELLS.join(" and ")}`).toEqual([]);
+// The dispatch these tests execute must work in both shells the product supports. bash is the one shell every
+// host has, so it is required and always exercised; zsh adds coverage wherever it is installed (CI installs it),
+// so a box without zsh still proves the generated dispatch through bash instead of failing on an environment the
+// reader cannot fix from the test. A missing shell used to surface as "(undefined and string)" from spawnSync's
+// ENOENT result, so a required shell is still named explicitly.
+const REQUIRED_SHELLS = ["bash"] as const;
+const EXTRA_SHELLS = ["zsh"] as const;
+const hasShell = (shell: string) => spawnSync(shell, ["-c", "true"], { stdio: "ignore" }).status === 0;
+function availableShells(): string[] {
+	const missing = REQUIRED_SHELLS.filter((shell) => !hasShell(shell));
+	expect(missing, `${missing.join(", ")} must be installed: the generated dispatch is executed in ${REQUIRED_SHELLS.join(" and ")}`).toEqual([]);
+	return [...REQUIRED_SHELLS, ...EXTRA_SHELLS].filter(hasShell);
 }
 
 describe("shell setup editor", () => {
@@ -92,14 +96,14 @@ describe("shell setup editor", () => {
 		await expect(readFile(join(dot, ".zshrc"))).rejects.toMatchObject({ code: "ENOENT" });
 	});
 
-	it("executes generated dispatch in bash and zsh without recursion or lost flags", async () => {
-		requireShells();
+	it("executes the generated dispatch in bash, and zsh when installed, without recursion or lost flags", async () => {
+		const shells = availableShells();
 		const home = await temp(), dispatch = join(home, "dispatch.sh");
 		await writeFile(dispatch, "pi() { if [[ $# -eq 0 && ${TERM_PROGRAM:-} == tern && -n ${TERN_PANE:-} ]]; then printf TSP; else command pi \"$@\"; fi; }\n");
 		await mkdir(join(home, "bin"));
 		const binary = join(home, "bin", "pi");
 		await writeFile(binary, "#!/bin/sh\nprintf 'NATIVE:%s' \"$*\"\nexit 7\n"); await chmod(binary, 0o755);
-		for (const shell of ["bash", "zsh"] as const) {
+		for (const shell of shells) {
 			const file = join(home, `${shell}.rc`);
 			await writeFile(file, ownedBlock(dispatch));
 			const run = (env: Record<string, string>, cmd: string) => spawnSync(shell, ["-ic", `. '${file}'; ${cmd}`], { encoding: "utf8", env: { ...process.env, PATH: `${join(home, "bin")}:${process.env.PATH}`, TERM_PROGRAM: "other", TERN_PANE: "", ...env } });
@@ -110,8 +114,8 @@ describe("shell setup editor", () => {
 		}
 	});
 
-	it("sources the real dispatcher under bash and zsh and preserves flagged fallback", async () => {
-		requireShells();
+	it("sources the real dispatcher under bash, and zsh when installed, and preserves flagged fallback", async () => {
+		const shells = availableShells();
 		const home = await temp(), repo = join(home, "repo"), dispatch = join(repo, ".pi/config/tern-pi.zsh");
 		await mkdir(join(repo, ".pi/lib/tern"), { recursive: true }); await mkdir(join(repo, ".pi/config"), { recursive: true }); await mkdir(join(home, "bin"));
 		await writeFile(dispatch, await readFile(join(process.cwd(), ".pi/config/tern-pi.zsh")));
@@ -120,7 +124,7 @@ describe("shell setup editor", () => {
 			const path = join(home, "bin", name);
 			await writeFile(path, `#!/bin/sh\nprintf '${contents}:%s' "$*"\nexit 17\n`); await chmod(path, 0o755);
 		}
-		for (const shell of ["bash", "zsh"] as const) {
+		for (const shell of shells) {
 			const file = join(home, `${shell}.rc`); await writeFile(file, ownedBlock(dispatch));
 			const run = (env: Record<string, string>, cmd: string) => spawnSync(shell, ["-ic", `. '${file}'; ${cmd}`], { encoding: "utf8", env: { ...process.env, PATH: `${join(home, "bin")}:${process.env.PATH}`, TERM_PROGRAM: "tern", TERN_PANE: "123", ...env } });
 			expect(run({}, "pi --version").stdout).toContain("NATIVE:--version");

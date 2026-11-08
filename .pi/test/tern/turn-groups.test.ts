@@ -5,7 +5,8 @@ import type { TspNode } from "../../lib/tern/tsp.ts";
 
 const start = (p: TranscriptProjector, toolCallId: string, command = "echo") => p.apply({ type: "tool_execution_start", toolCallId, toolName: "bash", args: { command } });
 // A work group's step heads: one native tool node per tool call, in call order.
-const stepsOf = (group: TspNode | undefined) => (group?.c ?? []).filter((c) => c.k === "tool" && String(c.id).startsWith("t-"));
+const bodyOf = (group: TspNode | undefined) => (group?.c ?? []).find((c) => c.p?.role === "tern.work-body");
+const stepsOf = (group: TspNode | undefined) => (bodyOf(group)?.c ?? []).filter((c) => c.k === "tool" && String(c.id).startsWith("t-"));
 const end = (p: TranscriptProjector, toolCallId: string, isError = false) => p.apply({ type: "tool_execution_end", toolCallId, toolName: "bash", result: { content: [{ type: "text", text: "ok" }], details: { exit_code: 0, duration_ms: 10 } }, isError });
 
 describe("turn grouping (pure)", () => {
@@ -41,20 +42,21 @@ describe("turn grouping in the Tern transcript", () => {
 		// One native head per parallel call, in call order; the finished one carries its duration, the running one its clock.
 		expect(stepsOf(live).map((r) => [r.id, r.p?.status])).toEqual([["t-a", "done"], ["t-b", "running"]]);
 		expect(typeof stepsOf(live)[1]?.p?.age).toBe("number");
-		expect(live.p).toMatchObject({ text: "1 running · fix login" });
+		// The head names the newest running call, not the prompt.
+		expect(live.p).toMatchObject({ text: "1 running · echo", target: "echo" });
 		p.setGroupCollapsed(live.id, true);
 		const folded = p.nodes()[1]!;
 		expect(folded).toMatchObject({ k: "tool", p: { role: "tern.work-live", collapsed: true } });
 		expect(stepsOf(folded).map((r) => r.id)).toEqual(["t-a", "t-b"]);
 	});
 
-	it("collapses a finished turn into one summary holding every step, in order, with the goal", () => {
+	it("collapses a finished turn into one summary holding every step, in order, with the last call", () => {
 		const p = new TranscriptProjector();
 		p.apply({ type: "message_start", message: { role: "user", content: [{ type: "text", text: "fix login" }] } });
 		start(p, "a"); end(p, "a");
 		start(p, "b"); end(p, "b", true);
 		const [summary] = p.nodes().slice(1);
-		expect(summary?.p).toMatchObject({ role: "tern.work", title: "Done", status: "done", target: "fix login", collapsed: true, collapsible: true, meta: ["2 steps"], badges: [{ text: "1 failed", tone: "warning" }, { text: "1 completed", tone: "success" }] });
+		expect(summary?.p).toMatchObject({ role: "tern.work", title: "Done", status: "done", target: "echo", collapsed: true, collapsible: true, meta: ["2 steps"], badges: [{ text: "1 failed", tone: "warning" }] });
 		expect(stepsOf(summary).map((r) => [r.id, r.p?.status])).toEqual([["t-a", "done"], ["t-b", "error"]]);
 	});
 
@@ -66,8 +68,8 @@ describe("turn grouping in the Tern transcript", () => {
 		start(p, "b");
 		const nodes = p.nodes();
 		expect(nodes.filter((n) => n.p?.role === "tern.work" || n.p?.role === "tern.work-live").map((n) => n.p?.role)).toEqual(["tern.work", "tern.work-live"]);
-		expect(nodes.find((n) => n.p?.role === "tern.work")?.p?.target).toBe("first");
-		expect(nodes.find((n) => n.p?.role === "tern.work-live")?.p?.text).toBe("1 running · second");
+		expect(nodes.find((n) => n.p?.role === "tern.work")?.p?.target).toBe("echo");
+		expect(nodes.find((n) => n.p?.role === "tern.work-live")?.p?.text).toBe("1 running · echo");
 	});
 
 	it("an aborted turn reads Interrupted live and on restore, even when every step had finished", () => {
@@ -119,7 +121,7 @@ describe("turn grouping in the Tern transcript", () => {
 			{ id: "r1", type: "message", message: { role: "toolResult", toolCallId: "c1", toolName: "bash", isError: false, content: [{ type: "text", text: "all green" }], details: { exit_code: 0, duration_ms: 300 } } },
 		]);
 		const summary = p.nodes().find((n) => n.p?.role === "tern.work");
-		expect(summary?.p).toMatchObject({ role: "tern.work", title: "Interrupted", status: "cancelled", target: "run tests" });
+		expect(summary?.p).toMatchObject({ role: "tern.work", title: "Interrupted", status: "cancelled", target: "npm run lint" });
 		const restored = stepsOf(summary);
 		expect(restored.map((r) => r.p?.status)).toEqual(["done", "cancelled"]);
 		expect(restored[0]?.p).toMatchObject({ status: "done", took: 300, target: "npm test", targetKind: "command" });

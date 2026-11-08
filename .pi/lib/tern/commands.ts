@@ -44,6 +44,9 @@ export const TERN_BUILTINS: ReadonlySet<string> = new Set(["model", "thinking", 
 export const BRIDGE_COMMANDS: ReadonlyArray<{ name: string; description: string; icon: string }> = [
 	// Opens the same context card as a click on the composer's context meter (context-panel.ts).
 	{ name: "context", description: "Show the context window: used, free, auto-compact room and the parts", icon: "gauge" },
+	// Opens the work sheet. The composer's pulse is the pointer route; this is the keyboard one, and the
+	// only way back to work that has already settled now that the dock carries no recent-work button.
+	{ name: "work", description: "Inspect running and recent background work", icon: "agent" },
 ];
 
 // OMP's slash-command icon names (its builtin table; commands without one fall back to "action").

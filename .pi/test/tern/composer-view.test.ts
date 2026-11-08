@@ -128,3 +128,39 @@ describe("OMP composer fact parity", () => {
 		expect(find(clean, "git").p.tone).toBeUndefined();
 	});
 });
+
+describe("composer running-work pulse", () => {
+	const facts = (over: Record<string, unknown> = {}) => ({ draft: "", busy: false, effortKind: false, ...over });
+
+	it("sits directly after the git facts in the same slot, and costs no space when work is idle", () => {
+		const withWork = composerNodes(facts({
+			git: { branch: "main", staged: 0, unstaged: 1, untracked: 0 },
+			work: { running: 1, queued: 0, newest: "npm test" },
+		}));
+		const extras = find(withWork, "extras");
+		expect(extras.c.map((n: any) => n.id)).toEqual(["git", "work"]);
+		// No work fact, or a phone-width bar, means no node at all — not an empty pulse.
+		expect(find(composerNodes(facts()), "work")).toBeUndefined();
+		expect(find(composerNodes(facts({ work: { running: 1, queued: 0, newest: "x" }, compact: true })), "work")).toBeUndefined();
+	});
+
+	it("shows one counted pulse that Tern clocks, opens the sheet on click, and never floats a card", () => {
+		const nodes = composerNodes(facts({ work: { running: 1, queued: 2, newest: "npm test" } }));
+		const work = find(nodes, "work");
+		expect(work.p).toMatchObject({ role: "pi.composer.work", actions: { click: "bg.open=all" } });
+		// The spinner is Tern's own kind: it is clocked by the host, so Pi sends no frames for it.
+		expect(find(nodes, "work-pulse")).toMatchObject({ k: "spinner", p: { style: "orbit", tone: "info" } });
+		expect(find(nodes, "work-count").p.text).toBe("3");
+		expect(find(nodes, "work-now").p.text).toBe(" · npm test");
+		// The bar's status band clips its own children, so a hover card there could never paint.
+		expect(find(nodes, "work-card")).toBeUndefined();
+		// The pulse carries no per-job rows: the sheet is the only place a list is drawn.
+		expect(work.c.map((n: any) => n.id)).toEqual(["work-pulse", "work-count", "work-now"]);
+	});
+
+	it("draws no name to reveal when the store never published one", () => {
+		const nodes = composerNodes(facts({ work: { running: 2, queued: 0 } }));
+		expect(find(nodes, "work-count").p.text).toBe("2");
+		expect(find(nodes, "work-now")).toBeUndefined();
+	});
+});

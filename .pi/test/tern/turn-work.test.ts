@@ -27,7 +27,8 @@ const cardText = (n: TspNode) => summaryText(
 );
 const cardLine = (n: TspNode) => [cardText(n), ...((n.p?.meta as string[] | undefined) ?? []).slice(1)].join(" · ");
 // The native step heads a work card holds, in call order.
-const stepsOf = (group: TspNode) => (group.c ?? []).filter((n) => n.k === "tool" && String(n.id).startsWith("t-"));
+const bodyOf = (group: TspNode) => (group.c ?? []).find((n) => n.p?.role === "tern.work-body");
+const stepsOf = (group: TspNode) => (bodyOf(group)?.c ?? []).filter((n) => n.k === "tool" && String(n.id).startsWith("t-"));
 const failedBadge = (card: TspNode) => ((card.p?.badges as Array<{ text: string }> | undefined) ?? []).some((b) => / failed$/.test(b.text));
 const workView = (nodes: readonly TspNode[]) => nodes.flatMap((n) =>
 	n.p?.role === "tern.work-live" ? [`LIVE ${String(n.p.text)}`] : n.p?.role === "tern.work" ? [`SUMMARY ${cardLine(n)}`] : []);
@@ -404,7 +405,8 @@ describe("turn-work properties", () => {
 			for (const c of cards) {
 				if (c.p?.title === "Failed") failedTurns++;
 				if (c.p?.title === "Done" && failedBadge(c)) recovered++;
-				narrated += (c.c ?? []).filter((x) => x.k === "md").length;
+				const tree = (c.c ?? []).find((x) => x.p?.role === "tern.work-body");
+				narrated += (tree?.c ?? []).filter((x) => x.k === "md").length;
 			}
 			if (turnsWithWork > outcomes.length) violations.push(`seed ${seed}: ${turnsWithWork} cards for ${outcomes.length} outcomes`);
 		}
@@ -416,7 +418,7 @@ describe("turn-work properties", () => {
 describe("turn line and running-work bar announce each piece of work once", () => {
 	afterEach(() => removeRunningWork("bash-1"));
 
-	it("a foreground call is only on the turn line; once backgrounded it is only in the bar", () => {
+	it("a foreground call is only on the turn line; once backgrounded it is only on the composer pulse", () => {
 		const session = fakeSession();
 		const writes: string[] = [];
 		const bridge = new PiTernBridge(session, { write: (d) => writes.push(d), surfaceId: "pi", credits: 1_000_000 });
@@ -426,7 +428,9 @@ describe("turn line and running-work bar announce each piece of work once", () =
 			const main = applyFrames(writes, state);
 			return {
 				line: main.filter((n) => n.p?.role === "tern.work-live").map((n) => String(n.p?.text)),
-				bar: [...state.nodes.values()].filter((n) => n.parent === "background-work").map((n) => n.id),
+				// The dock carries no work card any more: one pulse, and the jobs listed inside its hover card.
+				count: (state.nodes.get("work-count") as { p?: { text?: unknown } } | undefined)?.p?.text ?? null,
+				named: (state.nodes.get("work-now") as { p?: { text?: unknown } } | undefined)?.p?.text ?? null,
 			};
 		};
 		session.emit({ type: "agent_start" });
@@ -434,12 +438,13 @@ describe("turn line and running-work bar announce each piece of work once", () =
 		session.emit({ type: "tool_execution_start", toolCallId: "c1", toolName: "Bash", args: { command: "make" } });
 		// Bash registers foreground work in the shared store as it starts (swarm-bgprocess.ts).
 		setRunningWork({ id: "bash-1", kind: "bash", label: "make", status: "running", startedAt: Date.now(), detail: "", foreground: true });
-		expect(view()).toEqual({ line: ["1 running · build"], bar: [] });
+		expect(view()).toEqual({ line: ["1 running · make"], count: null, named: null });
 
 		// Ctrl+B / auto-background: the call returns, so the turn line no longer counts it, and the bar shows it.
 		patchRunningWork("bash-1", { foreground: false });
 		session.emit({ type: "tool_execution_end", toolCallId: "c1", toolName: "Bash", result: { content: [{ type: "text", text: "moved to background" }] }, isError: false });
-		expect(view()).toEqual({ line: ["working · build"], bar: ["bg-work-bash-1-line", "bg-work-more"] });
+		// This fixture's store item has an empty detail, so the pulse counts it and invents no name for it.
+		expect(view()).toEqual({ line: ["working · make"], count: "1", named: null });
 		bridge.close?.();
 	});
 });
@@ -484,31 +489,26 @@ describe("expansion", () => {
 		running.apply({ type: "tool_execution_start", toolCallId: "a", toolName: "bash", args: { command: "x" } });
 		running.apply({ type: "message_start", message: { role: "assistant", content: [] } });
 		running.apply({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "Now checking the\nbuild log" } });
-		// Open by default: the activity panel, with no narration tail (the tail belongs to a folded card).
+		// Open by default, with no narration tail (the tail belongs to a folded card).
 		const open1 = running.nodes(false).slice(1);
-		expect(open1.map((n) => [n.k, n.p?.role, n.p?.status, n.p?.collapsed, n.p?.text])).toEqual([["tool", "tern.work-live", "running", false, "1 running · go"]]);
+		expect(open1.map((n) => [n.k, n.p?.role, n.p?.status, n.p?.collapsed, n.p?.text])).toEqual([["tool", "tern.work-live", "running", false, "1 running · x"]]);
 		// Folded by the user: the same card with every step and its narration as children, plus the streaming tail.
 		running.setGroupCollapsed("g-t-a", true);
 		const folded2 = running.nodes(false).slice(1);
 		expect(folded2.map((n) => [n.k, n.p?.role, n.p?.status, n.p?.collapsed, n.p?.text])).toEqual([
-			["tool", "tern.work-live", "running", true, "1 running · go"],
+			["tool", "tern.work-live", "running", true, "1 running · x"],
 			["text", "tern.work-tail", undefined, undefined, "build log"],
 		]);
-		expect(folded2[0]!.c?.map((c) => c.id)).toEqual(["g-t-a-controls", "g-t-a-explore", "t-a", "m2-note"]);
+		expect(folded2[0]!.c?.map((c) => c.id)).toEqual(["g-t-a-body"]);
+		expect(bodyOf(folded2[0]!)?.c?.map((c) => c.id)).toEqual(["t-a", "m2-note", "g-t-a-inspect"]);
 		// Ctrl+O clears local folds: the same card (id and key) opens in place in All steps, narration inside, no tail.
 		running.clearGroupViews();
 		const open2 = running.nodes(true).slice(1);
 		expect(open2.map((n) => [n.id, n.k, n.p?.role, n.p?.status, n.p?.collapsed, n.p?.key])).toEqual([[folded2[0]!.id, "tool", "tern.work-live", "running", false, folded2[0]!.id]]);
-		expect(open2[0]!.c?.map((c) => [c.k, c.p?.role, c.p?.text])).toEqual([
-			["row", "tern.work-controls", undefined],
-			["row", "pi.work.explore", undefined],
+		expect(bodyOf(open2[0]!)?.c?.map((c) => [c.k, c.p?.role, c.p?.text])).toEqual([
 			["tool", "omp.tool.bash", undefined],
 			["md", "tern.work-note", "Now checking the\nbuild log"],
-		]);
-		// The chips are one row: Activity, then Collapse work.
-		expect(open2[0]!.c![0]!.c?.map((chip) => [chip.p?.role, chip.p?.text])).toEqual([
-			["tern.work-mode", "Activity"],
-			["tern.work-collapse", "Collapse work"],
+			["text", "tern.work-inspect", "Inspect steps"],
 		]);
 		running.apply({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: " now" } });
 		running.setGroupCollapsed("g-t-a", true);

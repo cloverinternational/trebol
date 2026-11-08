@@ -133,7 +133,9 @@ export function footerIdentityLine(state: "running" | "idle", model?: string): s
 }
 
 export function footerMetricsLine(walltime: string, outputTokens: number, segments: readonly string[] = []): string {
-  return [walltime, `↓ ${outputTokens.toLocaleString()} tok`, ...segments].filter(Boolean).join("  ·  ");
+  // Pinned to en-US like every other Tern surface (session-tree, context-panel): a bare toLocaleString() grouped
+  // the count by the host locale, so the same footer read "1,234" under en-US and "1234" under es_ES.
+  return [walltime, `↓ ${outputTokens.toLocaleString("en-US")} tok`, ...segments].filter(Boolean).join("  ·  ");
 }
 
 /** The work shortcut advertises live tasks; completed work remains available via /work. */

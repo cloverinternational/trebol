@@ -1,4 +1,4 @@
-// Pure, factual one-line summaries of tool steps and the live activity view. No TUI or I/O imports.
+// Pure, factual one-line summaries of tool steps. No TUI or I/O imports.
 // Only recognized argument keys are read, targets are bounded to one line, and unknown tools keep their names.
 
 export interface WorkStep {
@@ -10,8 +10,6 @@ export interface WorkStep {
 	timedOut?: boolean;
 	exit?: number;
 	took?: number;
-	// Completion order among finished steps (1-based). "Latest" means last to finish, not last called.
-	doneSeq?: number;
 }
 
 export type WorkTone = "pending" | "success" | "error" | "warning" | "muted";
@@ -30,8 +28,7 @@ export interface CurrentTask {
 }
 
 const MAX_TARGET = 80;
-const MAX_ACTIVE = 3;
-const MAX_REQUEST = 120;
+const MAX_CALL_LABEL = 400;
 const MAX_PATCH_FILES = 2;
 
 const oneLine = (text: string, max: number): string => {
@@ -174,8 +171,27 @@ export function stepHead(name: string | undefined, args: unknown): StepHead {
 	};
 }
 
-/** The running steps' slice the compact activity panel shows. */
-export const MAX_ACTIVE_STEPS = MAX_ACTIVE;
+/**
+ * What a Bash call reads as in its row and in the card head: the model's description, else the caller's name,
+ * else the command itself. Bounded, because both places draw one line; the exact command stays copyable.
+ */
+export function bashLabel(args: unknown): string | undefined {
+	const description = rawArg(args, "description")?.trim();
+	if (description) return oneLine(description, MAX_CALL_LABEL);
+	const name = rawArg(args, "name")?.trim();
+	if (name) return oneLine(name, MAX_CALL_LABEL);
+	const command = rawArg(args, "command");
+	if (command === undefined || !command.trim()) return undefined;
+	return oneLine(command, MAX_CALL_LABEL);
+}
+
+/** The one-line label a card head can carry for a tool call; a tool with no safe target keeps its own name. */
+export function toolCallLabel(name: string | undefined, args: unknown): string | undefined {
+	if (name === "bash" || name === "Bash") return bashLabel(args);
+	const head = stepHead(name, args);
+	if (head.target === undefined) return head.verb;
+	return `${head.verb} ${head.target}`;
+}
 
 const formatMs = (ms: number): string => (ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`);
 
@@ -204,50 +220,7 @@ export function summarizeWorkStep(step: WorkStep): WorkRow {
 	};
 }
 
-// The activity view's heading: the current task when one is known, else the bounded request. The turn card's head
-// already shows the request, so its body does not repeat it; the pure view keeps it for non-card consumers.
-function focusHeading(task: CurrentTask | undefined, request?: string): string | undefined {
-	if (task) return currentTaskLine(task);
-	return request?.trim() ? `Request · ${oneLine(request, MAX_REQUEST)}` : undefined;
-}
-
 /** The authoritative current task, labelled as such. Callers pass it only for the active work group. */
 export function currentTaskLine(task: CurrentTask): string {
 	return `Current task · #${task.id} ${oneLine(task.subject, 120)}`;
-}
-
-/** A row as one line of text: "Run · Build · Failed · exit 1". */
-export function rowLine(row: WorkRow): string {
-	return [row.label, row.target, row.result].filter((part): part is string => part !== undefined && part !== "").join(" · ");
-}
-
-export interface ActivityView {
-	/** Authoritative current task, else the bounded user request. Never an invented title. */
-	heading?: string;
-	/** Up to three running steps, in call order. */
-	active: WorkRow[];
-	/** Running steps beyond the shown three. */
-	moreActive: number;
-	/** The step that finished most recently, by completion order. */
-	latest?: WorkRow;
-	/** Persistent: every failed step so far, with the most recent failure named. */
-	failed?: { count: number; last: WorkRow };
-}
-
-/** Projects the live group's steps (given in call order) into the bounded activity panel. */
-export function activityView(steps: readonly WorkStep[], task?: CurrentTask, request?: string): ActivityView {
-	const running = steps.filter((step) => step.status === "running");
-	const shown = running.slice(0, MAX_ACTIVE).map(summarizeWorkStep);
-	const finished = steps.filter((step) => step.status !== "running" && step.cancelled !== true && step.doneSeq !== undefined);
-	const lastDone = finished.reduce<WorkStep | undefined>((best, step) => (best === undefined || step.doneSeq! > best.doneSeq! ? step : best), undefined);
-	const failures = steps.filter((step) => step.status === "error" && step.cancelled !== true);
-	const lastFailure = failures.reduce<WorkStep | undefined>((best, step) => (best === undefined || (step.doneSeq ?? 0) > (best.doneSeq ?? 0) ? step : best), undefined);
-	const heading = focusHeading(task, request);
-	return {
-		...(heading !== undefined ? { heading } : {}),
-		active: shown,
-		moreActive: running.length - shown.length,
-		...(lastDone ? { latest: summarizeWorkStep(lastDone) } : {}),
-		...(lastFailure ? { failed: { count: failures.length, last: summarizeWorkStep(lastFailure) } } : {}),
-	};
 }

@@ -26,23 +26,34 @@ published API is already available locally.
 Background commands and agents use `background-panel.ts` for a unified native
 manager and `background-format.ts` for bounded presentation: safe ANSI, complete
 JSON formatting, diagnostic badges and stable-ID visible agent messages/tool
-results. The live shelf distinguishes queued/running, links to all work and
-retains access to recent work for 15 minutes while the runtime still tracks it.
+results. The dock carries no work card: the composer bar holds one pulse
+(`composer-view.ts` `workChip`) — a Tern-clocked `spinner`, the live count, and the
+newest job's name revealed on hover/focus — which opens the work sheet on click
+and disappears the moment nothing is live. The status band clips its own children,
+so never put a floating panel in the bar; the list belongs in that sheet. Finished
+work stays readable there for 15 minutes while the runtime still tracks it, reached
+by clicking the pulse or typing `/work`, never as a standing composer row.
 Follow live/Pause viewing affects only the display. Stop requests are single-flight
 and do not claim cancellation before runtime settlement. Agent reasoning is not
 projected. Raw text is sanitized, not a byte-for-byte terminal escape replay.
-Tests: background-panel, dock, background-button under `.pi/test/tern/`.
+Tests: background-panel, dock, composer-view, background-button under `.pi/test/tern/`.
 Native fixture harness: `node tools/e2e/tern-background-manager.mjs`.
+Rendered-box measurement (real `tern serve`, not our own CSS):
+`node tools/e2e/tern-composer-work-chip.mjs`.
 
-Tern work groups offer All / Active / Failed filters and Search & inspect.
-`work-inspector.ts` provides pure counts/filtering and a native selected-step
-overlay; `bridge.ts` keeps per-group disclosure/filter state through streaming
-and settlement. Headers retain failure/completion/cancellation counts, and a
-collapsed live group can show the current action when no narration tail exists.
-The inspector searches safe step summaries, shows bounded captured output with
-explicit truncation, and reveals the original step without globally expanding
-other groups. It neither retries nor cancels operations. Raw/native input is
-isolated from the composer, and session replacement drops the inspector.
+Tern work groups show their steps as one tree with exactly **one** affordance, a
+quiet `Inspect steps` line (`tern.work-inspect`) that opens the step overlay.
+The card itself carries no filter, fold or mode buttons: the native head chevron
+and head click fold it, Ctrl+O opens every step, and `/work` opens the work
+sheet. `work-inspector.ts` provides the overlay's All / Active / Failed filters,
+search and selected-step detail; `bridge.ts` keeps only the group fold through
+streaming and settlement. Headers retain failure and cancellation badges (never
+a "completed" count that repeats `Done`), and a collapsed live group can show
+the current action when no narration tail exists. The inspector searches safe
+step summaries, shows bounded captured output with explicit truncation, and
+reveals the original step without globally expanding other groups. It neither
+retries nor cancels operations. Raw/native input is isolated from the composer,
+and session replacement drops the inspector.
 Tests: `.pi/test/tern/work-inspector.test.ts` plus work-table, turn-work and
 turn-groups. Runner changes require restarting the pane.
 
@@ -129,6 +140,7 @@ path, and preserve native tools and unrelated extensions while disabled.
 | `tools/experiments/bootstrap-agent/` | Opt-in bootstrap experiments; `planning-contract.mjs` provides experimental prompt variants and strict plan validation. Private history replays stay in ignored artifacts; planning scores do not prove execution or memory retrieval. |
 | `tools/integration/` | Postgres integration runner and cache dogfood. |
 | `tools/install/` | `doctor.mjs`: global-install health check (`npm run doctor`). |
+| `tools/docs/` | Diagram generators, never hand-drawn assets. `runtime-state-diagram.mjs <out.svg>` emits `docs/architecture/runtime-state-relocation.svg` and exits non-zero on text overflow, on a rect that paint order puts over earlier text, or on contrast below WCAG AA. `tests/runtime-state-diagram.test.ts` regenerates and byte-compares the committed file, matches its env names and paths against `stateRoot`/`workspaceKey`/`clawStateDir`, and rejects any `.swarm` destination outside the known legacy/input set. Regenerate instead of editing the SVG. |
 | `tools/repo/` | Repository maintenance: `rewrite-imports.mjs` re-targets relative specifiers after moves and has a `--check` mode; `check-tracked-symlinks.mjs` fails on a tracked symlink that escapes the checkout (`npm run check:symlinks`); `link-node-modules.mjs` is the opt-in, per-worktree, relative dependency sharing helper. |
 | `docs/architecture/` | Living design descriptions. |
 | `docs/reference/` | Contracts, inventories, and operational references. |
@@ -338,13 +350,13 @@ belongs in `packages/policy/policy`, and rendering belongs in the extension/rend
 | `memory_history recall` | `extensions/memory-history/extension.ts` | `.pi/lib/context/knowledge-pageindex.ts` projects scoped records into read-only PageIndex sections; `.pi/lib/context/memory-agent.ts` calls an isolated Pi model whose only tools are `memory_browse`, `memory_read`, and `memory_select` from `.pi/lib/state/memory-retrieval-worker.ts`. The parent validates selected IDs against its snapshot. Candidate results are leads, never verified recall; writes still use explicit store operations. |
 | `memory_history offer` | `extensions/memory-history/extension.ts` | `.pi/lib/context/memory-handoff.ts` accepts bounded explicit text, source and evidence; tool-less Pi consultation judges durable project knowledge, then the parent writes only a candidate through `KnowledgeStore`. A content/source-derived ID deduplicates retries. A read-only PageIndex projection acknowledges the exact saved revision as `stored-indexed`, otherwise `stored-index-pending` with a retry hint. No global or verified write. |
 | `project_init`, `/init` | `extensions/project-init/extension.ts` | `.pi/lib/policy/project-scaffold.ts`, `.pi/lib/policy/project-structure.ts`. `/init` injects an interview brief via `sendUserMessage`; the agent interviews with `ask_user_question` and calls `project_init` (`inspect`/`plan`/`apply`). There is no modal wizard. `apply` never clobbers existing files. Like `memory_history`, this is an intentional model-facing extension tool, so `swarmSurfaceFor` must keep `project_init` on the surface — otherwise it registers but is gated out and the agent reports it as missing. |
-| `hoja_list`, `hoja_get`, `hoja_project`; `/hoja on\|off\|status`; automatic TaskManage → Hoja publication | `extensions/hoja-mode/extension.ts` (on by default) | `extensions/hoja-mode/publish.ts` decides from the TaskManage result what is coarse enough to publish (top-level task, or `metadata.hoja:"publish"`; `metadata.hoja:"local"` stays local), reuses a named issue (`metadata.hojaIssue`) without writing to it, resolves the project from declarations — `metadata.hojaProject`, then the chat's target (a `hoja_project` selection, or the host option), then the repository's `.pi/config/hoja.json`, then `HOJA_PROJECT` — never from the workspace directory name, and an agent-named project that does not exist falls back to the repository project with `substitutedFrom` recorded instead of failing the registration; `hoja_project` `action=list` reads the real catalogue including empty projects (`hoja_list` only lists issues), `action=select` remembers an exact project per chat, and `action=create` creates one in an exact team after a host confirmation that shows name and team, journaling the attempt before the request and reconciling it by exact name and team. It writes through the shared client in `.pi/lib/claw/hoja.ts` (`createIssue` with `parentId`, `findIssueByIdentifier`, read-back with `Issue.parent`). Associations are journaled as `hoja-task-link` entries and replayed per chat. The pre-write intent is journaled *before* the create request, and any unconfirmed write stays `reconciling` with a description marker; `findIssueByMarker` plus a read-back that proves marker, project and parent is the only way one is adopted, so a marker miss is never retried as a create. A promoted child is deferred (`parent_unpublished`) unless its parent already has an issue. Batches are serialized per session and a generation guard stops an in-flight batch after `/hoja off`, a chat switch or shutdown; the outcome is appended to the TaskManage result, so the model — not only the UI — learns about a skip such as `no_project` and can retry it with corrected metadata. Missing filing is recovery, not a gate: on `no_project`/`project_unresolved` the extension runs bounded catalogue discovery (journaled as `hoja-recovery`, replayed on resume), reports up to 12 candidates with descriptions and team keys and never picks one, retries the same task once when a declared mapping becomes resolvable, and blocks no tool; queued tasks (authoritative snapshots with canonical answers, bounded, journaled, replayed on resume; deleted and `hoja:local` work dropped; overflow reported) are retried automatically after a selection or on a later plain TaskManage update, with the retry chained into the same serialized queue, and an unfiled completion is reported honestly. An ordinary `hoja_project` select is session-only; only select with `remember:true` (host-confirmed) or create persists the mapping to `.pi/config/hoja.json`, at the repository root resolved from `.git`, preserving existing keys and refusing malformed or symlinked files. A session-owned issue is kept current and closed by `lifecycle.ts`; a reused or shared issue is never written to. `/hoja off` disables publication and guidance; the read tools stay read-only. Docs: `docs/reference/hoja-task-publication.md`; tests: `.pi/test/tools/hoja-publish.test.ts`, `.pi/test/tools/hoja-lifecycle.test.ts`, `.pi/test/tools/hoja-recovery.test.ts`, `.pi/test/tools/hoja-recovery-cache.test.ts`, `.pi/test/tools/hoja-config.test.ts`. |
+| `hoja_list`, `hoja_get`, `hoja_project`; `/hoja on\|off\|status`; automatic TaskManage → Hoja publication | `extensions/hoja-mode/extension.ts` (on by default) | `extensions/hoja-mode/publish.ts` decides from the TaskManage result what is coarse enough to publish (top-level task, or `metadata.hoja:"publish"`; `metadata.hoja:"local"` stays local), reuses a named issue (`metadata.hojaIssue`) without writing to it, resolves the project from declarations — `metadata.hojaProject`, then the chat's target (a `hoja_project` selection, or the host option), then the repository's `.pi/config/hoja.json`, then `HOJA_PROJECT` — never from the workspace directory name, and an agent-named project that does not exist falls back to the repository project with `substitutedFrom` recorded instead of failing the registration; `hoja_project` `action=list` reads the real catalogue including empty projects (`hoja_list` only lists issues), `action=select` remembers an exact project per chat, and `action=create` creates one in an exact team after a host confirmation that shows name and team, journaling the attempt before the request and reconciling it by exact name and team. It writes through the shared client in `.pi/lib/claw/hoja.ts` (`createIssue` with `parentId`, `findIssueByIdentifier`, read-back with `Issue.parent`). The client resolves credentials per value — canonical `HOJA_TOKEN`/`HOJA_API_URL` first, the deprecated `LINEAR_TOKEN`/`LINEAR_API_URL` aliases only as fallbacks, a blank value treated as unset, and an unset token reported as `HOJA_TOKEN … (deprecated fallback LINEAR_TOKEN …)` — so a session that exports only the canonical pair still authenticates. Associations are journaled as `hoja-task-link` entries and replayed per chat. The pre-write intent is journaled *before* the create request, and any unconfirmed write stays `reconciling` with a description marker; `findIssueByMarker` plus a read-back that proves marker, project and parent is the only way one is adopted, so a marker miss is never retried as a create. A promoted child is deferred (`parent_unpublished`) unless its parent already has an issue. Batches are serialized per session and a generation guard stops an in-flight batch after `/hoja off`, a chat switch or shutdown; the outcome is appended to the TaskManage result, so the model — not only the UI — learns about a skip such as `no_project` and can retry it with corrected metadata. Missing filing is recovery, not a gate: on `no_project`/`project_unresolved` the extension runs bounded catalogue discovery (journaled as `hoja-recovery`, replayed on resume), reports up to 12 candidates with descriptions and team keys and never picks one, retries the same task once when a declared mapping becomes resolvable, and blocks no tool; queued tasks (authoritative snapshots with canonical answers, bounded, journaled, replayed on resume; deleted and `hoja:local` work dropped; overflow reported) are retried automatically after a selection or on a later plain TaskManage update, with the retry chained into the same serialized queue, and an unfiled completion is reported honestly. An ordinary `hoja_project` select is session-only; only select with `remember:true` (host-confirmed) or create persists the mapping to `.pi/config/hoja.json`, at the repository root resolved from `.git`, preserving existing keys and refusing malformed or symlinked files. A session-owned issue is kept current and closed by `lifecycle.ts`; a reused or shared issue is never written to. `/hoja off` disables publication and guidance; the read tools stay read-only. Docs: `docs/reference/hoja-task-publication.md`; tests: `.pi/test/tools/hoja-publish.test.ts`, `.pi/test/tools/hoja-lifecycle.test.ts`, `.pi/test/tools/hoja-recovery.test.ts`, `.pi/test/tools/hoja-recovery-cache.test.ts`, `.pi/test/tools/hoja-config.test.ts`. |
 | `skills_list`, `skill_view` | `extensions/swarm-skills/extension.ts` | `packages/context/skills/src/index.ts` and `.pi/lib/context/swarm-skill-registry.ts`; skill bodies/support files stay on disk. |
 | Final Mermaid response repair and follow-up | `extensions/mermaid-response/extension.ts` | `.pi/lib/context/mermaid-response.ts` and `mermaid-followup.ts`; `message_end` replaces only successful finalized assistant text before persistence/final redraw. The streaming preview may already have shown the original. Mermaid fences are processed independently (up to 16); only one narrowly recognized flowchart arrow or sequence-message colon per diagram is changed after successful revalidation. Other syntax and validator failures preserve the original. For conceptual/explicit-diagram user requests, `turn_end` queues one model-visible `followUp` if a substantial final explanation lacks a Mermaid fence; it does not replace the previous response, and a second omission does not loop. The follow-up text tells the model to stay on the original request and names the hook's own source files only when the prompt is about the Mermaid hook; it is never sent in subagents (`PI_SWARM_SUBAGENT=1`), whose final text is the deliverable (#299; e2e `node tools/e2e/mermaid-followup-stays-on-task.mjs`). Pi's terminal Markdown renderer displays Mermaid as code, not SVG connectors; connector color belongs in the actual diagram-rendering client. |
 | `Skill`, `SkillManage` | skill/autogen integration via `extensions/swarm-skills/extension.ts`, `extensions/autogenskills/extension.ts` | `packages/context/autogenskills/src/index.ts`; mutate skills only through the vault/revision API. |
 | `web_fetch`, `deepwiki`, `browser_get_page` | `extensions/research-tools/extension.ts` | Extension-local bounded evidence fetcher; provenance and network policy are coupled requirements. |
 | `transcribe_file`, `/voice`, `/voice-settings` | `extensions/voice/index.ts` | Vendored Pi Voice sources (MIT; `LICENSE` beside them, origin recorded under **Voice (dictation) builtin**). `src/index.ts` registers the tool, commands and shortcut and loads `src/runtime.ts` lazily on first press; capture/transcription live in `dictation-controller.ts`, `transcription-service.ts` and `vad.ts` (dynamic native imports), the recording meter in `visualizer.ts` paints plain-text widget lines. Model setup is explicit and local; the agent must ask before any package-manager command. |
-| `tern` | `extensions/tern-browser/extension.ts`; model-visible via `swarmSurfaceFor` in `.pi/lib/runtime/swarm-tool-gating.ts` | `.pi/lib/tern/browser.ts`: one agent tool for Tern browsers, panes and tabs, scoped to the caller pane's tab plus tabs this process created with `new_tab`. Browsers are regular signed-in ones (`open` focuses the target pane, runs `tern ctl browser open`, and tracks the one new block only if it lands in the target's tab; two new blocks at once is rejected). Ops: `list`; `new_tab` (optional absolute `cwd`, no command); `rename_tab` (only tabs it created); `open` (optional `block` target pane, default this pane); `blocks`, `goto`, `snapshot`, `act`, `capture` (browser blocks in scope); `split`; `focus`; `close` (only blocks it created: never this pane, never a user block). Ownership is in-process memory: after `/reload` agent-created blocks are readable but not closable. No session, cookie or profile operations, no arbitrary commands, no pane move. Subprocesses take the cancellation signal and report bounded errors. Unit: `npx vitest run .pi/test/tern/browser.test.ts .pi/test/tern/browser-handler.test.ts`; live: `npx vite-node tools/e2e/tern-browser-harness.mjs` (needs `TERN_PANE`). |
+| `tern` | `extensions/tern-browser/extension.ts`; model-visible via `swarmSurfaceFor` in `.pi/lib/runtime/swarm-tool-gating.ts` | `.pi/lib/tern/browser.ts`: one agent tool for Tern browsers, panes and tabs, scoped to the caller pane's tab plus tabs this process created with `new_tab`. Browsers are regular signed-in ones (`open` focuses the target pane, runs `tern ctl browser open`, and tracks the one new block only if it lands in the target's tab; two new blocks at once is rejected). Ops: `list`; `new_tab` (optional absolute `cwd`, no command); `rename_tab` (only tabs it created); `open` (optional `block` target pane, default this pane); `blocks`, `goto`, `snapshot`, `act`, `capture` (browser blocks in scope); `split`; `focus`; `close` (only blocks it created: never this pane, never a user block). Ownership is in-process memory: after `/reload` agent-created blocks are readable but not closable. No session, cookie or profile operations, no arbitrary commands, no pane move. Subprocesses take the cancellation signal and report bounded errors. Unit: `npx vitest run .pi/test/tern/browser.test.ts .pi/test/tern/browser-handler.test.ts`; live: `npx vite-node tools/e2e/tern-browser-harness.mjs` (needs `TERN_PANE`). Runtime detection: `detectBackendSync()`/`probePaneRuntime()` (`.pi/lib/panes/install-probe.ts`) prefer the native runtime and otherwise fall back to herdr (`.pi/lib/panes/herdr.ts` over its CLI/socket API, numeric facade over its string pane ids, ownership enforced per process). On a fallback the schema carries only `PANE_OPS`, so no advertised op can fail by construction; with no runtime the tool is not registered and `/pane-runtime` plus one dismissible session-start prompt (`.pi/lib/ui/pane-runtime-setup.ts`) offer the install. Unit: `npx vitest run .pi/test/panes`; live: `HERDR_LIVE=1` with a running `herdr server`. |
 | `enter_plan_mode`, `exit_plan_mode` | `extensions/swarm-plan-mode/extension.ts` | `.pi/lib/context/swarm-plan-mode.ts`; plan approval is separate from implementation. |
 | `/auto on|off|status` | `extensions/swarm-auto/extension.ts` | Opt-in session-local autonomous continuation. Contributes `auto:on/off` through the existing `pi-swarm-footer-segments` registry; it never replaces the footer slot. Ask-user now uses the replacement interactive questionnaire; the former ask tool’s automatic consultation is not supported. `before_agent_start` supplies bounded branch and tracked-worktree context; settled `agent_end` follows an explicit progress marker only while idle. No global provider limits or policy gates are changed. |
 | `ask_user_question` | `extensions/ask-user/extension.ts` | Ask-user uses `eko24ive/pi-ask` at commit `49482b7e5d0d57be8af1db81f490f6e860792cfb` (MIT; LICENSE beside it). Private implementation, docs and tests live within `extensions/ask-user/`. The canonical tool name remains `ask_user_question` with the new questionnaire schema. |
@@ -619,33 +631,35 @@ The transcript's turn card (`.pi/lib/tern/bridge.ts`, `work-summary.ts`) is a **
 hand-drawn table. Tern 0.9.5 draws and *clocks* the parts that change every second:
 
 - One native `tool` head per tool call, in call order, nested in the turn card (a nested `tool` draws
-  unframed). The head carries the verb (`stepHead`: Bash/Read/Edit/Patch/Search/Tasks), a typed `target`
-  (`command` for bash — the head's Copy button copies it, the description becomes `intent`; `path` for file
-  tools; `pattern` for searches), `status`, `age` while running / `took` once settled, `exit`, `note`.
-  Tern spins the glyph and counts `age` on its own, so **never** re-render on a timer to advance a clock and
-  never hand-format an elapsed row.
-- The group head is the turn, not the first step: title is `N running` / `Done`, target is the request,
-  `age`/`took` is the turn's own clock, and a recovered failure is a `warning` badge (`1 failed`). The
-  tracked task is the only extra heading line; never repeat the request the head already shows.
+  unframed). A step carries its verb and a typed `target` (`path` for file tools, `pattern` for searches);
+  a Bash step carries **no verb**: `bashLabel` gives description -> caller name -> bounded command, so the row
+  reads as the job, never as "Bash <command>". `status`, `age` while running / `took` once settled, `exit` and
+  `note` stay in the head. Tern spins the glyph and counts `age` on its own, so **never** re-render on a timer
+  to advance a clock and never hand-format an elapsed row.
+- The group head follows the work, not the prompt: title is `N running` / `working` / `Done`, and its target
+  is the newest running tool call's label while live, else the last call's label (including once settled).
+  Never put the user request there — it stays in the user bubble. `age`/`took` is the turn's own clock, and a
+  recovered failure is a `warning` badge (`1 failed`). The tracked task is the only extra heading line.
 - A running step is **open** over a bounded live window (`tailWindow`, `STEP_LIVE_LINES`); a settled step is
   folded to its head, and Ctrl+O opens every step. Do not clamp with a `tool` `preview`: Tern's previews give
   way inside an open tool, and removing a preview does not re-fold a step, so the body would stay visible.
 - The dock carries the turn too: an `elapsed` (`omp.composer.turn`) sits beside Stop only while busy, and a
   fact chip with no reachable action is a plain label (`modelSelectable`), because a click that can only write
   "unavailable" into the transcript is a trap.
-- A command longer than `STEP_HEAD_TARGET` (or multiline) is truncated in the head and repeated **in full**
-  in the body, where it can wrap; the head keeps the copyable `command` prop. A short command is never
-  duplicated into the body.
+- A Bash step's label is the **description** (else the caller's name, else the bounded command), `title` is
+  empty, and opening it shows the command (`code`, role `omp.tool.bash.command`) before the output, because
+  the label is intent. When the label already is the whole command, the body is output only, so nothing is
+  duplicated. The exact command stays in `command` for the head's Copy. The one `.sf-tool-hr` between command
+  and output is Tern's section rule and is intentional; there is no `omp.run` box and no state foot.
 - An `apply_patch` is a diff, not a status word: `patchSections` splits the V4A body per file (dropping the
   `***` markers), the head names the files with `+a −d`, and each file draws a Tern `diff` node. Folded once
   settled, like every other step.
-- Spacing is deliberate, not incidental: steps are separated in `work-style.ts` (`.sf-tool + .sf-tool`), the
-  run box uses `gap: "sm"` for command/output/foot, and the patch body gets its own margins. Do not compress
-  these back; the card is scanned, not read.
-- `activityBody` lists the running steps as the same heads plus `Last`/`failed`/`+N more` lines and a
-  `shimmer` "Preparing next action"; the chips (`Activity` / `All steps` / `Collapse work`) live in **one**
-  `row` (`tern.work-controls`), styled by `.pi/lib/tern/work-style.ts` — keep every selector inside Tern's
-  subset (no `:has()`, no `~`, no leading region element).
+- The card body is one `col` (`tern.work-body`, `gap: "sm"`), so steps read as a tree by indentation and Tern
+  never draws its kind-change hairline (`.sf-tool-hr`) between a step and its neighbours. `work-style.ts`
+  hides the nested `.sf-tool-ic`: the card head owns the turn's glyph, each step is named by its label (Bash:
+  the description). Steps are indented 18px and their bodies 12px more, so depth is the only guide. Keep every selector
+  inside Tern's subset (no `:has()`, no `~`, no leading region element). The one control is the muted
+  `Inspect steps` text line at the end of the tree; do not add a chip row back.
 - Text in program sheets follows the terminal font: write sizes as `calc(var(--sf-fs, 13px) * N / 13)`, never
   plain `px`. Tern documents a 13px design zoomed by `font / 13`, but the Tern 0.9.5 Linux desktop view sets
   `--sf-fs` to the raw font with no zoom, so plain px (ours and Tern's own composer rules) froze there while
@@ -658,6 +672,15 @@ hand-drawn table. Tern 0.9.5 draws and *clocks* the parts that change every seco
   Mermaid figures are one opaque `svg`, so diagram look is steered through the `mermaid` prompt section
   (flowchart + labelled subgraphs and role shapes; no `architecture-beta`, `C4*` or `classDef` fills), not CSS.
   Evidence and mockups: `ideas/tern-markdown/`.
+- The ask dialog is a **form**, so its card is solid: `.pi/lib/tern/ask-style.ts` (sheet `ask`, registered in
+  `start()` because a flow can be the pane's first frame) feeds Tern's `--sf-card-bg` with `--card`, falling
+  back to `--fog`, inside `.sf-card[data-role='pi.ask']`. Tern's card is glass (white 55% light, white 2.8%
+  dark), which made the question and the panel behind it the same colour and let a glass window show through.
+  Feed the token, never paint `background` (a tone fill still resolves through it), and never drop the role
+  scope: every other card keeps its glass. `--page`/`--panel` are not fallbacks — the kit calls them
+  translucent in glass windows. Verify with `node tools/e2e/tern-ask-card-surface.mjs`: a real `tern serve`
+  reports the computed fill in light and dark, checks in the same run that a role-less card is still glass,
+  and `--no-sheet` reproduces the pre-fix translucency.
 - Subagents are `agent` nodes in the background card (`stats.age`, `stats.tokens`, `task`), and a TaskManage
   batch is one `checklist` (a blocked operation is a `blocked` item whose `note` is its error). Only fields
   the running-work store and the batch really carry are sent; no invented progress, context or cost.
@@ -665,6 +688,32 @@ hand-drawn table. Tern 0.9.5 draws and *clocks* the parts that change every seco
   positional diff deleted and re-added every sibling after an insert or removal, which threw away the
   terminal-side state (local fold, ansi scroll, highlighted block) and repainted the card on every settle.
   Keep id matching; text that only grows must still go out as `text append`.
+- Keystroke cost must not grow with session length. Every input re-renders the surface, so
+  `TranscriptProjector.nodes` memoizes settled segments (a live group, or one with a running step, is
+  rebuilt every time because it reads `Date.now()`), and `diffNode` skips subtrees that are
+  reference-equal. A cache entry is valid only while its inputs are `===` and every item is shallow-equal
+  to its snapshot, so **replace** item fields (`item.artifacts = …`), never mutate nested values in place.
+  Reused nodes must never be mutated after `nodes()` returns. Gate: `.pi/test/tern/bridge-perf.test.ts`
+  (a scaling check, a wire op-replay oracle and a memo-versus-fresh oracle); `TERN_PERF=1` prints the
+  per-keystroke table up to 1000 turns.
+- The transcript renders a **window**: a resumed session opens on its last `TRANSCRIPT_WINDOW_TURNS` (50)
+  turns behind one `transcript-earlier` row (action `transcript.earlier` adds 50 more), and a live session
+  is trimmed back to 50 once it passes `TRANSCRIPT_TRIM_TURNS` (150) unless the user asked for older turns.
+  The window always starts on a turn boundary, so segments and group ids are the same as for the full
+  transcript; `revealStep` widens it to reach a hidden step.
+- Look up items with `TranscriptProjector.item` / `callItem` (searched from the newest), never a forward
+  `find` over `#items`: that made restoring a session O(n²). Tool items are keyed through `#callItems`
+  because some providers restart call ids per message (`call_0`, …); a repeat gets `t-<callId>~n`.
+- Long runtime: a step keeps at most `OUTPUT_KEEP_CHARS` (256 KB) of output, the tail behind
+  "… N earlier lines not kept" (counted incrementally per streamed update), copied off its parent string
+  once settled; `errorText` is bounded the same way and artifact blobs drop their bytes once sent. Set
+  output through `keepOutput`, never `item.output = …` directly. Soak: `node --expose-gc
+  tools/perf/tern-bridge-soak.mjs [turns]` prints keystroke cost and retained heap as the run goes.
+- TSP chunking counts UTF-8 bytes arithmetically (`codePointBytes`); never allocate per character there.
+- Measure on real sessions and constrained hosts with `node tools/perf/tern-bridge-bench.mjs <session.jsonl>`
+  or `--turns N`, e.g. under `systemd-run --user --scope -p CPUQuota=10% -p MemoryMax=512M node
+  --max-old-space-size=96 …`. Per-render work is about 0.13 ms; a Rust/N-API addon would pay more than that
+  just serializing the view across the boundary (0.22 ms at 1000 turns), so keep this path in TypeScript.
 
 Visual check without a model: `node tools/e2e/tern-live-work-demo.mjs` renders one scripted turn
 (`EXPAND=1` = Ctrl+O, `SPEED=n` = slower) into its own pane; `tern ctl shot <name>` writes
@@ -1151,11 +1200,41 @@ allowance, abort/error/user-interaction/background-work/shutdown and plan/child
 suppression remain. No auto-completion, deletion, or infinite continuation.
 Headless unavailable interaction must be reported with pending tasks retained.
 
+### Machine-local runtime state
+
+Runtime bookkeeping never lives in the workspace. `.pi/lib/state/workspace-state.ts`
+resolves `$PI_SWARM_STATE_DIR`, else `$XDG_STATE_HOME/pi-swarm`, else
+`~/.local/state/pi-swarm`, and keys one folder per workspace by
+`<basename>-<sha256(absolute path)[0:12]>`, so two checkouts with the same name never
+share state. Claw (`ClawStore.forWorkspace` → `<root>/workspaces/<key>/claw`), the
+scheduler (`extensions/schedule`, `<root>/workspaces/<key>/scheduled_tasks.json`) and
+the diagnostics log all use it. A legacy `<workspace>/.swarm/claw` directory or
+`.swarm/scheduled_tasks.json` is adopted once (rename, staged copy across devices) and
+never merged into an existing state folder; the legacy copy is left for inspection on
+a conflict.
+
+`.swarm/` inside a project stays reserved for user-authored inputs (`AGENTS.md`,
+skills, hook config). Do not add a blanket `.swarm/` ignore and do not write runtime
+files there: Claw's `control.json`, `supervisor.json` and `sessions/*.json` used to
+appear as untracked files in every user's `git status` exactly that way. Evidence:
+`.pi/test/state/workspace-state.test.ts`, `.pi/test/claw/state-dir.test.ts`,
+`.pi/test/tools/schedule-state.test.ts`, plus an observed run where
+`git status --porcelain` stays empty. Suites isolate themselves through
+`tests/setup/isolate-state.ts`; never point one at the real state directory.
+
 ### Temporary runtime review logs
-Jev writes bounded metadata under the active Git worktree root's
-`.swarmpi/jev/` (cwd for non-Git projects). Jev records attempt/outcome counts, not raw evidence or
-credentials. Best-effort writes must never break execution. Seven-day retention
-on next write, 500 files/category, 32KiB/file. Gitignored, safe to delete; logs are
+These are opt-in (`PI_SWARM_DIAGNOSTICS=1`) and are never written inside a working
+tree. `.pi/lib/context/execution-log.ts` (`executionLog`) writes bounded metadata to
+`$PI_SWARM_DIAGNOSTICS_DIR`, else `$XDG_STATE_HOME/pi-swarm/diagnostics`, else
+`~/.local/state/pi-swarm/diagnostics`, under one `<basename>-<path-hash>/<area>/`
+folder per workspace. It used to create `./.swarmpi/<area>/` in whatever repository
+Pi ran in — one untracked file per captured memory candidate, invisible in this
+repository only because its `.gitignore` lists `.swarmpi/`, and litter in every
+user's `git status`. Keep the write out of the worktree, and keep the default off:
+diagnostics are harness support, not project output. Jev and lifecycle memory capture
+record attempt/outcome counts and candidate-save receipts, not raw evidence or
+credentials. Best-effort writes must never break execution. Seven-day retention on
+next write, 500 files/category, 32KiB/file, mode 0700/0600. Safe to delete; logs are
 not memory and do not backfill earlier runs. Reload required for instrumentation.
 
 ### Memory capture quality, first curation batch
@@ -1163,7 +1242,8 @@ Lifecycle capture supplies project identity and a bounded sample of existing
 records to discourage semantic duplicates. Its prompt excludes transient execution
 history and asks for explicit project ownership. These are model guidance, not a
 semantic enforcement guarantee. Saved candidates emit metadata receipts under
-.swarmpi/execution. Restricted reviewer policy uses the same durability filter.
+the diagnostics directory above (only when enabled). Restricted reviewer policy
+uses the same durability filter.
 First code-reviewed worktree records document verified-only recall and the exact
 supervisor configuration location; tools/experiments/memory-curation/save-reviewed.ts
 writes them through the canonical store and checks production recall. This does not

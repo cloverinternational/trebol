@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { HOJA_ENV_HINT, HojaClient, resolveHojaToken, resolveHojaUrl } from "../../lib/claw/hoja.ts";
+import {
+	HOJA_ENDPOINT_HINT, HojaClient, MISSING_HOJA_TOKEN, resolveHojaToken, resolveHojaUrl,
+} from "../../lib/claw/hoja.ts";
 
 const RETIRED_HOST = "hoja.clover4.app";
 
@@ -55,11 +57,11 @@ describe("HojaClient fails closed", () => {
 
 	it("reports a missing token with the same guidance", async () => {
 		const client = new HojaClient({ url: "https://hoja.test/graphql", token: "" });
-		await expect(client.gql("query { viewer { id } }")).rejects.toThrow(/No Hoja token configured/);
+		await expect(client.gql("query { viewer { id } }")).rejects.toThrow(MISSING_HOJA_TOKEN);
 	});
 
 	it("keeps the guidance in one exported place", () => {
-		expect(HOJA_ENV_HINT).toContain("HOJA_API_URL");
-		expect(HOJA_ENV_HINT).toContain("HOJA_TOKEN");
+		expect(HOJA_ENDPOINT_HINT).toContain("HOJA_API_URL");
+		expect(HOJA_ENDPOINT_HINT).toContain("HOJA_MCP_URL");
 	});
 });

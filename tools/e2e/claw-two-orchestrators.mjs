@@ -41,7 +41,10 @@ const children = [];
 try {
 	const { ClawStore } = await import(lib("store.ts"));
 	const { applyEvent } = await import(lib("daemon.ts"));
-	const store = new ClawStore(join(dir, ".swarm", "claw"));
+	// Production resolves Claw state under the per-user state root, not `<workspace>/.swarm/claw`.
+	// Keep the fixture self-contained by pointing that root inside the temp dir; children inherit it.
+	process.env.PI_SWARM_STATE_DIR ??= join(dir, "state");
+	const store = ClawStore.forWorkspace(dir);
 	const child = (session) => {
 		const proc = spawn(process.execPath, ["--experimental-strip-types", "--no-warnings", fileURLToPath(import.meta.url), "--child", store.dir, session], { stdio: ["ignore", "pipe", "inherit"] });
 		let out = "";
