@@ -14,7 +14,7 @@ export const HOJA_URL_VARS = ["HOJA_API_URL", "LINEAR_API_URL"] as const;
  *  tenant host, which is a deployment fact rather than a code constant. An unset URL therefore fails with a
  *  message naming the variable instead of reaching a host that looks like a credential problem. */
 export const HOJA_ENDPOINT_HINT =
-	"No Hoja endpoint configured. Set HOJA_API_URL (e.g. https://<tenant>.hoja.work/graphql) or HOJA_MCP_URL; " +
+	"No Hoja endpoint configured. Set HOJA_API_URL (e.g. https://workspace.hoja.work/graphql) or HOJA_MCP_URL; " +
 	"LINEAR_API_URL is honoured only as a deprecated alias.";
 /** GraphQL endpoint: explicit option, then HOJA_API_URL / LINEAR_API_URL, then the host of HOJA_MCP_URL rewritten
  *  to /graphql. Returns "" when nothing is configured so the caller fails closed. */
