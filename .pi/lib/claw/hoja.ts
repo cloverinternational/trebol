@@ -1,6 +1,6 @@
-/** Minimal Hoja (Linear-compatible GraphQL) client for /claw. The token comes from LINEAR_TOKEN and is
- *  never placed in errors, logs or results. Project names decide the team: every Hoja project belongs to
- *  exactly one team, and the assignee must be a member of that team. */
+/** Minimal Hoja (Linear-compatible GraphQL) client for /claw. Endpoint and token are resolved by
+ *  resolveHojaUrl/resolveHojaToken below and are never placed in errors, logs or results. Project names
+ *  decide the team: every Hoja project belongs to exactly one team, and the assignee must be a member. */
 export type FetchLike = (url: string, init: { method: string; headers: Record<string, string>; body: string; signal?: AbortSignal; redirect?: "error" }) => Promise<{ status: number; text(): Promise<string> }>;
 /** Only locally authored errors may cross the tool boundary. Never echo server bodies.
  *  `ambiguous` means a write may have been applied even though no usable answer arrived (timeout, dropped connection,
@@ -12,6 +12,36 @@ export class HojaRequestError extends Error {
 /** The named project (or its team) could not be resolved. Distinct from an assignee problem so a caller can fall
  *  back to another configured project name without masking a real membership error. */
 export class HojaProjectError extends Error {}
+/** Shared guidance for the two fail-closed errors. Names every accepted variable so a bare install can be fixed
+ *  from the message alone, without reading this file. */
+export const HOJA_ENV_HINT =
+	"Set HOJA_API_URL (a GraphQL endpoint such as https://hoja.hoja.work/graphql) and HOJA_TOKEN. " +
+	"HOJA_MCP_URL is also accepted, and its host is used with /graphql. " +
+	"LINEAR_API_URL and LINEAR_TOKEN are honoured as legacy fallbacks.";
+
+/** GraphQL endpoint precedence: explicit option, then HOJA_API_URL, then legacy LINEAR_API_URL, then the host of
+ *  HOJA_MCP_URL rewritten to /graphql. There is deliberately no baked-in default: pointing Hoja work at a retired
+ *  or guessed host is worse than failing with a message that says what to set. */
+export function resolveHojaUrl(env: Record<string, string | undefined> = process.env, override?: string): string {
+	const direct = override?.trim() || env.HOJA_API_URL?.trim() || env.LINEAR_API_URL?.trim();
+	if (direct) return direct;
+	const mcp = env.HOJA_MCP_URL?.trim();
+	if (!mcp) return "";
+	try {
+		const parsed = new URL(mcp);
+		parsed.pathname = "/graphql";
+		parsed.search = "";
+		parsed.hash = "";
+		return parsed.toString();
+	} catch {
+		return "";
+	}
+}
+
+/** Token precedence: explicit option, then HOJA_TOKEN, then legacy LINEAR_TOKEN. */
+export function resolveHojaToken(env: Record<string, string | undefined> = process.env, override?: string): string {
+	return override ?? env.HOJA_TOKEN ?? env.LINEAR_TOKEN ?? "";
+}
 export type Resolved = {
 	teamId: string; teamKey: string; projectId: string; project: string; assigneeId: string; assignee: string;
 	states: Record<string, string>;
@@ -39,15 +69,16 @@ export class HojaClient {
 	private readonly fetchImpl: FetchLike;
 	private readonly timeoutMs: number;
 	constructor(options: { url?: string; token?: string; fetch?: FetchLike; timeoutMs?: number } = {}) {
-		this.url = options.url ?? process.env.LINEAR_API_URL ?? "https://hoja.clover4.app/graphql";
-		this.token = options.token ?? process.env.LINEAR_TOKEN ?? "";
+		this.url = options.url ?? resolveHojaUrl(process.env);
+		this.token = options.token ?? resolveHojaToken(process.env);
 		this.fetchImpl = options.fetch ?? (globalThis.fetch as unknown as FetchLike);
 		this.timeoutMs = options.timeoutMs ?? 15_000;
 		if (!Number.isFinite(this.timeoutMs) || this.timeoutMs <= 0) throw new Error("Invalid Hoja timeout");
 	}
 
 	async gql<T>(query: string, variables: Record<string, unknown> = {}): Promise<T> {
-		if (!this.token) throw new HojaRequestError("LINEAR_TOKEN is not set; Hoja is unavailable");
+		if (!this.url) throw new HojaRequestError("No Hoja endpoint configured. " + HOJA_ENV_HINT);
+		if (!this.token) throw new HojaRequestError("No Hoja token configured. " + HOJA_ENV_HINT);
 		const controller = new AbortController();
 		let timer: ReturnType<typeof setTimeout> | undefined;
 		const deadline = new Promise<never>((_, reject) => {
