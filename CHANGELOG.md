@@ -20,6 +20,15 @@ Release metadata is kept in `package.json`, `update-manifest.json`, and this fil
 
 ### Fixed
 
+- The ask-user dialog in a Tern pane is a solid card instead of a glass one. Tern's `.sf-card` fill is white
+  55% in light and white 2.8% in dark, which is right for a transcript block and wrong for a form the user has
+  to read: the question and the panel behind it were the same colour, and on a glass window the desktop showed
+  through the dialog. `ask-style.ts` now feeds Tern's own `--sf-card-bg` with the kit's opaque `--card` fill
+  (falling back to `--fog`, never to the translucent-in-glass `--page`/`--panel`), scoped to
+  `.sf-card[data-role='pi.ask']` so every other card keeps its glass, and the sheet is registered at surface
+  start because a flow can be the pane's first frame. Measured by `tools/e2e/tern-ask-card-surface.mjs` against
+  a real headless Tern: the card computes `rgb(255,255,255)` in light and an opaque theme card in dark, while a
+  role-less card still computes `rgba(255,255,255,0.55)` / `rgba(255,255,255,0.028)` in the same run.
 - Tern bridge stays fast in long and resumed sessions and on weak hosts. Typing re-projected and diffed the whole
   transcript on every key (14.7 ms per key at 500 turns); settled segments are now memoized and identical
   subtrees skipped, so a key costs about 0.13 ms at any length. Resuming re-sent every turn ever (13 MB, 7.9 s
@@ -37,6 +46,21 @@ Release metadata is kept in `package.json`, `update-manifest.json`, and this fil
   `tools/perf/tern-bridge-soak.mjs`.
 
 ### Changed
+
+- Tern's collapse-work card shows the work, not the prompt, and its rows are jobs, not tool names. The head
+  target is now the newest running tool call's label while live, and the last call's label between calls and
+  once settled; the user request no longer appears in the head (it stays in the user bubble). The opened card
+  went from six buttons (Activity / All steps / Collapse work plus All / Active / Failed / Search & inspect)
+  to one quiet `Inspect steps` line, one glyph at the head, and no repeated step icon. A Bash row is the
+  model's description (`bashLabel`: description -> caller name -> bounded command) with no "Bash" verb;
+  opening it shows the command and then the output, separated by Tern's single section hairline, and with no
+  description the command is the label and the body is output only. The `omp.run` box, the state foot and the
+  "completed" badge that repeated `Done` are gone; steps are a tree by indentation (18px, bodies 12px more).
+  Measured in a real `tern serve` on the same five-step turn, expanded: icons 6 -> 1, in-card controls
+  5 -> 1, card height 866.8px -> 601.3px; the two hairlines are the intentional command/output separators.
+  The live head read `1 running · Re-run the login tests`, the settled head `Done · Re-run the login tests`
+  (`node tools/e2e/tern-work-tree-measure.mjs`). Tests updated in `work-table`, `turn-work`, `bridge`,
+  `turn-groups`, `work-inspector` and `bridge-perf`.
 
 - Tern's composer carries running work as one pulse instead of a standing card.
   The dock prepended a `pi.background` card — a head, up to five job rows with

@@ -1,6 +1,6 @@
 // Pure factual summaries of tool steps for the work table. No model output, no raw argument dumps.
 import { describe, expect, it } from "vitest";
-import { activityView, currentTaskLine, stepHead, summarizeWorkStep, type WorkStep } from "../../lib/tern/work-summary.ts";
+import { currentTaskLine, stepHead, summarizeWorkStep, type WorkStep } from "../../lib/tern/work-summary.ts";
 
 describe("work step summaries (pure)", () => {
 	// The label is not a bash-only idea: any known tool that carries a description
@@ -69,43 +69,5 @@ describe("work step summaries (pure)", () => {
 
 	it("labels the current task line from the supplied focus only", () => {
 		expect(currentTaskLine({ id: "7", subject: "Build\nthe table" })).toBe("Current task · #7 Build the table");
-	});
-});
-
-describe("live activity view (pure)", () => {
-	const run = (id: string, name = "read", args: unknown = { path: `${id}.ts` }): WorkStep => ({ id, name, args, status: "running" });
-	const done = (step: WorkStep, doneSeq: number, status: "ok" | "error" = "ok"): WorkStep => ({ ...step, status, doneSeq, took: 10 });
-
-	it("shows at most three active rows in call order and counts the overflow", () => {
-		const steps = [run("a"), run("b"), run("c"), run("d"), run("e")];
-		const view = activityView(steps);
-		expect(view.active.map((r) => r.id)).toEqual(["a", "b", "c"]);
-		expect(view.moreActive).toBe(2);
-	});
-
-	it("reports the latest completion by completion order, not by call order", () => {
-		const a = run("a");
-		const b = run("b");
-		const late = activityView([done(a, 2), done(b, 1)]);
-		expect(late.latest?.id).toBe("a");
-		expect(activityView([done(a, 1), run("c")]).latest?.id).toBe("a");
-	});
-
-	it("keeps a failure indicator after later steps succeed, and names the latest failure", () => {
-		const view = activityView([done(run("a", "bash", { description: "Build" }), 1, "error"), done(run("b"), 2), run("c")]);
-		expect(view.failed).toEqual({ count: 1, last: expect.objectContaining({ id: "a", label: "Run", target: "Build" }) });
-	});
-
-	it("does not count cancelled steps as failures and never shows a running step as the latest result", () => {
-		const cancelled = { ...run("x"), status: "error" as const, cancelled: true, doneSeq: 1 };
-		const view = activityView([cancelled, run("y")]);
-		expect(view.failed).toBeUndefined();
-		expect(view.latest).toBeUndefined();
-	});
-
-	it("uses the authoritative task, else a labelled request, else no heading at all", () => {
-		expect(activityView([], { id: "7", subject: "Fix login" }, "fix").heading).toBe("Current task · #7 Fix login");
-		expect(activityView([], undefined, "fix the login bug").heading).toBe("Request · fix the login bug");
-		expect(activityView([]).heading).toBeUndefined();
 	});
 });

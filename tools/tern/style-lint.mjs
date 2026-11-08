@@ -64,7 +64,7 @@ function loadSheets() {
 	const out = [];
 	// Every sheet the bridge registers (bridge.ts: the `stylesheet` calls). The startup card has none: its mark is
 	// sized by the image node and the rest is Tern's own drawing, so a sheet there only risked a fade.
-	for (const [file, name] of [[".pi/lib/tern/composer-style.ts", "composer"], [".pi/lib/tern/work-style.ts", "work"]]) {
+	for (const [file, name] of [[".pi/lib/tern/composer-style.ts", "composer"], [".pi/lib/tern/work-style.ts", "work"], [".pi/lib/tern/ask-style.ts", "ask"]]) {
 		const source = readFileSync(join(REPO, file), "utf8");
 		const css = source.match(/export const [A-Z_]+ = `([\s\S]*?)`;/)?.[1];
 		if (!css) throw new Error(`${file}: stylesheet literal not found`);

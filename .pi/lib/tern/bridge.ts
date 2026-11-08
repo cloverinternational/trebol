@@ -27,7 +27,7 @@ import type { McpToolDefinitionLike } from "../tools/mcp-inventory.ts";
 import { McpController } from "./mcp-controller.ts";
 import { readMcpHost } from "./mcp-host.ts";
 import { mcpPanelNodes } from "./mcp-panel.ts";
-import { filterWork, workCounts, workInspectorNodes, workToolbar, type WorkFilter } from "./work-inspector.ts";
+import { filterWork, workCounts, workInspectorNodes, type WorkFilter } from "./work-inspector.ts";
 import { gitDismissNode, readRepoStatus, startupBlob, startupNodes, trebolVersion, watchRepo, type RepoStatus } from "./startup-card.ts";
 import { commitIndex, discardPaths, readCommitDiff, readFileDiff, stagePaths, unstagePaths, type GitSection } from "./git-status.ts";
 import { PI_GIT_CSS, gitHelpNodes, gitPanelNodes, gitPanelRefs, type GitDiffMode, type GitPanelRef, type GitSidebarStyle } from "./git-panel.ts";
@@ -36,6 +36,7 @@ import { patchArtifactPaths } from "../tools/swarm-artifacts.ts";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { readGitFacts } from "./git-facts.ts";
 import { PI_COMPOSER_CSS } from "./composer-style.ts";
+import { PI_ASK_CSS } from "./ask-style.ts";
 import { TERN_WORK_CSS } from "./work-style.ts";
 import { PI_CONTEXT_CSS } from "./context-style.ts";
 import { TERN_MARKDOWN_CSS } from "./markdown-style.ts";
@@ -48,8 +49,8 @@ import { createClipboard, imageExtension } from "./clipboard.ts";
 import type { KeyEffect } from "./keys.ts";
 import { AUTOCOMPLETE_ID, SlashAutocomplete, type Edit } from "./autocomplete.ts";
 import { expandMentions } from "./mentions.ts";
-import { activityView, currentTaskLine, MAX_ACTIVE_STEPS, rowLine, stepHead, type CurrentTask } from "./work-summary.ts";
-import { goalLine, isAbortedAssistant, isCancellationError, isFailedAssistant, isTurnBoundary, liveLineText, SETTLED_LABEL, segmentTranscript, summarizeToolGroup } from "./turn-groups.ts";
+import { bashLabel, currentTaskLine, stepHead, toolCallLabel, type CurrentTask } from "./work-summary.ts";
+import { goalLine, isAbortedAssistant, isCancellationError, isFailedAssistant, isTurnBoundary, SETTLED_LABEL, segmentTranscript, summarizeToolGroup } from "./turn-groups.ts";
 import { DraftEditor, isLargePaste, type HostEdit } from "./draft-edit.ts";
 import { ATTACHMENT_LIMITS, ATTACHMENT_REMOVE, attachmentChips, attachmentFromNodeId, attachmentPayload, attachmentSummary, loadAttachment, parseDroppedPaths, type Attachment, type ImageContentLike } from "./attachments.ts";
 import { getNativeClipboard } from "@earendil-works/pi-tui";
@@ -141,8 +142,6 @@ interface Item {
 	took?: number;
 	exit?: number;
 	timedOut?: boolean;
-	// Completion order among finished steps, so "latest" follows what finished last rather than what started last.
-	doneSeq?: number;
 	cancelled?: boolean;
 	turnAborted?: boolean;
 	turnFailed?: boolean;
@@ -339,7 +338,6 @@ export class TranscriptProjector {
 	#seq = 0;
 	// Per-group presentation state set by native toggle, select and the group's bottom controls. Never part of the session.
 	#groupViews = new Map<string, GroupView>();
-	#doneSeq = 0;
 	// Settled segments' nodes from the last projection, keyed by segment id. A keystroke re-renders the whole
 	// surface, so rebuilding every settled turn made each input cost O(session length). An entry is reused only
 	// when its inputs are identical (===) and every item is shallow-equal to the snapshot taken when it was built;
@@ -394,7 +392,6 @@ export class TranscriptProjector {
 		this.#callItems.clear();
 		this.#userExpanded = false;
 		this.#setWindowStart(0);
-		this.#doneSeq = 0;
 		for (const raw of entries) {
 			if (typeof raw !== "object" || raw === null) continue;
 			const entry = raw as { id?: unknown; type?: unknown; message?: unknown };
@@ -434,7 +431,6 @@ export class TranscriptProjector {
 		const details = result.details as { exit_code?: unknown; duration_ms?: unknown } | undefined;
 		item.exit = typeof details?.exit_code === "number" && details.exit_code !== 0 ? details.exit_code : undefined;
 		item.status = result.isError || item.exit !== undefined ? "error" : "ok";
-		item.doneSeq = ++this.#doneSeq;
 		item.took = typeof details?.duration_ms === "number" ? details.duration_ms : undefined;
 		const text = messageText(result);
 		if (item.status === "error") item.errorText = text.length > OUTPUT_KEEP_CHARS ? `…${text.slice(-OUTPUT_KEEP_CHARS)}` : text;
@@ -553,7 +549,6 @@ export class TranscriptProjector {
 					item.exit = typeof details?.exit_code === "number" && details.exit_code !== 0 ? details.exit_code : failureExit ? Number(failureExit) : undefined;
 					item.timedOut = details?.timed_out === true || (bashFailure && /^Error executing bash: command timed out after \d+s/.test(resultBody));
 					item.status = event.isError || item.exit !== undefined ? "error" : "ok";
-					item.doneSeq = ++this.#doneSeq;
 					if (item.status === "error") item.errorText = resultBody.length > OUTPUT_KEEP_CHARS ? `…${resultBody.slice(-OUTPUT_KEEP_CHARS)}` : resultBody;
 					if (item.name === "TaskManage") item.batch = taskManageBatch(event.result);
 					item.text = `tool ${String(event.toolName)} ${item.status}`;
@@ -663,20 +658,18 @@ export class TranscriptProjector {
 			const said = this.#items.slice(this.#turnStart).findLast((item) => item.role === "assistant" && item.text.trim() !== "");
 			tail = said ? (said.text.trim().split("\n").map((line) => line.trim()).filter(Boolean).at(-1) ?? "").replace(/\s+/g, " ") : "";
 		}
-		let goal = "";
 		segments.forEach((segment, i) => {
 			if (segment.kind === "tools") {
 				const turnOpen = i === openGroup;
 				const key = groupId(segment.items);
 				const view = this.#groupViews.get(key);
-				const ctx = { goal, tail: turnOpen ? tail : "", outputExpanded, turnOpen, view, currentTask: options.currentTask };
+				const ctx = { tail: turnOpen ? tail : "", outputExpanded, turnOpen, view, currentTask: options.currentTask };
 				// toolGroupNode labels the current task only in the live (running) group.
 				if (turnOpen || segment.items.some((item) => item.status === "running")) out.push(...toolGroupNode(segment.items, ctx));
-				else memo(`g:${key}`, segment.items, [goal, outputExpanded, view], () => toolGroupNode(segment.items, ctx));
+				else memo(`g:${key}`, segment.items, [outputExpanded, view], () => toolGroupNode(segment.items, ctx));
 				return;
 			}
 			const { item } = segment;
-			if (isTurnBoundary(item)) goal = goalLine(item.text);
 			// A message with no visible text (thinking or tool calls only) has nothing to show.
 			if (item.role === "assistant" && item.text.trim() === "") return;
 			const focused = options.messageFocus === item.id;
@@ -688,10 +681,6 @@ export class TranscriptProjector {
 
 	setGroupCollapsed(groupId: string, collapsed: boolean): void {
 		this.#groupViews.set(groupId, { ...this.#groupViews.get(groupId), minimized: collapsed });
-	}
-
-	setGroupView(groupId: string, view: DetailView): void {
-		this.#groupViews.set(groupId, { ...this.#groupViews.get(groupId), minimized: false, view });
 	}
 
 	groupItems(id: string): Item[] {
@@ -708,7 +697,8 @@ export class TranscriptProjector {
 			this.#userExpanded = true;
 			this.#setWindowStart(turnStartBefore(this.#items, at + 1, 1));
 		}
-		this.setGroupView(key, "all");
+		// Every step is always shown, so revealing one only means opening its card.
+		this.setGroupCollapsed(key, false);
 		return key;
 	}
 
@@ -792,23 +782,16 @@ function groupId(items: readonly Item[]): string {
 	return `g-${items[0]?.id ?? "empty"}`;
 }
 
-// Three presentations per group. Opening a card is a request to see the work, so an opened group shows every
-// step (All steps) whether it is live or settled; the activity panel is an explicit choice that persists through
-// streamed updates. Minimize persists the same way.
-type DetailView = "activity" | "all" | "active" | "failed";
-interface GroupView { minimized?: boolean; view?: DetailView }
+// The only group-local state left is the fold: the work is always the same step tree, live or settled.
+interface GroupView { minimized?: boolean }
 
 interface GroupContext {
-	goal: string;
 	tail: string;
 	outputExpanded: boolean;
 	turnOpen: boolean;
 	view: GroupView | undefined;
 	currentTask: CurrentTask | undefined;
 }
-
-const ACTIVITY_LABEL = "Activity";
-const ALL_STEPS_LABEL = "All steps";
 
 // The group's own clock: how long the turn has been working (live) or how long its steps took (settled).
 // Tern counts a live `age` on from the value it last received, so no per-second frame is needed.
@@ -833,35 +816,34 @@ function toolGroupNode(items: Item[], ctx: GroupContext): TspNode[] {
 	const live = summary.status === "running" || ctx.turnOpen;
 	const minimized = ctx.view?.minimized ?? (!live && !ctx.outputExpanded);
 	const steps = tools.length === 1 ? "1 step" : `${tools.length} steps`;
+	// A failure count is the only badge worth keeping: "Done" already says the rest, and every step is visible.
 	const badges = failureBadge(summary);
-	const counts = workCounts(tools);
-	if (counts.done) badges.push({ text: `${counts.done} completed`, tone: "success" });
-	if (counts.cancelled) badges.push({ text: `${counts.cancelled} cancelled`, tone: "muted" });
-	// The head says the turn's state and names its request; each step below carries its own verb and target.
+	const cancelledSteps = workCounts(tools).cancelled;
+	if (cancelledSteps) badges.push({ text: `${cancelledSteps} cancelled`, tone: "muted" });
+	// The head follows the work, not the prompt: the newest running call, else the last call in the group.
+	const running = tools.findLast((item) => item.status === "running" && !item.cancelled);
+	const headCall = running ?? tools.at(-1);
+	const headLabel = headCall ? toolCallLabel(headCall.name, headCall.args) : undefined;
 	const age = live ? liveAge(tools) : undefined;
 	const took = live ? undefined : summary.durationMs;
 	if (live) {
-		const line = liveLineText(ctx.goal, summary.active);
-		// Steps first: the head already says "N steps", so the opened body must show those steps. The activity
-		// panel stays one control away (and Ctrl+O still opens everything on every card).
-		const mode: DetailView = ctx.view?.view ?? "all";
+		const state = summary.active > 0 ? `${summary.active} running` : "working";
+		const line = headLabel ? `${state} · ${headLabel}` : state;
 		// The live header is the settled card's id, key and kind, so it keeps identity through streaming, expansion
 		// and settlement.
 		const card: TspNode = {
 			id, k: "tool",
 			p: {
-				role: "tern.work-live", key: id, name: "work", title: line.split(" · ")[0], status: "running", text: line,
-				...(ctx.goal ? { target: ctx.goal, targetKind: "text" } : {}),
+				role: "tern.work-live", key: id, name: "work", title: state, status: "running", text: line,
+				...(headLabel ? { target: headLabel, targetKind: "text" } : {}),
 				...(age !== undefined ? { age } : {}),
 				...(badges.length > 0 ? { badges } : {}),
 				frame: "card", collapsible: true, collapsed: minimized, meta: [steps],
 			},
-			c: workBody(id, items, ctx.currentTask, ctx.outputExpanded, mode, ctx.goal, true),
+			c: workBody(id, items, ctx.currentTask, ctx.outputExpanded),
 		};
-		// Only a minimized live group needs the one-line tail; the activity panel already carries narration.
-		const current = tools.find((item) => item.status === "running" && !item.cancelled);
-		const currentHead = current ? stepHead(current.name ?? "tool", current.args) : undefined;
-		const tailText = ctx.tail || currentHead?.intent || currentHead?.target || "";
+		// Only a minimized live group needs the narration tail; the head already names the current call.
+		const tailText = ctx.tail;
 		const tail: TspNode[] = minimized && tailText ? [{ id: `${id}-tail`, k: "text", p: { role: "tern.work-tail", tone: "muted", wrap: "none", truncate: "end", text: tailText } }] : [];
 		return [card, ...tail];
 	}
@@ -872,77 +854,40 @@ function toolGroupNode(items: Item[], ctx: GroupContext): TspNode[] {
 		id, k: "tool",
 		p: {
 			role: "tern.work", key: id, name: "work", title: SETTLED_LABEL[summary.status], status,
-			...(ctx.goal ? { target: ctx.goal, targetKind: "text" } : {}),
+			...(headLabel ? { target: headLabel, targetKind: "text" } : {}),
 			...(took !== undefined ? { took } : {}),
 			...(badges.length > 0 ? { badges } : {}),
 			frame: "card", collapsible: true, collapsed: minimized,
 			meta: [steps],
 		},
-		c: workBody(id, items, undefined, ctx.outputExpanded, ctx.view?.view ?? "all"),
+		c: workBody(id, items, undefined, ctx.outputExpanded),
 	}];
 }
 
 const textNode = (id: string, role: string, text: string, tone: string, extra: Record<string, unknown> = {}): TspNode => ({ id, k: "text", p: { role, tone, wrap: "none", truncate: "end", text, ...extra } });
 
-// Every step is its own `tool` head, in call order, with narration written between them left in place. A nested
-// `tool` draws unframed inside the group card, so a turn reads as one card of steps rather than one card of rows.
-// The group's controls come first, so an opened card shows how to fold it again without scrolling past the steps.
-function workBody(groupId: string, items: readonly Item[], currentTask: CurrentTask | undefined, outputExpanded: boolean, mode: DetailView | "all", goal = "", live = false): TspNode[] {
-	const tools = items.filter((i) => i.role === "tool");
-	const toolbar = workToolbar(groupId, tools, mode);
-	if (mode === "active" || mode === "failed") {
-		const filtered = filterWork(items, mode);
-		return [...controls(groupId, undefined), toolbar, ...(filtered.length ? filtered.map((i) => toolRow(i as Item, outputExpanded)) : [{ id: `${groupId}-filter-empty`, k: "empty", p: { title: mode === "active" ? "No active steps" : "No failed steps", description: "This view updates as work changes. Choose All to see the full timeline." } }])];
-	}
-	const body = mode === "activity" ? activityBody(groupId, items, currentTask, outputExpanded, goal) : allStepsBody(groupId, items, currentTask, outputExpanded, mode === "all" && live, goal);
-	return [...body.slice(0, 1), toolbar, ...body.slice(1)];
-}
-
-// A settled group has no activity panel, so it offers only Collapse work. Live groups always offer the mode
-// chip, for the whole turn: deriving it from "a step is running right now" deleted and re-added the chip at
-// every step boundary, which is a new element each time and drops whatever the host had on it (measured by
-// tools/tern/style-lint.mjs, rule fold-reset).
-
-function activityBody(groupId: string, items: readonly Item[], currentTask: CurrentTask | undefined, outputExpanded: boolean, goal: string): TspNode[] {
-	const out: TspNode[] = [...controls(groupId, "activity")];
-	const tools = items.filter((item) => item.role === "tool");
-	const view = activityView(tools, currentTask, goal);
-	// The head already carries the turn's request as its target, so the heading adds only the tracked task.
-	if (currentTask) out.push(textNode(`${groupId}-focus`, "tern.work-focus", currentTaskLine(currentTask), "accent"));
-	// The running steps, each with its own spinner and terminal-clocked timer. No list: a step head carries more
-	// state than a row can (status, exit, note, target kind) and animates without a repaint from us.
-	const running = tools.filter((item) => item.status === "running" && item.cancelled !== true);
-	for (const item of running.slice(0, MAX_ACTIVE_STEPS)) out.push(toolRow(item, outputExpanded));
-	if (view.moreActive > 0) out.push(textNode(`${groupId}-overflow`, "tern.work-overflow", `+${view.moreActive} more running`, "muted"));
-	if (view.latest) out.push(textNode(`${groupId}-latest`, "tern.work-latest", `Last · ${rowLine(view.latest)}`, view.latest.tone === "error" ? "error" : "muted"));
-	if (view.failed) out.push(textNode(`${groupId}-failed`, "tern.work-failed", `${view.failed.count} failed · ${rowLine(view.failed.last)}`, "error"));
-	if (view.active.length === 0) out.push({ id: `${groupId}-preparing`, k: "shimmer", p: { role: "tern.work-preparing", text: "Preparing next action" } });
-	return out;
-}
-
-function allStepsBody(groupId: string, items: readonly Item[], currentTask: CurrentTask | undefined, outputExpanded: boolean, live: boolean, goal = ""): TspNode[] {
-	const out: TspNode[] = [...controls(groupId, live ? "all" : undefined)];
-	// The head already carries the turn's request as its target, so the heading adds only the tracked task.
-	if (currentTask) out.push(textNode(`${groupId}-focus`, "tern.work-focus", currentTaskLine(currentTask), "accent"));
+// The card body is one tree: the tracked task when there is one, every step in call order with narration left in
+// place, then a single quiet Inspect action (the overlay already owns All/Active/Failed and search).
+// One `col` wrapper also keeps Tern from drawing its kind-change hairline between a step and its neighbours, so
+// the tree reads by indentation alone.
+function workBody(groupId: string, items: readonly Item[], currentTask: CurrentTask | undefined, outputExpanded: boolean): TspNode[] {
+	const children: TspNode[] = [];
+	if (currentTask) children.push(textNode(`${groupId}-focus`, "tern.work-focus", currentTaskLine(currentTask), "accent"));
 	for (const item of items) {
 		if (item.role === "tool") {
-			out.push(toolRow(item, outputExpanded));
+			children.push(toolRow(item, outputExpanded));
 			continue;
 		}
-		if (item.text.trim()) out.push({ id: `${item.id}-note`, k: "md", p: { role: "tern.work-note", text: item.text, stream: item.streaming === true } });
+		if (item.text.trim()) children.push({ id: `${item.id}-note`, k: "md", p: { role: "tern.work-note", text: item.text, stream: item.streaming === true } });
 	}
-	return out;
-}
-
-// The last control is always Collapse work, which closes only this group.
-function controls(groupId: string, mode: DetailView | undefined): TspNode[] {
-	const chips: TspNode[] = [];
-	if (mode === "activity") chips.push(textNode(`${groupId}-all`, "tern.work-mode", ALL_STEPS_LABEL, "muted", { actions: { click: `work.all=${groupId}` } }));
-	if (mode === "all") chips.push(textNode(`${groupId}-activity`, "tern.work-mode", ACTIVITY_LABEL, "muted", { actions: { click: `work.activity=${groupId}` } }));
-	chips.push(textNode(`${groupId}-collapse`, "tern.work-collapse", "Collapse work", "muted", { actions: { click: `work.collapse=${groupId}` } }));
-	for (const chip of chips) { chip.k = "button"; chip.p = { ...chip.p, variant: "quiet", size: "sm" }; }
-	// One row, so the chips sit side by side on a single quiet line instead of stacking as two transcript lines.
-	return [{ id: `${groupId}-controls`, k: "row", p: { role: "tern.work-controls", gap: "sm", align: "center" }, c: chips }];
+	children.push({
+		id: `${groupId}-inspect`, k: "text",
+		p: {
+			role: "tern.work-inspect", tone: "muted", wrap: "none", text: "Inspect steps",
+			title: "Search and inspect these steps", actions: { click: `work.inspect=${groupId}` },
+		},
+	});
+	return [{ id: `${groupId}-body`, k: "col", p: { role: "tern.work-body", gap: "sm" }, c: children }];
 }
 
 function toolNode(item: Item, outputExpanded: boolean): TspNode {
@@ -967,6 +912,7 @@ function genericToolNode(item: Item, status: "running" | "done" | "error" | "can
 			name: head.name,
 			title: head.verb,
 			status,
+			frame: "inline",
 			// A running step stays open over a bounded live window; a settled one folds to its head (Ctrl+O opens all).
 			collapsible: body,
 			collapsed: body && !running && !outputExpanded,
@@ -1081,6 +1027,7 @@ function taskManageToolNode(item: Item, status: "running" | "done" | "error" | "
 		id: item.id, k: "tool",
 		p: {
 			role: "tasks.call", name: "todo", title: "Tasks", status, frame: "inline", collapsible: true, collapsed: false,
+			target: `${ops.length} op${ops.length === 1 ? "" : "s"}`, targetKind: "text",
 			...(status === "running" ? { age: elapsed } : { took: elapsed }),
 		},
 		c: [{ id: `${item.id}-body`, k: "col", p: { role: "tasks.body", gap: "none" }, c: [
@@ -1088,65 +1035,47 @@ function taskManageToolNode(item: Item, status: "running" | "done" | "error" | "
 				id: `${item.id}-list`, k: "checklist",
 				p: {
 					role: "tasks.list",
-					phases: [{ id: `${item.id}-phase`, title: `${ops.length} op${ops.length === 1 ? "" : "s"}`, items: items.length ? items : [{ id: `${item.id}-empty`, text: "No operations", status: "pending" }] }],
+					// No phase title: the step head already says "N ops", and a single untitled phase drops its row.
+					phases: [{ id: `${item.id}-phase`, title: "", items: items.length ? items : [{ id: `${item.id}-empty`, text: "No operations", status: "pending" }] }],
 				},
 			},
 		] }],
 	};
 }
 
-// Mirror OMP's native bash describeCall/describeResult: the head carries the command as a `command` target
-// (syntax-classed, copyable) and the description as the intent tooltip, while a single borderless run contains
-// the command, the tailing output and the state foot.
+// A Bash step reads as the model's description, never as "Bash <command>". The command is what the step opens to:
+// the body puts it before the output, unless the label already is the command whole. Status, exit and the clock
+// stay in the head; the exact command stays copyable through `command`.
 function bashToolNode(item: Item, status: "running" | "done" | "error" | "cancelled", outputExpanded: boolean): TspNode {
 	const args = item.args as { command?: unknown; description?: unknown; name?: unknown } | undefined;
 	const command = typeof args?.command === "string" && args.command ? args.command : "…";
-	// The caller's label leads the head; the command is demoted to the body, so the
-	// collapsed row says what the step is for instead of quoting the shell. A step
-	// with no label keeps the command where it was.
 	const description = typeof args?.description === "string" ? args.description.trim() : "";
-	const label = typeof args?.name === "string" && args.name ? `Bash · ${args.name}` : "Bash";
-	const head = stepHead("bash", item.args);
-	// A target long enough to be truncated in the head is shown in full in the body, which is where it can wrap.
-	const rawTarget = description || head.target;
-	const headTarget = rawTarget !== undefined && rawTarget.length > STEP_HEAD_TARGET ? `${rawTarget.slice(0, STEP_HEAD_TARGET - 1)}…` : rawTarget;
-	const targetKind: "text" | "command" = description ? "text" : "command";
-	// Expanded steps keep the exact command reachable (a stop or audit decision needs
-	// it); a collapsed step does not quote the shell.
-	const showsCommand = description ? outputExpanded : command.length > STEP_HEAD_TARGET || command.includes("\n");
+	const name = typeof args?.name === "string" ? args.name.trim() : "";
+	const label = bashLabel(item.args) ?? "Bash";
+	const flat = command.replace(/\s+/g, " ").trim();
+	// With a description (or a caller name) the label is intent, so the exact command belongs in the body. Without
+	// one the label is the command; repeat it only when the label could not carry it whole.
+	const needsCommandBody = description !== "" || name !== "" || flat !== command.trim() || flat.length > 400;
 	const elapsed = status === "running" ? Date.now() - (item.startedAt ?? Date.now()) : item.took ?? 0;
-	const state = status === "running" ? "Running" : status === "cancelled" ? "Cancelled" : item.timedOut ? "Timed out" : status === "error" ? item.exit !== undefined ? `exit ${item.exit}` : "Failed" : "Done";
-	const tone = status === "running" ? "pending" : status === "done" ? "success" : status === "cancelled" ? "muted" : item.timedOut ? "warning" : "error";
-	const foot: TspNode = {
-		id: `${item.id}-foot`, k: "row", p: { role: "omp.run.foot", gap: "sm", align: "center" },
-		c: [
-			{ id: `${item.id}-state`, k: "text", p: { role: "omp.run.state", tone, spans: [{ t: state }] } },
-			{ id: `${item.id}-elapsed`, k: "elapsed", p: { role: "omp.run.time", age: elapsed, ...(status === "running" ? {} : { stopped: elapsed }), format: "short" } },
-		],
-	};
-	const run: TspNode = {
-		// `sm` inside the box: the command, its output and the state foot are three different things.
-		id: `${item.id}-run`, k: "col", p: { role: "omp.run", gap: "sm", ...(status === "error" ? { tone: item.timedOut ? "warning" : "error" } : {}) },
-		c: [
-			...(showsCommand ? [{ id: `${item.id}-cmd`, k: "code", p: { role: "omp.tool.bash.command", lang: "bash", wrap: true, text: command.trimEnd() } }] : []),
-			...(item.output?.trim() ? [{ id: `${item.id}-out`, k: "ansi", p: { role: "omp.tool.bash.output", text: status === "running" ? tailWindow(item.output, STEP_LIVE_LINES, item.outputDropped) : item.output, follow: true } }] : []),
-			foot,
-		],
-	};
+	const output = item.output?.trim() ? item.output : undefined;
+	const body: TspNode[] = [
+		...(needsCommandBody ? [{ id: `${item.id}-cmd`, k: "code", p: { role: "omp.tool.bash.command", lang: "bash", wrap: true, text: command.trimEnd() } }] : []),
+		...(output === undefined ? [] : [{ id: `${item.id}-out`, k: "ansi", p: { role: "omp.tool.bash.output", text: status === "running" ? tailWindow(output, STEP_LIVE_LINES, item.outputDropped) : output, follow: true } }]),
+	];
 	return {
 		id: item.id, k: "tool",
 		p: {
-			role: "omp.tool.bash", key: item.id.slice(2), name: "bash", title: label,
-			...(headTarget !== undefined ? { target: headTarget, targetKind } : {}),
-			...(!description && head.intent !== undefined ? { intent: head.intent } : {}),
-			// Open while it runs, so the tail of its output is visible; folded once settled, where the head keeps the
-			// command, the state, the exit code and the duration. Ctrl+O opens every step.
-			command, status, frame: "inline", collapsible: true, collapsed: status !== "running" && !outputExpanded,
+			role: "omp.tool.bash", key: item.id.slice(2), name: "bash", title: "",
+			target: label, targetKind: description !== "" || name !== "" ? "text" : "command",
+			// Open while it runs, so the tail of its output is visible; folded once settled. Ctrl+O opens every step.
+			command, status, frame: "inline",
+			collapsible: body.length > 0,
+			collapsed: body.length > 0 && status !== "running" && !outputExpanded,
 			...(status === "running" ? { age: elapsed } : { took: elapsed }),
 			...(item.exit !== undefined ? { exit: item.exit } : {}),
 			...(item.timedOut ? { note: "timed out" } : {}),
 		},
-		c: [run],
+		...(body.length > 0 ? { c: body } : {}),
 	};
 }
 
@@ -1182,15 +1111,11 @@ function patchToolNode(item: Item, status: "running" | "done" | "error" | "cance
 			...(item.exit !== undefined ? { exit: item.exit } : {}),
 			...(item.timedOut ? { note: "timed out" } : {}),
 		},
-		c: [
-			{
-				id: `${item.id}-body`, k: "col", p: { role: "tern.work-patch", gap: "sm" },
-				c: sections.slice(0, MAX_PATCH_FILES_SHOWN).map((section, i) => ({
-					id: `${item.id}-diff-${i}`, k: "diff",
-					p: { role: "tern.work-patch.diff", text: section.lines.join("\n"), path: section.path },
-				})),
-			},
-		],
+		// One diff per file, in call order; same-kind children draw no divider, so the tree needs no wrapper.
+		c: sections.slice(0, MAX_PATCH_FILES_SHOWN).map((section, i) => ({
+			id: `${item.id}-diff-${i}`, k: "diff",
+			p: { role: "tern.work-patch.diff", text: section.lines.join("\n"), path: section.path },
+		})),
 	};
 }
 
@@ -1224,8 +1149,6 @@ export interface BridgeOptions {
 // A running step stays open, so its body is a bounded tail of what it printed: Tern's own `preview` gives way
 // inside an open tool, and an unbounded body would push the rest of the turn off screen.
 const STEP_LIVE_LINES = 12;
-// The head stays one readable line; a longer command is repeated (wrapped) in the body where it can be read.
-const STEP_HEAD_TARGET = 64;
 const MAX_PATCH_FILES_SHOWN = 3;
 
 // The last `lines` lines of a live stream, with an explicit count of what is held back (never silently cut).
@@ -1495,6 +1418,9 @@ export class PiTernBridge {
 		this.#surface.stylesheet("composer", PI_COMPOSER_CSS);
 		this.#surface.stylesheet("work", TERN_WORK_CSS);
 		this.#surface.stylesheet("markdown", TERN_MARKDOWN_CSS);
+		// An ask flow can open before any panel does, so its sheet is up front: the card must be solid on the
+		// first frame it draws, not after some later feature registers a sheet (ask-style.ts).
+		this.#surface.stylesheet("ask", PI_ASK_CSS);
 		// The blob precedes any frame that references it, as with artifact previews.
 		for (const chunk of encodeTspBlob(this.#logo.id, this.#logo.mime, this.#logo.base64)) this.#write(chunk);
 		this.#loadRepo();
@@ -3044,11 +2970,6 @@ export class PiTernBridge {
 			this.#stepInspector = { group: msg.body.value, filter: "all", search: new DraftEditor() };
 			this.#render(); return;
 		}
-		if (typeof act === "string" && act.startsWith("work.filter.") && typeof msg.body.value === "string") {
-			const filter = act.slice("work.filter.".length);
-			if (["all", "active", "failed"].includes(filter)) this.#projector.setGroupView(msg.body.value, filter as WorkFilter);
-			this.#render(); return;
-		}
 		// Form-backed actions carry `values.text`. The composer's Send control carries no payload, so it
 		// must fall through to the same path as Enter (autocomplete, ask-dialog confirmation, attachments
 		// and the draft) instead of submitting an empty string.
@@ -3088,11 +3009,6 @@ export class PiTernBridge {
 		if (act === "interrupt") void this.cancel();
 		if (act === "work.collapse" && typeof msg.body.value === "string") {
 			this.#projector.setGroupCollapsed(msg.body.value, true);
-			this.#render();
-			return undefined;
-		}
-		if ((act === "work.all" || act === "work.activity") && typeof msg.body.value === "string") {
-			this.#projector.setGroupView(msg.body.value, act === "work.all" ? "all" : "activity");
 			this.#render();
 			return undefined;
 		}

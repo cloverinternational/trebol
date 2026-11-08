@@ -41,15 +41,19 @@ Native fixture harness: `node tools/e2e/tern-background-manager.mjs`.
 Rendered-box measurement (real `tern serve`, not our own CSS):
 `node tools/e2e/tern-composer-work-chip.mjs`.
 
-Tern work groups offer All / Active / Failed filters and Search & inspect.
-`work-inspector.ts` provides pure counts/filtering and a native selected-step
-overlay; `bridge.ts` keeps per-group disclosure/filter state through streaming
-and settlement. Headers retain failure/completion/cancellation counts, and a
-collapsed live group can show the current action when no narration tail exists.
-The inspector searches safe step summaries, shows bounded captured output with
-explicit truncation, and reveals the original step without globally expanding
-other groups. It neither retries nor cancels operations. Raw/native input is
-isolated from the composer, and session replacement drops the inspector.
+Tern work groups show their steps as one tree with exactly **one** affordance, a
+quiet `Inspect steps` line (`tern.work-inspect`) that opens the step overlay.
+The card itself carries no filter, fold or mode buttons: the native head chevron
+and head click fold it, Ctrl+O opens every step, and `/work` opens the work
+sheet. `work-inspector.ts` provides the overlay's All / Active / Failed filters,
+search and selected-step detail; `bridge.ts` keeps only the group fold through
+streaming and settlement. Headers retain failure and cancellation badges (never
+a "completed" count that repeats `Done`), and a collapsed live group can show
+the current action when no narration tail exists. The inspector searches safe
+step summaries, shows bounded captured output with explicit truncation, and
+reveals the original step without globally expanding other groups. It neither
+retries nor cancels operations. Raw/native input is isolated from the composer,
+and session replacement drops the inspector.
 Tests: `.pi/test/tern/work-inspector.test.ts` plus work-table, turn-work and
 turn-groups. Runner changes require restarting the pane.
 
@@ -627,33 +631,35 @@ The transcript's turn card (`.pi/lib/tern/bridge.ts`, `work-summary.ts`) is a **
 hand-drawn table. Tern 0.9.5 draws and *clocks* the parts that change every second:
 
 - One native `tool` head per tool call, in call order, nested in the turn card (a nested `tool` draws
-  unframed). The head carries the verb (`stepHead`: Bash/Read/Edit/Patch/Search/Tasks), a typed `target`
-  (`command` for bash — the head's Copy button copies it, the description becomes `intent`; `path` for file
-  tools; `pattern` for searches), `status`, `age` while running / `took` once settled, `exit`, `note`.
-  Tern spins the glyph and counts `age` on its own, so **never** re-render on a timer to advance a clock and
-  never hand-format an elapsed row.
-- The group head is the turn, not the first step: title is `N running` / `Done`, target is the request,
-  `age`/`took` is the turn's own clock, and a recovered failure is a `warning` badge (`1 failed`). The
-  tracked task is the only extra heading line; never repeat the request the head already shows.
+  unframed). A step carries its verb and a typed `target` (`path` for file tools, `pattern` for searches);
+  a Bash step carries **no verb**: `bashLabel` gives description -> caller name -> bounded command, so the row
+  reads as the job, never as "Bash <command>". `status`, `age` while running / `took` once settled, `exit` and
+  `note` stay in the head. Tern spins the glyph and counts `age` on its own, so **never** re-render on a timer
+  to advance a clock and never hand-format an elapsed row.
+- The group head follows the work, not the prompt: title is `N running` / `working` / `Done`, and its target
+  is the newest running tool call's label while live, else the last call's label (including once settled).
+  Never put the user request there — it stays in the user bubble. `age`/`took` is the turn's own clock, and a
+  recovered failure is a `warning` badge (`1 failed`). The tracked task is the only extra heading line.
 - A running step is **open** over a bounded live window (`tailWindow`, `STEP_LIVE_LINES`); a settled step is
   folded to its head, and Ctrl+O opens every step. Do not clamp with a `tool` `preview`: Tern's previews give
   way inside an open tool, and removing a preview does not re-fold a step, so the body would stay visible.
 - The dock carries the turn too: an `elapsed` (`omp.composer.turn`) sits beside Stop only while busy, and a
   fact chip with no reachable action is a plain label (`modelSelectable`), because a click that can only write
   "unavailable" into the transcript is a trap.
-- A command longer than `STEP_HEAD_TARGET` (or multiline) is truncated in the head and repeated **in full**
-  in the body, where it can wrap; the head keeps the copyable `command` prop. A short command is never
-  duplicated into the body.
+- A Bash step's label is the **description** (else the caller's name, else the bounded command), `title` is
+  empty, and opening it shows the command (`code`, role `omp.tool.bash.command`) before the output, because
+  the label is intent. When the label already is the whole command, the body is output only, so nothing is
+  duplicated. The exact command stays in `command` for the head's Copy. The one `.sf-tool-hr` between command
+  and output is Tern's section rule and is intentional; there is no `omp.run` box and no state foot.
 - An `apply_patch` is a diff, not a status word: `patchSections` splits the V4A body per file (dropping the
   `***` markers), the head names the files with `+a −d`, and each file draws a Tern `diff` node. Folded once
   settled, like every other step.
-- Spacing is deliberate, not incidental: steps are separated in `work-style.ts` (`.sf-tool + .sf-tool`), the
-  run box uses `gap: "sm"` for command/output/foot, and the patch body gets its own margins. Do not compress
-  these back; the card is scanned, not read.
-- `activityBody` lists the running steps as the same heads plus `Last`/`failed`/`+N more` lines and a
-  `shimmer` "Preparing next action"; the chips (`Activity` / `All steps` / `Collapse work`) live in **one**
-  `row` (`tern.work-controls`), styled by `.pi/lib/tern/work-style.ts` — keep every selector inside Tern's
-  subset (no `:has()`, no `~`, no leading region element).
+- The card body is one `col` (`tern.work-body`, `gap: "sm"`), so steps read as a tree by indentation and Tern
+  never draws its kind-change hairline (`.sf-tool-hr`) between a step and its neighbours. `work-style.ts`
+  hides the nested `.sf-tool-ic`: the card head owns the turn's glyph, each step is named by its label (Bash:
+  the description). Steps are indented 18px and their bodies 12px more, so depth is the only guide. Keep every selector
+  inside Tern's subset (no `:has()`, no `~`, no leading region element). The one control is the muted
+  `Inspect steps` text line at the end of the tree; do not add a chip row back.
 - Text in program sheets follows the terminal font: write sizes as `calc(var(--sf-fs, 13px) * N / 13)`, never
   plain `px`. Tern documents a 13px design zoomed by `font / 13`, but the Tern 0.9.5 Linux desktop view sets
   `--sf-fs` to the raw font with no zoom, so plain px (ours and Tern's own composer rules) froze there while
@@ -666,6 +672,15 @@ hand-drawn table. Tern 0.9.5 draws and *clocks* the parts that change every seco
   Mermaid figures are one opaque `svg`, so diagram look is steered through the `mermaid` prompt section
   (flowchart + labelled subgraphs and role shapes; no `architecture-beta`, `C4*` or `classDef` fills), not CSS.
   Evidence and mockups: `ideas/tern-markdown/`.
+- The ask dialog is a **form**, so its card is solid: `.pi/lib/tern/ask-style.ts` (sheet `ask`, registered in
+  `start()` because a flow can be the pane's first frame) feeds Tern's `--sf-card-bg` with `--card`, falling
+  back to `--fog`, inside `.sf-card[data-role='pi.ask']`. Tern's card is glass (white 55% light, white 2.8%
+  dark), which made the question and the panel behind it the same colour and let a glass window show through.
+  Feed the token, never paint `background` (a tone fill still resolves through it), and never drop the role
+  scope: every other card keeps its glass. `--page`/`--panel` are not fallbacks — the kit calls them
+  translucent in glass windows. Verify with `node tools/e2e/tern-ask-card-surface.mjs`: a real `tern serve`
+  reports the computed fill in light and dark, checks in the same run that a role-less card is still glass,
+  and `--no-sheet` reproduces the pre-fix translucency.
 - Subagents are `agent` nodes in the background card (`stats.age`, `stats.tokens`, `task`), and a TaskManage
   batch is one `checklist` (a blocked operation is a `blocked` item whose `note` is its error). Only fields
   the running-work store and the batch really carry are sent; no invented progress, context or cost.

@@ -349,9 +349,10 @@ describe("Transcript render window", () => {
 	it("revealing a step in a hidden turn brings that turn into the window", () => {
 		const p = new TranscriptProjector();
 		p.replaceFromSessionBranch(persistedBranch(80));
-		expect(p.nodes().some((n) => (n.c ?? []).some((c) => c.id === "t-p3"))).toBe(false);
+		const paints = () => JSON.stringify(p.nodes()).includes('"id":"t-p3"');
+		expect(paints()).toBe(false);
 		expect(p.revealStep("t-p3")).toBeTruthy();
-		expect(p.nodes().some((n) => (n.c ?? []).some((c) => c.id === "t-p3"))).toBe(true);
+		expect(paints()).toBe(true);
 	});
 
 	it("a resumed session's first frame and keystrokes stay bounded however old it is", () => {

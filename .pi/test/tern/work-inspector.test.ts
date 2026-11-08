@@ -27,17 +27,16 @@ describe("progressive work", () => {
     expect(rendered).not.toContain("SECRET"); expect(rendered.length).toBeLessThan(30000);
     expect(JSON.stringify(workInspectorNodes("g", [], undefined, "", 0, "all", 120))).toContain("No matching steps");
   });
-  it("keeps filters and folding through streaming and settlement", () => {
+  it("keeps the fold and every step through streaming and settlement", () => {
     const p = new TranscriptProjector();
     p.apply({ type: "agent_start" }); start(p, "a"); end(p, "a", true); start(p, "b");
-    p.setGroupView("g-t-a", "failed"); p.setGroupCollapsed("g-t-a", true);
+    p.setGroupCollapsed("g-t-a", true);
     const before = p.nodes(false).find((n) => n.id === "g-t-a")!;
     expect(before.p?.collapsed).toBe(true);
-    expect(before.c?.filter((n) => n.k === "tool").map((n) => n.id)).toEqual(["t-a"]);
+    expect(p.groupItems("g-t-a").map((n) => n.id)).toEqual(["t-a", "t-b"]);
     end(p, "b"); p.apply({ type: "agent_end", messages: [] });
     const after = p.nodes(false).find((n) => n.id === "g-t-a")!;
     expect(after.p?.collapsed).toBe(true);
-    expect(after.c?.filter((n) => n.k === "tool").map((n) => n.id)).toEqual(["t-a"]);
     expect(p.groupItems("g-t-a").length).toBe(2);
   });
   it("owns keyboard/native paste without changing the draft and closes on session replacement", async () => {

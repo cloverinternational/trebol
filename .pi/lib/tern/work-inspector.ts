@@ -25,14 +25,6 @@ export function filterWork(steps: readonly InspectableStep[], filter: WorkFilter
 const node = (id: string, k: string, p: Record<string, unknown>, c?: TspNode[]): TspNode => ({ id, k, p, ...(c ? { c } : {}) });
 const button = (id: string, text: string, click: string) => node(id, "button", { text, variant: "quiet", size: "sm", actions: { click } });
 
-export function workToolbar(id: string, steps: readonly WorkStep[], filter: string): TspNode {
-	const counts = workCounts(steps);
-	return node(`${id}-explore`, "row", { gap: "sm", wrap: true, role: "pi.work.explore" }, [
-		...([ ["all", "All", counts.total], ["active", "Active", counts.active], ["failed", "Failed", counts.failed] ] as const).map(([key, label, count]) => node(`${id}-filter-${key}`, "button", { text: `${label} ${count}`, on: filter === key, variant: "quiet", size: "sm", tone: key === "failed" && count ? "warning" : "neutral", actions: { click: `work.filter.${key}=${id}` } })),
-		button(`${id}-inspect`, "Search & inspect", `work.inspect=${id}`),
-	]);
-}
-
 /** Safe projections only: never dump arbitrary tool arguments into a UI summary. */
 export function workInspectorNodes(id: string, steps: readonly InspectableStep[], selected: string | undefined, query: string, cursor: number, filter: WorkFilter, columns: number): TspNode[] {
 	const rows = filterWork(steps, filter, query);

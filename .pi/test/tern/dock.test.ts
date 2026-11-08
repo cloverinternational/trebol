@@ -4,6 +4,7 @@ import { ESC, parseTspMessages } from "../../lib/tern/tsp.ts";
 import { PI_COMPOSER_CSS } from "../../lib/tern/composer-style.ts";
 import { TERN_WORK_CSS } from "../../lib/tern/work-style.ts";
 import { TERN_MARKDOWN_CSS } from "../../lib/tern/markdown-style.ts";
+import { PI_ASK_CSS } from "../../lib/tern/ask-style.ts";
 import { removeRunningWork, setRunningWork } from "../../lib/ui/running-work-store.ts";
 
 interface FakeOptions {
@@ -388,6 +389,14 @@ describe("Tern regions and dock structure", () => {
 		expect(TERN_MARKDOWN_CSS).not.toContain("--accent");
 	});
 
+	it("registers the ask sheet at start, so the dialog is solid on the frame it first draws", () => {
+		const { writes } = make(fakeSession());
+		const sheets = writes.filter((w) => w.startsWith(`${ESC}_tsp;s;`)).map((w) => parseTspMessages(w)[0]?.body as { name: string; css: string });
+		// An ask flow can be the first thing the pane shows; waiting for a panel to open would leave the card
+		// glass until then.
+		expect(sheets.find((s) => s.name === "ask")?.css).toBe(PI_ASK_CSS);
+	});
+
 	it("every composer selector stays inside the subset Tern supports", () => {
 		const selectors = PI_COMPOSER_CSS.replace(/\/\*[\s\S]*?\*\//g, "")
 			.split("}")
@@ -532,7 +541,7 @@ describe("Tern regions and dock structure", () => {
 		bridge.start();
 		await bridge.submit("/reload");
 		expect(called).toBe(1);
-		expect(writes.filter(w => w.startsWith(`${ESC}_tsp;s;`))).toHaveLength(4); // composer, work, markdown, reloaded named sheet
+		expect(writes.filter(w => w.startsWith(`${ESC}_tsp;s;`))).toHaveLength(5); // composer, work, markdown, ask, reloaded named sheet
 		expect(textsUnder(writes, "main").join(" ")).toContain("Reloaded Pi resources");
 		bridge.close();
 	});
@@ -551,7 +560,7 @@ describe("Tern regions and dock structure", () => {
 		fake.emit({ type: "agent_end" });
 		await bridge.submit("/reload");
 		expect(called).toBe(1);
-		expect(writes.filter(w => w.startsWith(`${ESC}_tsp;s;`))).toHaveLength(3); // composer, work, markdown
+		expect(writes.filter(w => w.startsWith(`${ESC}_tsp;s;`))).toHaveLength(4); // composer, work, markdown, ask
 		expect(textsUnder(writes, "main").join(" ")).toContain("reload failed: invalid resource");
 		bridge.close();
 	});
