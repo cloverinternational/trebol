@@ -15,7 +15,7 @@ export class HojaProjectError extends Error {}
 /** Shared guidance for the two fail-closed errors. Names every accepted variable so a bare install can be fixed
  *  from the message alone, without reading this file. */
 export const HOJA_ENV_HINT =
-	"Set HOJA_API_URL (a GraphQL endpoint such as https://hoja.hoja.work/graphql) and HOJA_TOKEN. " +
+	"Set HOJA_API_URL (a GraphQL endpoint such as https://workspace.hoja.work/graphql) and HOJA_TOKEN. " +
 	"HOJA_MCP_URL is also accepted, and its host is used with /graphql. " +
 	"LINEAR_API_URL and LINEAR_TOKEN are honoured as legacy fallbacks.";
 
