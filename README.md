@@ -122,9 +122,9 @@ state; it must not become the source of truth for that state.
 | `.pi/test/` | Tests for Pi-specific code |
 | `.pi/config/` | Project prompt and Swarm settings; credentials stay ignored |
 | `.pi/themes/` | Local Pi themes |
-| `packages/runtime/` | Core identity, contracts, and runtime control |
+| `packages/runtime/` | Shared tool rendering and runtime control interfaces |
 | `packages/context/` | Prompt assets, skills, and generated-skill lifecycle |
-| `packages/policy/` | Capability and execution policy |
+| `packages/experimental/` | Experimental workers kept out of the local agents graph |
 | `packages/tools/` | Agents, MCP, scheduling, and task management |
 | `docs/` | Architecture, plans, references, and parity documentation |
 | `artifacts/` | Ignored probe output, recordings, and baselines |

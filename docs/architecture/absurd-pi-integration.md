@@ -39,7 +39,8 @@ already ends at a resumable boundary; otherwise start a new prompt with
 
 See `packages/runtime/runtime-contracts/src/general-agent.ts` for the narrow typed task,
 checkpoint, runtime, status, and tool request/response contracts. The minimal
-worker is `packages/tools/agents/src/worker-daemon.ts`: it registers only the general-agent
+worker is `packages/experimental/absurd-worker/src/worker-daemon.ts` (an experimental
+package the local agents graph never imports): it registers only the general-agent
 task, starts Absurd with concurrency one, reports health, and closes its worker
 and client on shutdown. Its runtime factory is injectable for offline tests.
 The transport-neutral control/task tool contract is in

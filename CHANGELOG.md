@@ -20,6 +20,11 @@ Release metadata is kept in `package.json`, `update-manifest.json`, and this fil
 
 ### Fixed
 
+- `npm run test:integration` no longer reports success without running anything. With
+  `PI_SWARM_POSTGRES_URL` set it printed "Optional integration path enabled" and exited 0 while
+  exercising no database and no worker. It now refuses: it writes
+  "NOT IMPLEMENTED: no live Postgres/Absurd acceptance test is wired" and exits 2 either way, so a
+  green integration run can only mean a real suite ran.
 - The footer's output-token count no longer changes shape with the host locale. `footerMetricsLine` called a
   bare `toLocaleString()`, the only surface that did: the same count read `↓ 1,234 tok` under `en-US` and
   `↓ 1234 tok` under `es_ES`, because Spanish drops the thousands separator below ten thousand. It now pins
@@ -52,6 +57,19 @@ Release metadata is kept in `package.json`, `update-manifest.json`, and this fil
 
 ### Changed
 
+- Experimental worker code is out of the local agents package. The Absurd daemon, control plane and
+  general-agent adapter moved from `packages/tools/agents/src/` to a private
+  `packages/experimental/absurd-worker` (`npm run build:experimental`), and `@pi-swarm/agents` no
+  longer declares `absurd-sdk` or `pg`. `tests/architecture-boundaries.test.ts` now fails if the
+  local agents source graph reaches `absurd`, `experimental`, `runtime-contracts/dist` or `pg`.
+- Three packages with no consumer were removed: `packages/policy/policy` (its `checkAllowedPath`
+  was never called; path boundaries live in `.pi/lib/tools/path-guard.ts`),
+  `packages/runtime/contract` (the profile/capability contracts nothing imported, plus
+  `docs/reference/profiles.md`), and the session-identity/event-journal half of
+  `packages/runtime/core`, which now exports only the shared tool renderer. AGENTS.md and README
+  described all three as load-bearing; the documentation now matches what the code does.
+  `packages/runtime/runtime-contracts/src/general-agent.{js,d.ts}` were dead duplicates of the
+  tracked `general-agent.ts` and are gone.
 - Tern's collapse-work card shows the work, not the prompt, and its rows are jobs, not tool names. The head
   target is now the newest running tool call's label while live, and the last call's label between calls and
   once settled; the user request no longer appears in the head (it stays in the user bubble). The opened card

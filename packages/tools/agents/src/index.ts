@@ -1,6 +1,4 @@
 import { createHash, randomUUID } from "node:crypto";
-export * from "./general-agent-adapter.js";
-export * from "./worker-daemon.js";
 import { mkdir, rm } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -157,4 +155,3 @@ export function registerAgents(pi: any, manager = new AgentManager(), parentSess
   pi.registerTool({ name: "AgentControl", label: "Control agent", description: "Wait, cancel, or steer a background agent.", parameters: { type: "object", required: ["id", "action"], properties: { id: { type: "string" }, action: { type: "string", enum: ["wait", "cancel", "steer"] }, instruction: { type: "string" }, timeoutMs: { type: "number" } } }, async execute(_id: string, input: any) { const value = input.action === "wait" ? await manager.control(input.id, "wait", undefined, input.timeoutMs) : manager.control(input.id, input.action, input.instruction); return { content: [{ type: "text", text: JSON.stringify(value) }], details: value }; } });
   return manager;
 }
-export * from "./absurd-control-plane.js";

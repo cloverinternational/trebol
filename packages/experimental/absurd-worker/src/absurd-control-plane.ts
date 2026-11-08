@@ -3,7 +3,8 @@ import { newId, type ID } from "../../../runtime/runtime-contracts/dist/contract
 import { ControlPlaneError, type ControlPlane, type AgentBinding, type AgentRegistration, type CreateJobRequest, type Job, type EventSubscription, type ControlPlaneEvent } from "../../../runtime/runtime-contracts/dist/control-plane.js";
 import { GENERAL_AGENT_TASK } from "../../../runtime/runtime-contracts/dist/general-agent.js";
 
-/** Absurd/Postgres production implementation. It intentionally has no local fallback. */
+/** Experimental dispatcher: Absurd persists tasks, but agent/job/index/event state
+ * here is process-local and is lost on restart. NOT a durable control plane. */
 export class AbsurdControlPlane implements ControlPlane {
  private agents=new Map<ID,AgentBinding>(); private jobs=new Map<ID,Job>(); private keys=new Map<string,ID>(); private seq=0; private events:ControlPlaneEvent[]=[];
  constructor(private readonly absurd: Absurd, private readonly ownerFor:(job:Job)=>string|undefined=()=>undefined) {}

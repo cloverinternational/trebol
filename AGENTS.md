@@ -132,9 +132,9 @@ path, and preserve native tools and unrelated extensions while disabled.
 | `.pi/config/` | Project configuration: `prompt-context.json`, `swarm-settings.json`, and the ignored `api-keys.json`. |
 | `.pi/themes/` | Local Pi theme definitions. |
 | `packages/<layer>/<name>/` | npm workspaces (`packages/*/*`). Directory name equals the npm name suffix: `packages/runtime/core` is `@pi-swarm/core`. |
-| `packages/runtime/` | `core` (session identity, event journal), `contract` (immutable profile/capability contracts), `runtime-contracts` (control-plane, daemon, goal-loop, task interfaces). |
+| `packages/runtime/` | `core` (the shared tool renderer), `runtime-contracts` (control-plane, daemon, goal-loop, task interfaces). |
 | `packages/context/` | `prompt` (canonical prompt markdown and provenance), `skills` (loader, registry, builtins), `autogenskills` (generated-skill lifecycle). |
-| `packages/policy/` | `policy` (capability, workspace, mutation, network, approval). |
+| `packages/experimental/` | `absurd-worker`: the Absurd daemon, control plane and general-agent adapter, deliberately outside the local agents graph. `npm run build:experimental`. |
 | `packages/tools/` | `agents`, `taskmanage`, `mcp`, `schedule`. |
 | `tools/experiments/patch-parity/` | Runs the pinned upstream apply-patch scenario corpus (`fixtures/scenarios`, openai/codex `430a16799d90e296fb27b1e94f206023902b7e56`) against Trebol: `node --experimental-strip-types tools/experiments/patch-parity/runner.ts standalone\|agent`. `oracle` mode needs `CODEX_APPLY_PATCH_BIN` pointing at a built upstream binary and otherwise reports BLOCKED. Fixture expectations are upstream-authored and were not produced by executing the oracle. |
 | `tools/experiments/bootstrap-agent/` | Opt-in bootstrap experiments; `planning-contract.mjs` provides experimental prompt variants and strict plan validation. Private history replays stay in ignored artifacts; planning scores do not prove execution or memory retrieval. |
@@ -333,8 +333,9 @@ See `docs/reference/hoja-task-publication.md` for live reproduction and verifica
 
 Use this section when a user names a tool, skill, or hook. Start at the public
 Pi extension, then follow its imported package/library. Keep the extension
-thin: execution/domain logic belongs in the package or `.pi/lib/`, policy
-belongs in `packages/policy/policy`, and rendering belongs in the extension/render bridge.
+thin: execution/domain logic belongs in the package or `.pi/lib/`, authorization and path
+boundaries belong in `.pi/lib/tools/` (`path-guard.ts`), and rendering belongs in the
+extension/render bridge.
 
 ### Tools by user-facing name
 
@@ -342,7 +343,7 @@ belongs in `packages/policy/policy`, and rendering belongs in the extension/rend
 | --- | --- | --- |
 | `bash` | `extensions/swarm-bash/extension.ts` | `.pi/lib/tools/swarm-bash.ts`; policy must gate execution separately. |
 | `Read`, `apply_patch` | `extensions/swarm-fs-tools/extension.ts` | `.pi/lib/tools/swarm-apply-patch.ts`, `.pi/lib/tools/swarm-read-image.ts`; filesystem boundary is an explicit decoupling seam. `apply_patch` follows pinned upstream Codex V4A semantics (parse, then validate with no writes, then sequential execution with no rollback; first-match context; per-line endings). There are no file snapshots or `Undo` tool (removed 2026-10-27: 1 call in 354 sessions, unbounded `.swarm/snapshots` growth); revert with git. Known exclusions and the oracle status are in `docs/parity/codex-apply-patch-audit.md`. Do not reintroduce atomicity or ambiguity-rejection claims. |
-| `Agent`, `AgentControl` | `extensions/swarm-agent-tools/extension.ts` | `packages/tools/agents/src/index.ts`, `packages/tools/agents/src/general-agent-adapter.ts`; child runner/session isolation lives in `packages/tools/agents`. |
+| `Agent`, `AgentControl` | `extensions/swarm-agent-tools/extension.ts` | `packages/tools/agents/src/index.ts`; child runner/session isolation lives in `packages/tools/agents`. |
 | `task_create`, `task_update`, `task_get`, `task_list`, `task_delete`, `task_claim`, `task_note`, `task_plan`, `task_complete`, `task_reopen`, `task_block`, `task_unblock`, `task_focus`, `task_unfocus`, `task_status`, `run_status` | `extensions/taskmanage/extension.ts`, `extensions/control-task-tools/extension.ts` | `packages/tools/taskmanage/src/task-manage.ts`, `packages/tools/taskmanage/src/workflow.ts`, `packages/tools/taskmanage/src/persistence.ts`, `packages/runtime/runtime-contracts/src/control-task.ts`; do not duplicate task state in extensions. |
 | `HistorySearch`, `HistoryGet` | `extensions/swarm-history-vault-tools/extension.ts` and `extensions/history-search/extension.ts` | `.pi/lib/tools/swarm-history-tools.ts` with shared `history-reader.ts`, `history-matching.ts`, and `history-admission.ts`; streaming history is read-only, resource-budgeted, redacted, and reports incomplete scans. See `docs/reference/history-search.md`. |
 | `memory_history` | `extensions/memory-history/extension.ts` | `.pi/lib/state/shared-memory.ts`: repository-default immutable records under `~/.swarm/memory` (override `PI_SWARM_MEMORY_DIR`), Git-common-dir repository identity, worktree overlay and explicit global scope. Legacy session scope remains readable. Redact before writes. |
@@ -551,15 +552,13 @@ are separate seams and should remain decoupled.
 
 | Package | Primary source files | Change here when… |
 | --- | --- | --- |
-| `packages/tools/agents` | `packages/tools/agents/src/index.ts`, `general-agent-adapter.ts`, `worker-daemon.ts`, `absurd-control-plane.ts` | Agent identity, runner, cancellation, concurrency, or child sessions change. |
+| `packages/tools/agents` | `packages/tools/agents/src/index.ts` | Agent identity, runner, cancellation, concurrency, or child sessions change. The Absurd daemon, control plane and general-agent adapter live in `packages/experimental/absurd-worker`. |
 | `packages/context/autogenskills` | `packages/context/autogenskills/src/index.ts` | Skill curation, locking, budgets, revision history, or review policy changes. |
 | `packages/tools/mcp` | `packages/tools/mcp/src/index.ts` | MCP manifests, transports, discovery, tool allowlists, or auth change. |
-| `packages/policy/policy` | `packages/policy/policy/src/policy.ts`, `packages/policy/policy/src/index.ts` | Authorization, workspace/mutation/network boundaries, or fail-closed rules change. |
 | `packages/runtime/runtime-contracts` | `packages/runtime/runtime-contracts/src/*.ts` | Control-plane, daemon, goal-loop, task, or stable runtime interfaces change. |
 | `packages/tools/schedule` | `packages/tools/schedule/src/{cron,scheduler,store,tools,types}.ts` | Scheduling semantics, persistence, or schedule tools change. |
 | `packages/context/skills` | `packages/context/skills/src/index.ts`, `packages/context/skills/builtins/**` | Skill loading, precedence, builtins, metadata, or disclosure changes. |
-| `packages/runtime/contract` | `packages/runtime/contract/src/index.ts` | Immutable profile, capability IDs, digest, or provenance contracts change. |
-| `packages/runtime/core` | `packages/runtime/core/src/index.ts` | Session identity, event journal, or runtime replacement semantics change. |
+| `packages/runtime/core` | `packages/runtime/core/src/tool-renderer.ts` | Shared tool rendering changes. |
 | `packages/context/prompt` | `packages/context/prompt/src/index.ts`, `prompts/swarm-system-prompt.md` | Canonical prompt text, section order, or prompt provenance changes. |
 | `packages/tools/taskmanage` | `packages/tools/taskmanage/src/*.ts` | Task persistence, hooks, workflows, interaction, or authoritative task lifecycle changes. |
 
@@ -572,16 +571,16 @@ the package/extension boundary.
 
 - `packages/context/prompt` owns prompt precedence, workspace context, and non-secret
   provenance; chain `event.systemPrompt` instead of overwriting blindly.
-- `packages/policy/policy` owns final fail-closed authorization. Tool registration or a prompt
-  instruction is not authorization.
+- Tool registration or a prompt instruction is not authorization: the gate lives in the tool
+  implementation under `.pi/lib/tools/` (`path-guard.ts` holds the path boundaries).
 - `packages/tools/taskmanage`, `packages/tools/agents`, `history-search`, and `memory-history` own their
   respective durable workflows; use stable IDs and bounded outputs.
-- `packages/runtime/core` owns shared runtime identity/lifecycle; extensions must not each
-  invent global identity or duplicate lifecycle state.
+- `packages/runtime/core` exports only the shared tool renderer. Session identity and lifecycle
+  belong to Pi; extensions must not invent global identity or duplicate lifecycle state.
 - `packages/context/skills`, `packages/context/autogenskills`, `packages/tools/mcp`, and `packages/tools/schedule` provide opt-in capability
   layers; do not make ambient discovery silently widen a closed profile.
-- `packages/runtime/contract` and `packages/runtime/runtime-contracts` define interfaces consumed by
-  multiple packages; change them deliberately and update all consumers/tests.
+- `packages/runtime/runtime-contracts` defines interfaces consumed by multiple packages; change it
+  deliberately and update all consumers/tests.
 - Import direction is fixed by who runs the code. `.pi/` imports package
   sources by relative path (`../../../packages/<layer>/<name>/src/index.ts`):
   Pi loads extensions through jiti with plain Node resolution and no build
@@ -905,6 +904,8 @@ npm run build                     # tsc for every package, dependency order
 npm test                          # vitest: packages/**/test, .pi/test, tests/
 npx vitest run .pi/test/context   # one layer, or any path/file
 npm run build -w @pi-swarm/prompt # one package
+npm run build:experimental        # runtime + packages/experimental/absurd-worker (not in `build`)
+npm run test:integration          # refuses with exit 2 until a live Postgres/Absurd suite exists
 npm run doctor                    # global-install health: PATH, dist, deps, models.json, theme
 node tools/repo/rewrite-imports.mjs --check   # every relative specifier resolves
 npm run check:symlinks            # no tracked symlink escapes this checkout
