@@ -20,6 +20,11 @@ Release metadata is kept in `package.json`, `update-manifest.json`, and this fil
 
 ### Fixed
 
+- The footer's output-token count no longer changes shape with the host locale. `footerMetricsLine` called a
+  bare `toLocaleString()`, the only surface that did: the same count read `↓ 1,234 tok` under `en-US` and
+  `↓ 1234 tok` under `es_ES`, because Spanish drops the thousands separator below ten thousand. It now pins
+  `"en-US"` like `session-tree.ts` and `context-panel.ts` already do, so the footer reads the same everywhere
+  and `.pi/test/ui/conversation-metrics.test.ts` no longer depends on the machine that runs it.
 - The ask-user dialog in a Tern pane is a solid card instead of a glass one. Tern's `.sf-card` fill is white
   55% in light and white 2.8% in dark, which is right for a transcript block and wrong for a form the user has
   to read: the question and the panel behind it were the same colour, and on a glass window the desktop showed
