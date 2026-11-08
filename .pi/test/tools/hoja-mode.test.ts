@@ -209,9 +209,13 @@ describe("hoja-mode read-only guarantee", () => {
 	});
 });
 
+// These cases are about fetch behaviour, so they need an endpoint: without one every call stops at the
+// endpoint check and the assertions below never reach the code they name (and the secret-leak cases
+// would pass because "no endpoint" is also an error).
+const HOJA_TEST_URL = "https://hoja.test/graphql";
 describe("shared Hoja client safety", () => {
 	it.each(["http", "graphql", "network", "json"])("does not leak secrets via %s errors", async (kind) => {
-		const client = new HojaClient({ token: TOKEN, fetch: async () => {
+		const client = new HojaClient({ url: HOJA_TEST_URL, token: TOKEN, fetch: async () => {
 			if (kind === "network") throw new Error(TOKEN);
 			return { status: kind === "http" ? 403 : 200, text: async () => kind === "json" ? TOKEN : JSON.stringify({ errors: [{ message: TOKEN }] }) };
 		} });
@@ -221,7 +225,7 @@ describe("shared Hoja client safety", () => {
 	});
 	it.each(["fetch", "body"])("bounds a stalled %s and aborts the request", async (stage) => {
 		let signal: AbortSignal | undefined;
-		const client = new HojaClient({ token: TOKEN, timeoutMs: 10, fetch: async (_url, init) => {
+		const client = new HojaClient({ url: HOJA_TEST_URL, token: TOKEN, timeoutMs: 10, fetch: async (_url, init) => {
 			signal = init.signal;
 			if (stage === "fetch") return new Promise(() => {});
 			return { status: 200, text: () => new Promise(() => {}) };
@@ -230,7 +234,7 @@ describe("shared Hoja client safety", () => {
 		expect(signal?.aborted).toBe(true);
 	});
 	it("retains valid results and refuses redirects", async () => {
-		const client = new HojaClient({ token: TOKEN, fetch: async (_url, init) => {
+		const client = new HojaClient({ url: HOJA_TEST_URL, token: TOKEN, fetch: async (_url, init) => {
 			expect(init.redirect).toBe("error");
 			expect(init.headers.Authorization).toBe(TOKEN);
 			return { status: 200, text: async () => JSON.stringify({ data: { viewer: { id: "1" } } }) };
