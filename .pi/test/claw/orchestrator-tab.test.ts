@@ -6,6 +6,7 @@ import { clawSession, launchTab, nameClawTab, ownPaneBlock, type TernExec } from
 import { ClawStore, type Run } from "../../lib/claw/store.ts";
 import { applyEvent } from "../../lib/claw/daemon.ts";
 import { registerOrchestrator } from "../../../extensions/claw/extension.ts";
+import type { PrereqId, PrereqReport, ToolState } from "../../lib/claw/prereqs.ts";
 import { gateActiveTools, swarmSurfaceFor } from "../../lib/runtime/swarm-tool-gating.ts";
 
 describe("claw tools on the model surface", () => {
@@ -155,14 +156,42 @@ describe("/claw on command", () => {
 	beforeEach(() => { dir = mkdtempSync(join(tmpdir(), "claw-cmd-")); });
 	afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-	function harness(tern: TernExec, env: NodeJS.ProcessEnv) {
+	const present = (id: PrereqId): ToolState => ({ id, ok: true, path: id });
+	const allPresent: PrereqReport = { ok: true, present: [present("pi"), present("tern"), present("rg")], missing: [] };
+	const missing = (...ids: PrereqId[]): PrereqReport => ({
+		ok: false,
+		present: (["pi", "tern", "rg"] as PrereqId[]).filter((id) => !ids.includes(id)).map(present),
+		missing: ids.map((id) => ({ id, ok: false, error: `spawn ${id} ENOENT` })),
+	});
+
+	/** `answer` is what the confirm resolves to; `report` is what the first probe says; `installed` makes the probe that
+	 *  follows an install report a healthy machine. Nothing here spawns a tool or a package manager. */
+	function harness(tern: TernExec, env: NodeJS.ProcessEnv, options: { report?: PrereqReport; answer?: boolean; installed?: boolean } = {}) {
 		const commands: Record<string, { handler: (args: string, ctx: any) => Promise<unknown> }> = {};
 		const pi = { getCwd: () => dir, on: () => undefined, registerTool: () => undefined, registerCommand: (name: string, o: any) => { commands[name] = o; } };
 		const ensured: string[] = [];
-		registerOrchestrator(pi, { tern, env, ensure: (store) => { ensured.push(store.dir); return 4242; } });
+		const installs: PrereqId[][] = [];
+		const asked: string[] = [];
+		let probes = 0;
+		registerOrchestrator(pi, {
+			tern, env,
+			ensure: (store) => { ensured.push(store.dir); return 4242; },
+			prereqs: async () => {
+				probes++;
+				if (probes === 1 || !options.installed) return options.report ?? allPresent;
+				return allPresent;
+			},
+			install: async (states) => {
+				installs.push(states.map((state) => state.id));
+				return { installed: states.map((state) => state.id), failed: [] };
+			},
+		});
 		const notes: { msg: string; level: string }[] = [];
-		const ctx = { ui: { notify: (msg: string, level = "info") => notes.push({ msg, level }) } };
-		return { run: (args: string) => commands.claw.handler(args, ctx), notes, ensured, store: ClawStore.forWorkspace(dir) };
+		const ctx = { ui: {
+			notify: (msg: string, level = "info") => notes.push({ msg, level }),
+			confirm: async (_title: string, body: string) => { asked.push(body); return options.answer ?? false; },
+		} };
+		return { run: (args: string) => commands.claw.handler(args, ctx), notes, ensured, installs, asked, store: ClawStore.forWorkspace(dir) };
 	}
 
 	it("names the pane's tab Claw, records the pane, and starts the daemon", async () => {
@@ -180,17 +209,56 @@ describe("/claw on command", () => {
 		const h = harness(t.exec, { TERN_PANE: "500" });
 		await h.run("on");
 		expect(h.notes.at(-1)?.level).toBe("warning");
-		expect(h.notes.at(-1)?.msg).toContain('Tab not named: tern: rename refused. Name it "Claw" yourself.');
+		expect(h.notes.at(-1)?.msg).toContain("The tab keeps its current name (tern: rename refused); Claw works without it.");
 		expect(h.store.readControl().enabled).toBe(true);
 	});
 
-	it("warns when Tern is absent, without touching any tab", async () => {
-		const t = fakeTern(base, { absent: true });
-		const h = harness(t.exec, { TERN_PANE: "500" });
+	it("a missing tern is named as a missing executable, not as a tab problem, and nothing is enabled", async () => {
+		const t = fakeTern(base);
+		const h = harness(t.exec, { TERN_PANE: "500" }, { report: missing("tern") });
 		await h.run("on");
-		expect(h.notes.at(-1)?.msg).toContain("ENOENT");
+		expect(h.notes.at(-1)?.msg).toContain("Claw needs `tern` and it is not installed.");
+		expect(h.notes.at(-1)?.msg).toContain("spawn tern ENOENT");
+		expect(h.notes.at(-1)?.msg).toContain("https://docs.stencil.so/tern");
+		expect(h.notes.at(-1)?.msg).toContain("Claw stays off: nothing was enabled and no daemon was started.");
+		expect(h.notes.at(-1)?.msg).not.toContain("Tab not");
 		expect(h.notes.at(-1)?.level).toBe("warning");
+		expect(t.calls).toHaveLength(0);
+		expect(h.ensured).toHaveLength(0);
+		// Tern is not installable from this repository, so there is nothing to offer: saying so is the whole answer.
+		expect(h.asked).toHaveLength(0);
+	});
+
+	it("offers to install an installable missing tool, and a No keeps everything off", async () => {
+		const t = fakeTern(base);
+		const h = harness(t.exec, { TERN_PANE: "500" }, { report: missing("rg"), answer: false });
+		await h.run("on");
+		expect(h.asked.at(-1)).toContain("Install rg now? Choose No to install it yourself.");
+		// The install command is platform-specific; the tool it installs is not.
+		expect(h.asked.at(-1)).toContain("ripgrep");
+		expect(h.installs).toHaveLength(0);
+		expect(h.ensured).toHaveLength(0);
+		expect(h.notes.at(-1)?.msg).toContain("Claw stays off");
+	});
+
+	it("installs after a Yes, then turns Claw on once the tool is there", async () => {
+		const t = fakeTern(base);
+		const h = harness(t.exec, { TERN_PANE: "500" }, { report: missing("rg"), answer: true, installed: true });
+		await h.run("on");
+		expect(h.installs).toEqual([["rg"]]);
 		expect(h.ensured).toHaveLength(1);
+		expect(h.notes[0]?.msg).toContain("installed rg");
+		expect(h.notes.at(-1)?.msg).toContain('Tab named "Claw".');
+		expect(h.store.readControl()).toMatchObject({ enabled: true, pane: 500 });
+	});
+
+	it("stays off when the install did not make the tool available", async () => {
+		const t = fakeTern(base);
+		const h = harness(t.exec, { TERN_PANE: "500" }, { report: missing("rg"), answer: true });
+		await h.run("on");
+		expect(h.installs).toEqual([["rg"]]);
+		expect(h.ensured).toHaveLength(0);
+		expect(h.notes.at(-1)?.msg).toContain("Claw stays off");
 	});
 
 	it("outside a Tern pane it names nothing and calls Tern not at all", async () => {

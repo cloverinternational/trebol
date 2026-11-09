@@ -57,6 +57,27 @@ function checkToolchain() {
   }
 }
 
+// 1b. the executables Claw and the agent surface cannot work without (.pi/lib/claw/prereqs.ts): `tern` opens worker
+//     tabs, `rg` is the search the prompts tell every agent to use. Each tool also counts when its own installer put it
+//     outside PATH — `rg` where Pi downloaded it, `tern` where the Tern app installs its CLI — because a bare
+//     `command -v` reported "not on PATH" on a machine where Tern was installed, running, and working. Claw's probe
+//     accepts the same locations, so this check and the `/claw on` gate cannot disagree.
+function checkMandatoryTools() {
+  const binDir = join(AGENT_DIR, "bin");
+  const ternData = process.env.XDG_DATA_HOME?.trim() || join(homedir(), ".local", "share");
+  const tools = [
+    ["tern", [join(homedir(), ".local", "bin", "tern"), join(ternData, "tern", "build", "tern")],
+      "install the Tern app (https://docs.stencil.so/tern); Claw looks for its CLI on PATH and in the app's own install locations, so a binary kept anywhere else must be named with TERN_BIN"],
+    ["rg", [join(binDir, "rg")],
+      `install ripgrep (brew install ripgrep / apt-get install ripgrep / pkg install ripgrep), or let Pi download it: pi's own copy lands in ${binDir}`],
+  ];
+  for (const [tool, offPathCandidates, fix] of tools) {
+    const onPath = (run("bash", ["-c", `command -v ${tool}`]) ?? {}).stdout?.trim() ?? "";
+    const where = onPath || offPathCandidates.find((path) => existsSync(path)) || "";
+    report(`${tool} available (Claw prerequisite)`, Boolean(where), where || "not on PATH", fix);
+  }
+}
+
 // 2. dist/ for the packages consumed from dist.
 function checkDist() {
   for (const pkg of DIST_PACKAGES) {
@@ -116,6 +137,7 @@ function checkSettings() {
 }
 
 checkToolchain();
+checkMandatoryTools();
 checkDist();
 checkRuntimeDeps();
 checkVendorFree();

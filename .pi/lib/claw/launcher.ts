@@ -2,12 +2,26 @@
  *  through a login shell (so LINEAR_TOKEN and the rest of the profile reach the worker), and probe liveness. */
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
+import { homedir } from "node:os";
 import { promisify } from "node:util";
 import type { LaunchPlan } from "./launch-plan.ts";
+import { isExecutable, ternAppPaths } from "./prereqs.ts";
 
 const run = promisify(execFile);
 export type TernExec = (args: string[]) => Promise<string>;
-export const ternExec: TernExec = async (args) => (await run("tern", args, { timeout: 30_000, maxBuffer: 64 * 1024 * 1024 })).stdout;
+/** The Tern CLI this process uses: `TERN_BIN` when set, else the app's own copy when it is installed, else `tern` on
+ *  PATH — the same candidates in the same order that `prereqs.ts` probes, so the binary Claw validated is the binary it
+ *  spawns. Resolving only by name broke that promise: a Tern installed with its bin dir off PATH passed validation as
+ *  `tern` and then failed the real spawn as `spawn tern ENOENT`. `tools/tern/style-lint.mjs` reads TERN_BIN too, so a
+ *  machine that points it at a Tern outside PATH still gets that exact one. */
+export function ternBinary(
+	env: NodeJS.ProcessEnv = process.env,
+	exists: (path: string) => boolean = isExecutable,
+	home: string = homedir(),
+): string {
+	return env.TERN_BIN?.trim() || ternAppPaths(env, home).find((path) => exists(path)) || "tern";
+}
+export const ternExec: TernExec = async (args) => (await run(ternBinary(), args, { timeout: 30_000, maxBuffer: 64 * 1024 * 1024 })).stdout;
 
 export const CLAW_TAB = "Claw";
 type Inspect = { sessions: { id: number; tabs: { id: number; name: string | null; blocks: { id: number; exited?: unknown; live?: boolean }[] }[] }[] };

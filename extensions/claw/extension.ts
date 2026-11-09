@@ -9,6 +9,7 @@ import { pidAlive } from "../../.pi/lib/claw/daemon.ts";
 import { refreshDaemon } from "../../.pi/lib/claw/lifecycle.ts";
 import { deliveredInboxIds, pumpInbox } from "../../.pi/lib/claw/inbox.ts";
 import { liveBlocks, nameClawTab, ownPaneBlock, ternExec, CLAW_TAB, type TernExec } from "../../.pi/lib/claw/launcher.ts";
+import { checkPrereqs, describeInstall, installCommands, installPrereqs, missingPrereqsMessage, type InstallOutcome, type PrereqDeps, type PrereqReport, type ToolState } from "../../.pi/lib/claw/prereqs.ts";
 import { WORKER_BLOCKED_TOOLS, askFromCompleted, askFromStarted, recordAsk, recordFinish, recordGoal, recordResumed, recordSettled, recordStarted, validateFinish, workerIdentity } from "../../.pi/lib/claw/child.ts";
 import { clearGoal, establishGoal, goalHostForSession, type GoalHost } from "../../.pi/lib/tools/swarm-goal.ts";
 import { onAgentSettled } from "../../.pi/lib/runtime/agent-settled.ts";
@@ -178,6 +179,11 @@ export type OrchestratorOptions = {
 	tern?: TernExec;
 	env?: NodeJS.ProcessEnv;
 	ensure?: (store: ClawStore, workspace: string) => number | undefined;
+	/** The mandatory-tool gate `/claw on` runs before enabling anything. Tests inject a fixed report instead of probing
+	 *  the machine they happen to run on. */
+	prereqs?: (deps: PrereqDeps) => Promise<PrereqReport>;
+	/** The install step behind the gate's confirm. Injected so a test never runs a real package manager. */
+	install?: (missing: readonly ToolState[], deps: PrereqDeps) => Promise<InstallOutcome>;
 };
 
 /** Records which orchestrator session asked for a run and which Tern pane it lives in, on every request that can
@@ -199,6 +205,8 @@ export function registerOrchestrator(pi: any, options: OrchestratorOptions = {})
 	const tern = options.tern ?? ternExec;
 	const env = options.env ?? process.env;
 	const ensure = options.ensure ?? ensureDaemon;
+	const readPrereqs = options.prereqs ?? ((deps: PrereqDeps) => checkPrereqs(undefined, deps));
+	const installPrereqsFor = options.install ?? ((missing: readonly ToolState[], deps: PrereqDeps) => installPrereqs(missing, deps));
 	const wake = createSessionWakeup(pi);
 	const footer = modeFooter("claw", clawModeOn);
 	let timer: ReturnType<typeof setInterval> | undefined;
@@ -414,17 +422,53 @@ export function registerOrchestrator(pi: any, options: OrchestratorOptions = {})
 			const sub = (args ?? "").trim().toLowerCase() || "status";
 			const notify = (msg: string, level = "info") => ctx?.ui?.notify?.(msg, level);
 			if (sub === "on") {
+				// pi, tern and rg are mandatory: a session without them cannot open a worker tab, and "Claw on" would
+				// promise work it cannot do. Nothing is enabled and no daemon starts until this passes. The missing
+				// executable is named as itself — never as a tab-rename failure, which is only ever its symptom.
+				const report = await readPrereqs({ env });
+				if (!report.ok) {
+					const message = missingPrereqsMessage(report);
+					const installable = report.missing.filter((state) => installCommands(state.id).length > 0);
+					// Tern's preview answers confirm natively (`.pi/lib/tern/ext-ui.ts`), and Pi's own TUI does too. An
+					// unavailable, cancelled or failed confirm is a no: installing is never implied by running /claw.
+					let accepted = false;
+					if (installable.length) {
+						const question = `Install ${installable.map((state) => state.id).join(" and ")} now? Choose No to install it yourself.`;
+						try { accepted = Boolean(await ctx?.ui?.confirm?.("Claw prerequisites", `${message}\n\n${question}`)); }
+						catch { accepted = false; }
+					}
+					// Declining leaves every missing tool for the user to install: naming only the ones this repository
+					// cannot install would hide the one they just said no to.
+					if (!accepted) {
+						const byHand = report.missing.map((state) => state.id).join(" and ");
+						return notify(`${message}\nClaw stays off: nothing was enabled and no daemon was started. Install ${byHand} yourself, then run /claw on again.`, "warning");
+					}
+					const outcome = await installPrereqsFor(report.missing, { env });
+					const note = describeInstall(outcome);
+					const after = await readPrereqs({ env });
+					if (!after.ok) {
+						const byHand = after.missing.map((state) => state.id).join(" and ");
+						return notify(`${note} ${missingPrereqsMessage(after)}\nClaw stays off: nothing was enabled and no daemon was started. Install ${byHand} yourself, then run /claw on again.`, "warning");
+					}
+					notify(note || "Prerequisites installed.", "info");
+				}
 				claim();
 				const pane = ownPaneBlock(env);
 				// Only this process's own pane is renamed, and only after Tern confirms the pane is live.
 				let tabNote: string;
-				if (pane === undefined) tabNote = `Tab not named: this session is not in a Tern pane (TERN_PANE unset). Name its tab "${CLAW_TAB}" yourself.`;
+				let tabWarning = false;
+				if (pane === undefined) {
+					tabNote = `Tab not renamed: this session is not in a Tern pane (TERN_PANE unset); name its tab "${CLAW_TAB}" yourself.`;
+					tabWarning = true;
+				}
 				else {
 					try {
 						const r = await nameClawTab(tern, pane);
 						tabNote = r.renamed ? `Tab named "${CLAW_TAB}".` : `Tab already named "${CLAW_TAB}".`;
 					} catch (error) {
-						tabNote = `Tab not named: ${(error as Error).message}. Name it "${CLAW_TAB}" yourself.`;
+						// The name is cosmetic: the pane is still recorded, and worker tabs still open in its session.
+						tabNote = `The tab keeps its current name (${(error as Error).message}); Claw works without it.`;
+						tabWarning = true;
 					}
 				}
 				store.writeControl(true, pane);
@@ -438,7 +482,7 @@ export function registerOrchestrator(pi: any, options: OrchestratorOptions = {})
 				const daemonNote = pid
 					? `Daemon already running (pid ${pid}, current code).`
 					: freshness?.action === "stopped" ? "Daemon from older code stopped; starting one from the current code." : "Daemon starting.";
-				return notify(`Claw on. ${daemonNote} ${tabNote}`, tabNote.startsWith("Tab not named") ? "warning" : "info");
+				return notify(`Claw on. ${daemonNote} ${tabNote}`, tabWarning ? "warning" : "info");
 			}
 			if (sub === "off") {
 				store.writeControl(false, store.readControl().pane);

@@ -55,6 +55,10 @@ Release metadata is kept in `package.json`, `update-manifest.json`, and this fil
   git read no longer freezes the composer's git facts for the rest of the session. Soak:
   `tools/perf/tern-bridge-soak.mjs`.
 
+- Claw finds the Tern CLI the Tern app installed, instead of declaring Tern missing on a machine that is running it. `/claw on` reported `Claw needs tern and it is not installed (spawn tern ENOENT)` on a host where Tern 0.9.12 owned the very pane the session ran in and worked: the app puts a `tern` symlink in `~/.local/bin` and the binary under its data dir, and nothing adds that directory to the PATH of the process pi runs in. The probe now follows `TERN_BIN`, then the app's own install locations, then `tern` on PATH, and `ternBinary` resolves the same candidates in the same order — before, the gate could pass on a name that the real spawn then failed to find. `npm run doctor` accepts the same off-PATH copies, and the fix line no longer reads as "install Tern" when Tern is installed (`.pi/lib/claw/prereqs.ts`, `.pi/lib/claw/launcher.ts`, `tools/install/doctor.mjs`).
+
+- `/claw on` no longer reports a missing Tern CLI as a tab-rename problem. `pi`, `tern` and `rg` are mandatory (`.pi/lib/claw/prereqs.ts`): a missing one is named with why Claw needs it and the exact step that installs it, the install is offered through a confirm (a No, an unavailable dialog or a cancelled one all mean "install it yourself"), and nothing is enabled and no daemon starts until the tools exist. Reproduced on a machine without the Tern CLI, where the old message was `Tab not named: spawn tern ENOENT. Name it "Claw" yourself.`; the cause was `execFile("tern")` in the launcher, reported as a failed rename. The launcher now honours `TERN_BIN`, `rg` counts when Pi downloaded its own copy into the agent bin dir, and the daemon refuses a run *before* creating its Hoja issue when the Tern CLI is unusable, so a missing tool can no longer leave an issue for a worker that could never start. `npm run doctor` checks the same three tools.
+
 ### Changed
 
 - Experimental worker code is out of the local agents package. The Absurd daemon, control plane and

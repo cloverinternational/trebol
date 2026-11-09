@@ -2,6 +2,7 @@
 import { HojaClient } from "./hoja.ts";
 import { computeClawFingerprint } from "./fingerprint.ts";
 import { ternExec } from "./launcher.ts";
+import { ternUsable } from "./prereqs.ts";
 import { workerLaunchPlan } from "./launch-plan.ts";
 import { ClawStore } from "./store.ts";
 import { claimLock, pidAlive, releaseLock, runDaemon } from "./daemon.ts";
@@ -38,4 +39,7 @@ runDaemon({
 	bootedAt: bootedAtMs(),
 	signal: (pid, sig) => process.kill(pid, sig),
 	planLaunch: (cwd) => workerLaunchPlan(cwd),
+	// A run's Hoja issue is created before its tab, and the tab needs the Tern CLI: refuse first, so a machine without
+	// it never accumulates issues for workers that could not start.
+	prereqs: () => ternUsable(),
 }, { log, codeKey: () => computeClawFingerprint()?.key }).then((reason) => { log(`claw daemon exiting (${reason})`); process.exit(0); });

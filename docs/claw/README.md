@@ -8,9 +8,22 @@ Tests: `.pi/test/claw/claw.test.ts` (lifecycle, daemon, Hoja, Tern, worker) and
 resume, including the goal generation a resume restores), `.pi/test/claw/liveness-reboot.test.ts` (identity-checked
 liveness, `claw_list`/`claw_resume` agreement, and a reboot that must not spend the relaunch budget).
 
+## Prerequisites
+
+`pi`, `tern` and `rg` are mandatory (`.pi/lib/claw/prereqs.ts`). `pi` runs the daemon and every worker tab, `tern` opens,
+names and inspects those tabs, and `rg` is the search the prompts tell every agent to use. `/claw on` probes all three
+before enabling anything and refuses with the reason and the fix when one is absent; it never reports a missing binary as
+a tab-rename failure. The probe follows pi's own rule — only a failed spawn (ENOENT) means "not installed" — accepts a
+`tern` named by `TERN_BIN` (the same override `tools/tern/style-lint.mjs` uses) and accepts the ripgrep pi downloaded into
+its agent `bin` directory. Tern installs its own CLI into `~/.local/bin` (the binary lives under the app's data dir), and
+nothing puts that directory on the PATH of the process pi runs in; the probe follows `TERN_BIN`, then those app install
+locations, then `tern` on PATH, and the launcher spawns the same one in the same order. A machine with Tern installed and
+running the pane therefore no longer reports it as missing, and the reported path is the binary Claw actually runs.
+`npm run doctor` reports the same three tools and accepts the same off-PATH copies.
+
 ## Commands and tools
 
-- `/claw on` — start the singleton daemon if absent; register this session's own inbox cursor (see *Several Claw sessions on one workspace*); rename the tab that holds this pane (`TERN_PANE`) to `Claw`. Only that block's tab is renamed, only after Tern confirms the pane is live and the name sticks. Refusal, a missing pane, or an absent Tern is reported as a warning; Claw stays on. The pane is recorded so worker tabs open in its session. It also switches this session's routing (below).
+- `/claw on` — first check the mandatory executables (`pi`, `tern`, `rg`; see *Prerequisites*). If one is missing it is named with why Claw needs it and the step that installs it, the install is offered through a confirm (No, an unavailable dialog or a cancelled one all mean "install it yourself"), and **nothing is enabled and no daemon starts** until they exist. Then: start the singleton daemon if absent; register this session's own inbox cursor (see *Several Claw sessions on one workspace*); rename the tab that holds this pane (`TERN_PANE`) to `Claw`. Only that block's tab is renamed, only after Tern confirms the pane is live and the name sticks. A refused rename, or a pane outside Tern, is reported as a warning and Claw stays on: the name is cosmetic, the pane is still recorded, and worker tabs still open in its session. It also switches this session's routing (below).
 - Routing while on (`.pi/lib/claw/mode.ts`): the single `Agent` tool routes to Claw spawn (`project` required). `Subagent`, `BackgroundTask`, `Delegate`, `DelegateOutput`, `SubagentOutput`, `TaskOutput`, `AgentControl`, `wait_for_agent`, `multi_agent_wait` are removed from the active set and refused at `tool_call`. Orchestrator tools (`claw_spawn|list|read|send|cancel|trigger`) are active only while on. Off restores the prior active set captured at `/claw on`; a session shutdown restores it too and does not change the store control (triggers keep firing).
 - Worker launch is plain terminal pi: the command sets `PI_TERN_UI=0` (the documented bypass of the Tern shell dispatch, `docs/reference/tern-pi-shell-dispatch.md`). Normal tools stay enabled; `-nt` is not used.
 - `/claw off` — suspend triggers and new runs. Running workers keep running and are still reconciled.

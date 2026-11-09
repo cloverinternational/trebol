@@ -93,13 +93,16 @@ describe("claw: two orchestrator sessions on one workspace", () => {
 	/** A turns Claw on in pane 100, then B (another process) in pane 200: the order that used to hand B everything. */
 	async function twoClaws() {
 		const noDaemon = () => 4242; // pretend a daemon answers; never spawn one
+		// `/claw on` refuses to enable anything when a mandatory tool is missing. The gate itself is exercised in orchestrator-tab.test.ts
+		// and prereqs.test.ts; these tests are about inbox ownership, so they must not probe the host machine.
+		const healthy = async () => ({ ok: true, present: [], missing: [] });
 		const a = fakePi(dir);
-		registerOrchestrator(a, { tern: twoWindowTern().exec, env: { TERN_PANE: "100" }, ensure: noDaemon });
+		registerOrchestrator(a, { tern: twoWindowTern().exec, env: { TERN_PANE: "100" }, ensure: noDaemon, prereqs: healthy });
 		await a.emit("session_start", {}, ctxFor("sess-A"));
 		await a.reg.get("/claw").handler("on", ctxFor("sess-A"));
 		setClawMode(false); // B is a separate process with its own process-local mode
 		const b = fakePi(dir);
-		registerOrchestrator(b, { tern: twoWindowTern().exec, env: { TERN_PANE: "200" }, ensure: noDaemon });
+		registerOrchestrator(b, { tern: twoWindowTern().exec, env: { TERN_PANE: "200" }, ensure: noDaemon, prereqs: healthy });
 		await b.emit("session_start", {}, ctxFor("sess-B"));
 		await b.reg.get("/claw").handler("on", ctxFor("sess-B"));
 		return { a, b };

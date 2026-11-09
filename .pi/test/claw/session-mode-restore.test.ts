@@ -32,7 +32,8 @@ function instance(cwd: string, session: Session, active: string[], ensureCalls: 
 		sendUserMessage: () => undefined,
 		tools, commands, handlers,
 	};
-	registerOrchestrator(pi, { ensure: () => { ensureCalls.n++; return 1; }, tern: async () => "{}", env: {} });
+	// `/claw on` gates on the mandatory tools; this file is about what survives a reload, so it never probes the host.
+	registerOrchestrator(pi, { ensure: () => { ensureCalls.n++; return 1; }, tern: async () => "{}", env: {}, prereqs: async () => ({ ok: true, present: [], missing: [] }) });
 	registerHojaMode(pi, { gql: async () => ({ issues: { nodes: [] } }) } as any);
 	const ctx = { sessionManager: { getSessionId: () => session.id, getBranch: () => session.entries, getCwd: () => cwd } };
 	const emit = async (name: string, event: unknown) => { for (const fn of handlers[name] ?? []) await fn(event, ctx); };

@@ -76,6 +76,9 @@ describe("claw routing mode", () => {
 	});
 });
 
+/** `/claw on` gates on the mandatory tools; routing is what these tests measure, so the host machine is never probed. */
+const healthy = async () => ({ ok: true, present: [], missing: [] });
+
 describe("registerOrchestrator activation", () => {
 	let cwd: string;
 	beforeEach(() => { cwd = mkdtempSync(join(tmpdir(), "claw-route-")); setClawMode(false); });
@@ -84,7 +87,7 @@ describe("registerOrchestrator activation", () => {
 	it("on hides alternates and blocks them at tool_call; off restores the exact prior set", async () => {
 		const pi = fakePi(cwd, ALL);
 		pi.registerTool({ name: "Agent", parameters: { type: "object" } });
-		registerOrchestrator(pi, { ensure: () => 1, tern: async () => "{}" });
+		registerOrchestrator(pi, { ensure: () => 1, tern: async () => "{}", prereqs: healthy });
 		await pi.tools.get("/claw").handler("on", { ui: { notify: () => undefined } });
 		expect(clawModeOn()).toBe(true);
 		expect(pi.active).toEqual(expect.arrayContaining(["Agent", "read", "bash", "claw_spawn"]));
@@ -106,7 +109,7 @@ describe("registerOrchestrator activation", () => {
 	it("session shutdown restores the tool set without touching the store control", async () => {
 		const pi = fakePi(cwd, ALL);
 		pi.registerTool({ name: "Agent", parameters: { type: "object" } });
-		registerOrchestrator(pi, { ensure: () => 1, tern: async () => "{}" });
+		registerOrchestrator(pi, { ensure: () => 1, tern: async () => "{}", prereqs: healthy });
 		await pi.tools.get("/claw").handler("on", { ui: { notify: () => undefined } });
 		await pi.emit("session_shutdown", {});
 		expect(clawModeOn()).toBe(false);

@@ -33,6 +33,10 @@ export type LaunchDeps = {
 	sleep?: (ms: number) => Promise<void>;
 	/** Jitter source for the retry backoff. Defaults to Math.random. */
 	random?: () => number;
+	/** Mandatory executables, checked before any Hoja write. A worker tab is opened with the Tern CLI, so a machine
+	 *  without it must fail the run before its issue exists instead of after. Absent means no check (the launcher's own
+	 *  error still reports it), which keeps every caller that predates this gate unchanged. */
+	prereqs?: () => Promise<{ ok: boolean; error?: string }>;
 };
 
 /** The worker's model choice. Both unset means pi's configured default. pi's --provider only searches for --model, so a provider needs one. */
@@ -229,6 +233,12 @@ async function locateTab(run: Run, tern: TernExec): Promise<string> {
 async function dispatchCreate(run: Run, deps: LaunchDeps): Promise<Run> {
 	const { store, hoja } = deps;
 	if (pastDeadline(run, deps)) return failRun(run, deps, "request expired before dispatch; not started (no Hoja issue was created)");
+	// Before the read-only marker lookup and the create: a missing mandatory executable is deterministic, so retrying or
+	// committing an issue cannot help. Failing here is what keeps a run from leaving an issue nobody can work.
+	const tools = await (deps.prereqs?.() ?? Promise.resolve({ ok: true })).catch(() => ({ ok: true }));
+	if (!tools.ok) {
+		return failRun(run, deps, `launch prerequisites are not met, so no Hoja issue was created: ${tools.error ?? "unknown"}. Install the missing tool, then spawn again`);
+	}
 	let resolved: Resolved;
 	try {
 		resolved = await hoja.resolve(run.project, run.requestedAssignee);
