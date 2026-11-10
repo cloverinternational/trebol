@@ -1,0 +1,144 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1160" height="540" viewBox="0 0 1160 540" role="img" aria-labelledby="title desc">
+  <title id="title">Bash command and output as native Tern components</title>
+  <desc id="desc">Two light-theme panels. A turn card with an inline bash step and a tail preview, and a promoted failure card with a command block and a stack trace. Drawn with native GUI shapes: one ring per turn, hairlines between kinds, no ANSI or terminal box art.</desc>
+  <defs>
+    <linearGradient id="topFade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f6f3ee"/>
+      <stop offset="1" stop-color="#f6f3ee" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <style>
+    .sans { font-family: Geist, "SF Pro Text", Inter, system-ui, sans-serif; fill: #3b3b3b; }
+    .mono { font-family: "SF Mono", "Ioskeley Mono Term", ui-monospace, monospace; fill: #3b3b3b; }
+    .ink { fill: #3b3b3b; }
+    .muted { fill: #6f6a61; }
+    .dim { fill: #918b80; }
+    .path { fill: #6b5f4a; }
+    .err { fill: #a33a2e; }
+    .ok { fill: #2f7d4f; }
+    .meta { font-size: 11px; }
+    .label { font-size: 11px; letter-spacing: 0.01em; }
+    .verb { font-size: 13px; font-weight: 550; }
+    .body { font-size: 12.5px; }
+    .code { font-size: 11.5px; }
+    .hair { stroke: #e9e5dd; stroke-width: 1; }
+  </style>
+
+  <rect width="1160" height="540" fill="#f1efea"/>
+
+  <!-- A: the turn card is the only ring. The bash step is a borderless section inside it. -->
+  <rect x="28" y="28" width="660" height="400" rx="12" fill="#fdfcf9" stroke="#e7e2d9"/>
+
+  <text x="52" y="62" class="sans" font-size="15" font-weight="550">Done</text>
+  <text x="100" y="62" class="sans" font-size="13">Fix the flaky login test and verify it</text>
+
+  <text x="502" y="61" class="sans dim meta" text-anchor="end">5 steps</text>
+  <rect x="520" y="46" width="64" height="22" rx="11" fill="#f9ecea" stroke="#edd3ce"/>
+  <text x="552" y="61" class="sans err label" text-anchor="middle">1 failed</text>
+  <text x="626" y="61" class="sans dim meta" text-anchor="end">3.8s</text>
+  <path d="M654 54 l4 4 -4 4" fill="none" stroke="#918b80" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+  <line x1="44" y1="80" x2="672" y2="80" class="hair"/>
+
+  <!-- Read step. -->
+  <rect x="52" y="99" width="13" height="15" rx="2" fill="none" stroke="#7d776c"/>
+  <line x1="55" y1="104" x2="62" y2="104" stroke="#a8a196" stroke-width="1"/>
+  <line x1="55" y1="107" x2="62" y2="107" stroke="#a8a196" stroke-width="1"/>
+  <text x="78" y="112" class="sans verb">Read</text>
+  <text x="122" y="112" class="mono path body">src/auth/login.test.ts</text>
+  <text x="648" y="112" class="sans dim meta" text-anchor="end">0.4s</text>
+
+  <!-- Bash step head: intent, native exit chip, note, timer, chevron. -->
+  <rect x="52" y="139" width="16" height="13" rx="3" fill="none" stroke="#7d776c"/>
+  <path d="M56 143 l3 2.5 -3 2.5" fill="none" stroke="#7d776c" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <line x1="62" y1="148" x2="66" y2="148" stroke="#7d776c" stroke-width="1.2" stroke-linecap="round"/>
+  <text x="80" y="152" class="sans verb">Run the login tests</text>
+  <rect x="220" y="138" width="50" height="20" rx="6" fill="#f9ecea"/>
+  <text x="245" y="152" class="mono err" font-size="10.5" text-anchor="middle">exit 1</text>
+  <text x="282" y="152" class="sans muted label">1 failed</text>
+  <text x="648" y="152" class="sans dim meta" text-anchor="end">3.8s</text>
+  <path d="M660 146 l4 4 -4 4" fill="none" stroke="#918b80" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Native collapse preview: the tail is visible, the rest is named. -->
+  <text x="84" y="180" class="sans label">
+    <tspan class="muted">3 earlier lines</tspan>
+    <tspan class="dim"> · </tspan>
+    <tspan class="ink" font-weight="500">Show all</tspan>
+    <tspan class="dim" font-family="&quot;SF Mono&quot;, &quot;Ioskeley Mono Term&quot;, ui-monospace, monospace"> ⌃O</tspan>
+  </text>
+  <rect x="84" y="192" width="572" height="102" rx="8" fill="#f6f3ee"/>
+  <rect x="84" y="192" width="572" height="20" fill="url(#topFade)"/>
+
+  <circle cx="99" cy="215" r="7" fill="#e7f1e8"/>
+  <path d="M96 215 l2.2 2.2 4-4.4" fill="none" stroke="#2f7d4f" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="114" y="220" class="mono body">rejects an empty password</text>
+  <text x="640" y="220" class="mono dim" font-size="11" text-anchor="end">412ms</text>
+
+  <circle cx="99" cy="243" r="7" fill="#f7e4e0"/>
+  <path d="M96.5 240.5 l5 5 M101.5 240.5 l-5 5" fill="none" stroke="#a33a2e" stroke-width="1.4" stroke-linecap="round"/>
+  <text x="114" y="248" class="mono body">keeps the session alive</text>
+  <text x="640" y="248" class="mono dim" font-size="11" text-anchor="end">68ms</text>
+
+  <text x="114" y="278" class="mono muted" font-size="11.5">1 failed | 2 passed</text>
+
+  <!-- Patch step. -->
+  <rect x="52" y="315" width="14" height="14" rx="2.5" fill="none" stroke="#7d776c"/>
+  <path d="M59 319 v6 M56 322 h6" stroke="#7d776c" stroke-width="1.2" stroke-linecap="round"/>
+  <text x="78" y="326" class="sans verb">Patch</text>
+  <text x="128" y="326" class="mono path body">src/auth/login.ts</text>
+  <text x="600" y="326" class="mono" font-size="11.5">
+    <tspan class="ok">+8</tspan>
+    <tspan class="dim"> </tspan>
+    <tspan class="err">−1</tspan>
+  </text>
+  <text x="648" y="326" class="sans dim meta" text-anchor="end">0.6s</text>
+
+  <text x="52" y="386" class="sans dim" font-size="11.5">Inspect steps</text>
+
+  <!-- B: promoted failure card. Its own ring, tint and status bar. -->
+  <rect x="716" y="28" width="416" height="400" rx="12" fill="#fdf8f7" stroke="#ead7d2"/>
+  <rect x="716" y="42" width="3" height="372" rx="1.5" fill="#b3261e"/>
+
+  <rect x="740" y="52" width="16" height="13" rx="3" fill="none" stroke="#7d776c"/>
+  <path d="M744 56 l3 2.5 -3 2.5" fill="none" stroke="#7d776c" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <line x1="750" y1="61" x2="754" y2="61" stroke="#7d776c" stroke-width="1.2" stroke-linecap="round"/>
+  <text x="768" y="65" class="sans" font-size="13.5" font-weight="550">Run the login tests</text>
+  <rect x="900" y="50" width="50" height="20" rx="6" fill="#f9ecea"/>
+  <text x="925" y="64" class="mono err" font-size="10.5" text-anchor="middle">exit 1</text>
+  <text x="1096" y="65" class="sans dim meta" text-anchor="end">3.8s</text>
+  <path d="M1108 59 l4 4 -4 4" fill="none" stroke="#918b80" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <rect x="740" y="84" width="368" height="42" rx="7" fill="#f4efec"/>
+  <text x="752" y="110" class="mono code">
+    <tspan class="dim">$ </tspan>
+    <tspan>pnpm exec vitest run </tspan>
+    <tspan class="path">src/auth/login.test.ts</tspan>
+  </text>
+  <line x1="740" y1="142" x2="1108" y2="142" class="hair"/>
+
+  <circle cx="750" cy="168" r="8" fill="#f9e3df"/>
+  <line x1="750" y1="164" x2="750" y2="169" stroke="#a33a2e" stroke-width="1.5" stroke-linecap="round"/>
+  <circle cx="750" cy="172" r="0.9" fill="#a33a2e"/>
+  <text x="766" y="173" class="sans err" font-size="13" font-weight="600">AssertionError</text>
+  <text x="766" y="194" class="sans muted" font-size="12">expected 1 call, got 2</text>
+
+  <text x="748" y="226" class="mono body" font-weight="500">keeps the session alive</text>
+  <text x="748" y="244" class="mono" font-size="11.5">
+    <tspan class="path">src/auth/session.test.ts</tspan>
+    <tspan class="dim">:42</tspan>
+  </text>
+
+  <path d="M748 262 l4 4 -4 4" fill="none" stroke="#918b80" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="762" y="270" class="sans dim" font-size="11.5">2 library frames</text>
+
+  <line x1="740" y1="356" x2="1108" y2="356" class="hair"/>
+  <rect x="984" y="370" width="54" height="26" rx="6" fill="#fffdfa" stroke="#e5d9d5"/>
+  <text x="1011" y="387" class="sans" font-size="11.5" text-anchor="middle">Copy</text>
+  <rect x="1044" y="370" width="64" height="26" rx="6" fill="#fffdfa" stroke="#e5d9d5"/>
+  <text x="1076" y="387" class="sans" font-size="11.5" text-anchor="middle">Rerun</text>
+
+  <text x="28" y="462" class="sans" font-size="12" font-weight="550">A — inline step inside the turn card</text>
+  <text x="28" y="480" class="sans muted" font-size="11.5">One ring per turn. A hairline separates command from output; the tail preview carries evidence.</text>
+  <text x="716" y="462" class="sans" font-size="12" font-weight="550">B — promoted card for a failure</text>
+  <text x="716" y="480" class="sans muted" font-size="11.5">Its own ring, red tint and status bar.</text>
+  <text x="28" y="510" class="sans dim" font-size="10.5">Native Tern nodes only: tool, text spans, code, table, stacktrace, exit, note, preview, tools. No ANSI and no terminal box drawing.</text>
+</svg>

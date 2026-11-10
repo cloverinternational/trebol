@@ -13,6 +13,15 @@ export const TERN_WORK_CSS = `
 /* The card head carries the turn's glyph; a step is a verb and a target, never the same icon again. */
 [data-role='tern.work-body'] { margin-top: 2px; }
 [data-role='tern.work-body'] .sf-tool-ic { display: none; }
+/* Active work is not a warning. Tern paints a running tool card with its theme's live colour and pending
+   tint; in imported palettes those come out orange, so the turn's own live card overrides both to quiet
+   neutral. Motion stays (the spinner still turns), and a step's error tint is untouched. */
+[data-role='tern.work-live'].sf-tool.card.st-running,
+[data-role='tern.work-live'].sf-tool.card.st-pending {
+  --live: var(--t2);
+  --sf-tint-pending: transparent;
+  background: transparent;
+}
 /* The tree is read by depth: each step sits clearly inside the card, with no rails or rules to say so. */
 [data-role='tern.work-body'] .sf-tool { padding-left: 18px; }
 /* A step's own body sits one level further in, so the tree reads as card > step > output. */

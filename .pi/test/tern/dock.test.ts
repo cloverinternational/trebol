@@ -374,6 +374,11 @@ describe("Tern regions and dock structure", () => {
 		}
 	});
 
+	it("keeps the live work card off the theme's orange running tint", () => {
+		// Imported palettes resolve --live to orange; the turn's own card must read as neutral work instead.
+		expect(TERN_WORK_CSS).toMatch(/\[data-role='tern\.work-live'\]\.sf-tool\.card\.st-running,[\s\S]*\[data-role='tern\.work-live'\]\.sf-tool\.card\.st-pending \{[^}]*--live: var\(--t2\)[^}]*--sf-tint-pending: transparent[^}]*background: transparent/);
+	});
+
 	it("sends the theme-neutral Markdown sheet, inside the selector subset and free of fills", () => {
 		const { writes } = make(fakeSession());
 		const sheets = writes.filter((w) => w.startsWith(`${ESC}_tsp;s;`)).map((w) => parseTspMessages(w)[0]?.body as { name: string; css: string });
