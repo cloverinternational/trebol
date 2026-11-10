@@ -888,6 +888,27 @@ before the frame, id = SHA-256) at its pixel size within 12ch × 4lines. Remove 
 as Pi `images` (`session.prompt(text, { images })`; a model whose `input` lacks `image` gets paths instead) and
 other files as an `Attached files:` path list; attachments alone are a valid submit; queued follow-ups carry them.
 
+### Drawing from the composer
+
+The composer's `+` (`composer-view.ts`, role `pi.composer.drawing`, action `drawing.attach`) and
+`/drawing` run the same bridge path (`#openDrawing`). Tern's whiteboard is a canvas block
+(kind `canvas`) and a TSP program cannot call `cx.whiteboard` (window Lua only); the runner therefore
+passes `drawing` deps (`run.ts`) that drive the installed `tern ctl canvas …` family. The first press
+opens a canvas with `canvas new`; a later press with shapes captures it; an empty canvas is brought
+forward rather than duplicated. `/drawing` is a bridge command, so it works mid-turn and never reaches
+the model.
+
+Capture is pixel-honest and scoped: `ctl shot` writes the whole window, `ctl dump
+section.tn-pane.canvas` gives the focused pane's box, and `png-crop.ts` (Node `zlib` only, no
+ImageMagick) keeps just that pane, so unrelated panes never become model input. A blank canvas is
+refused before any screenshot. Several open canvases require the user to focus one; the capture never
+guesses. The whiteboard is desktop-only and the `canvas` control family is not in the 0.9.5-era docs,
+so verify it against the installed Tern (`canvas new` answered in 0.9.13) instead of assuming.
+
+Tests: `.pi/test/tern/drawing.test.ts` (PNG round-trip/crop, canvas choice, open, empty, capture) plus
+the composer, dock and command suites. Live: `node --experimental-strip-types tools/e2e/tern-drawing.ts`
+opens its own canvas, draws through `canvas draw`, asserts the crop's size and ink, then closes it.
+
 Diagnose input with `PI_TERN_INPUT_LOG=<file>` (raw keys and TSP events per read). Tests:
 `npx vitest run .pi/test/tern/native-edit.test.ts .pi/test/tern/platform-input.test.ts
 .pi/test/tern/clipboard.test.ts .pi/test/tern/attachments.test.ts` (the hello test runs the real runner on a pty via

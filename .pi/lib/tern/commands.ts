@@ -47,6 +47,8 @@ export const BRIDGE_COMMANDS: ReadonlyArray<{ name: string; description: string;
 	// Opens the work sheet. The composer's pulse is the pointer route; this is the keyboard one, and the
 	// only way back to work that has already settled now that the dock carries no recent-work button.
 	{ name: "work", description: "Inspect running and recent background work", icon: "agent" },
+	// Opens Tern's native whiteboard, or attaches the drawing on it. The composer's + runs the same path.
+	{ name: "drawing", description: "Draw or diagram in Tern's whiteboard, then attach it to the message", icon: "pen" },
 ];
 
 // OMP's slash-command icon names (its builtin table; commands without one fall back to "action").

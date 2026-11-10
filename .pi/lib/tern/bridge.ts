@@ -59,6 +59,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { extractBashDisplayText } from "../tools/swarm-bash.ts";
 import { queueGroups, queueNodes } from "./queue-view.ts";
+import { DRAWING_ACTION, drawingAction, type DrawingDeps } from "./drawing.ts";
 
 export interface PiEventLike {
 	type: string;
@@ -1142,6 +1143,9 @@ export interface BridgeOptions {
 	kinds?: readonly string[];
 	// Pi's theme object, handed to extension component factories.
 	theme?: unknown;
+	// Native Tern drawing (canvas control + cropped capture). Omitted: /drawing and + explain that the
+	// bridge is not running in the desktop Tern app instead of pretending to draw.
+	drawing?: DrawingDeps;
 	clipboard?: { filePaths(): Promise<string[] | null | undefined>; image(): Promise<Uint8Array | null | undefined>; text(): Promise<string | null | undefined>; saveImage?(bytes: Uint8Array): string };
 }
 
@@ -1295,6 +1299,7 @@ export class PiTernBridge {
 	#columns = 100;
 	readonly #ui: TernExtensionUI;
 	readonly #clipboard: NonNullable<BridgeOptions["clipboard"]>;
+	readonly #drawing?: DrawingDeps;
 	// Images and files waiting above the composer for the next submit (attachments.ts).
 	#attachments: Attachment[] = [];
 	#attachmentSeq = 0;
@@ -1314,6 +1319,7 @@ export class PiTernBridge {
 			},
 		}, () => this.#render());
 		this.#write = options.write;
+		this.#drawing = options.drawing;
 		this.#clipboard = options.clipboard ?? {
 			...createClipboard({ platform: process.platform, env: process.env, native: getNativeClipboard }),
 			saveImage: (bytes) => {
@@ -1364,6 +1370,28 @@ export class PiTernBridge {
 		if (this.closed) return;
 		this.#projector.add("system", text);
 		this.#render();
+	}
+
+	// One path for the composer's + and /drawing: open the native whiteboard, or attach what is drawn on
+	// it. The screenshot is cropped to the canvas pane before it becomes an attachment.
+	async #openDrawing(): Promise<void> {
+		if (!this.#drawing) {
+			this.notice("Drawing needs Tern's desktop whiteboard; this frontend has no canvas control");
+			return;
+		}
+		try {
+			const result = await drawingAction(this.#drawing);
+			if (result.status === "attached") {
+				this.attachPaths([result.path]);
+				this.notice(`Attached drawing (${result.width}×${result.height}, ${result.shapes} ${result.shapes === 1 ? "shape" : "shapes"}) from the whiteboard`);
+			} else if (result.status === "opened") {
+				this.notice("Whiteboard opened beside this pane — draw, then run /drawing again to attach it.");
+			} else {
+				this.notice("Whiteboard ready — draw, then run /drawing again to attach the drawing.");
+			}
+		} catch (error) {
+			this.notice(`drawing failed: ${error instanceof Error ? error.message : String(error)}`);
+		}
 	}
 
 	get busy(): boolean {
@@ -2982,6 +3010,10 @@ export class PiTernBridge {
 			if (n !== undefined) this.removeAttachment(n);
 			return undefined;
 		}
+		if (act === DRAWING_ACTION) {
+			void this.#openDrawing();
+			return undefined;
+		}
 		if (act === "submit.followUp") return this.submitFollowUp(submittedText(msg.body));
 		if (act === MESSAGE_FOCUS || act === MESSAGE_EDIT || act === MESSAGE_RESEND) {
 			const item = messageItemFromNode(msg.body.id);
@@ -3211,6 +3243,7 @@ export class PiTernBridge {
 			this.#draft = "";
 			if (route.name === "context") this.#openContextView();
 			else if (route.name === "work") this.#openWorkView("all");
+			else if (route.name === "drawing") void this.#openDrawing();
 			else this.#render();
 			return Promise.resolve();
 		}

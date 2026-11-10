@@ -583,7 +583,7 @@ describe("Tern regions and dock structure", () => {
 		expect(childrenOf(writes, "dock")).toEqual(["composer-col"]);
 		expect(replay(writes).get("composer-col")?.p?.role).toBe("omp.editor");
 		expect(childrenOf(writes, "composer-col")).toEqual(["composer-line", "composer-bar"]);
-		expect(childrenOf(writes, "composer-line")).toEqual(["composer"]);
+		expect(childrenOf(writes, "composer-line")).toEqual(["composer-add", "composer"]);
 		expect(replay(writes).get("composer")?.p?.placeholder).toBe("What are we cooking?");
 		expect(childrenOf(writes, "composer-bar")).toEqual(["extras", "usage", "send"]);
 	});

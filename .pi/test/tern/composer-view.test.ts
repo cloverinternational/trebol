@@ -59,6 +59,19 @@ describe("OMP composer port", () => {
 		expect(find([col], "usage").p.text).toBe("");
 	});
 
+	it("puts Tern's plus before the editor as the drawing affordance", () => {
+		const [col] = composerNodes({ draft: "hello", busy: false });
+		const line = find([col], "composer-line")!;
+		expect(line.c.map((n: any) => n.id)).toEqual(["composer-add", "composer"]);
+		expect(find([col], "composer-add").p).toMatchObject({
+			name: "plus",
+			role: "pi.composer.drawing",
+			actions: { click: "drawing.attach" },
+		});
+		// The editor keeps its own identity and the typed draft.
+		expect(find([col], "composer").p.text).toBe("hello");
+	});
+
 	it("folds the effort glyph into the model chip when Tern has the effort kind, else a separate chip", () => {
 		const base = { draft: "", busy: false, model: "M", thinking: "high" };
 		expect(find(composerNodes({ ...base, effortKind: true }), "model-effort")?.k).toBe("effort");

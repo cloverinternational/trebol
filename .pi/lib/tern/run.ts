@@ -7,7 +7,7 @@ import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { readFile } from "node:fs/promises";
 import { appendFileSync, existsSync } from "node:fs";
-import { uptime } from "node:os";
+import { homedir, uptime } from "node:os";
 import { join } from "node:path";
 import {
 	createAgentSessionFromServices,
@@ -284,6 +284,17 @@ function startTsp(): void {
 		},
 			// /new goes through Pi's runtime so the session is replaced, persisted and rebound as in Pi's own UI.
 			newSession: async () => runtime.newSession(),
+			// /drawing and the composer's + drive Tern's native whiteboard through `ctl`, then crop its
+			// screenshot. Absent outside a Tern pane, which is exactly when there is no whiteboard.
+			drawing: {
+				ctl: async (args) => {
+					const { stdout } = await promisify(execFile)("tern", ["ctl", ...args], { timeout: 60_000, maxBuffer: 64 * 1024 * 1024 });
+					return JSON.parse(stdout);
+				},
+				focus: async (pane) => { await promisify(execFile)("tern", ["focus", String(pane)], { timeout: 30_000 }); },
+				workspace: runtime.session.sessionManager?.getCwd?.() ?? process.cwd(),
+				roots: [process.cwd(), homedir()],
+			},
 		});
 		bridge.start("pi");
 	// `/reload` and session replacement swap the extension runner, so the dispatcher

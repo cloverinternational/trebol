@@ -114,6 +114,15 @@ describe("buildCatalog", () => {
 		expect(autocompleteCommands({ extensionCommands: () => [{ invocationName: "context" }], promptTemplates: () => [], skills: () => [] })
 			.filter((c) => c.name === "context")).toHaveLength(1);
 	});
+
+	it("offers /drawing as a local bridge command with its own icon", () => {
+		expect(catalog.lookup("drawing")).toEqual([{ name: "drawing", kind: "bridge", description: expect.any(String), supported: true }]);
+		expect(routeSubmission("/drawing", catalog, false)).toEqual({ kind: "bridge", name: "drawing", args: "" });
+		expect(autocompleteCommands(source).find((c) => c.name === "drawing")).toMatchObject({ icon: "pen" });
+		// A claiming extension keeps the name, as with every bridge command.
+		const claimed = buildCatalog({ extensionCommands: () => [{ invocationName: "drawing" }], promptTemplates: () => [], skills: () => [] });
+		expect(claimed.lookup("drawing").map((e) => e.kind)).toEqual(["extension"]);
+	});
 });
 
 describe("routeSubmission", () => {

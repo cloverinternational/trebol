@@ -284,3 +284,30 @@ loads the three sheets the bridge registers (composer, work, startup) and replay
 - Limits: it measures painted geometry, so native host folds, hover popovers and focus rings are invisible to
   it; states come from recorded sessions, not from live keystrokes; and `tree` omits elements scrolled out of
   view. None of those are claimed as covered.
+
+### Drawing in Tern's whiteboard (2026-11-09)
+
+The composer's `+` and `/drawing` open Tern's native whiteboard and attach what is drawn on it. Both run
+`PiTernBridge.#openDrawing`; the runner injects `drawing` deps that call `tern ctl`. The installed Tern is
+**0.9.13 (8c6dfbd)**; its `ctl canvas` family (`new`, `tool`, `draw`, `rect`, `text`, `key`, `select-all`,
+`look`, `wait`) is not in the pinned 0.9.5-era `docs/reference/tern-site`, so it was verified against the
+live binary rather than inferred from the docs:
+
+- `tern ctl canvas new` opened a canvas block (pane became the focused `div.cv-surface`); `ctl state`
+  reported it under `canvas_blocks` with `id`, `shapes`, `tool`, `camera`, `look`, `paper`.
+- `tern ctl canvas tool draw` then `tern ctl canvas draw 80,80 180,120 260,200 320,140` raised `shapes`
+  from 0 to 1.
+- `tern ctl shot <name>` wrote `target/shots/tern/live/<name>.png` plus its layout relative to the app's cwd;
+  `tern ctl dump section.tn-pane.canvas` gave the focused pane's box. The captured pane was 547.61×1379.31
+  CSS px at scale 1. A Python/Pillow crop of that box (548×1380) contained ink; the committed path instead
+  uses `png-crop.ts` (Node `zlib`, RGB/RGBA 8-bit) so ImageMagick is not required.
+- `node --experimental-strip-types tools/e2e/tern-drawing.ts` PASS: opened its own canvas, drew one stroke,
+  captured 139×1388 with 88 ink pixels and 1 shape, then closed the canvas it created.
+
+Rules kept: an empty canvas is refused instead of attaching a blank page; the crop is the canvas pane only, so
+other panes never reach the model; several canvases require the user to focus one; `/drawing` is a local
+bridge command and never reaches the model. Tests: `.pi/test/tern/drawing.test.ts` plus the composer, dock and
+command suites (68 targeted tests at the time of writing). Not verified: pointer-drawn input by a human (the
+stroke here came from `canvas draw`), non-1 device scale factors, the Windows/macOS capture roots, and the
+web/iOS clients, which have no whiteboard. `npm run lint:tern` still needs `NODE_OPTIONS=--experimental-strip-types`
+to import `bridge.ts`, and its 24 `type-scale` errors on `omp.composer.extras` 11.5px predate this change.

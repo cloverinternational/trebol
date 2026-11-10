@@ -97,6 +97,16 @@ export const PI_COMPOSER_CSS = `
   cursor: pointer;
 }
 [data-role='pi.composer.send']:hover { background: var(--l1); }
+
+/* The plus sits on the editor line like Tern's own affixes: quiet until hovered, never competing with Send. */
+[data-role='pi.composer.drawing'] {
+  align-self: center;
+  color: var(--t3);
+  padding: 2px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+[data-role='pi.composer.drawing']:hover { color: var(--t1); background: var(--l1); }
 /* /btw card, inline in the composer slot: the newest exchange reads as body text, the input row is the boundary. */
 [data-role='pi.btw.question'] { color: var(--t2); }
 [data-role='pi.btw.answer'] { color: var(--t1); overflow-wrap: anywhere; }

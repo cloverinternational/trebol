@@ -3,6 +3,7 @@
 // omp-chat-reader.css (glass card, context hairline, chips, fold, caption, folder) render it 1:1.
 // Elements OMP shows that Pi has no source for are omitted, never faked.
 import type { TspNode } from "./tsp.ts";
+import { DRAWING_ACTION } from "./drawing.ts";
 
 export interface ContextFacts {
 	tokens: number | null;
@@ -249,7 +250,11 @@ export function composerNodes(f: ComposerFacts, above: TspNode[] = []): TspNode[
 		id: "composer-line",
 		k: "row",
 		p: { role: "omp.composer.line", align: "start", gap: "sm" },
-		c: [{ id: "composer", k: "editor", p: { text: f.draft, cursor: f.cursor ?? f.draft.length, anchor: f.anchor ?? null, ...(f.ghost ? { ghost: f.ghost } : {}), sendable: f.sendable === true, placeholder: PLACEHOLDER } }],
+		c: [
+			// Tern's own plus: opens the native whiteboard beside this pane, then attaches the drawing.
+			{ id: "composer-add", k: "icon", p: { name: "plus", role: "pi.composer.drawing", title: "Draw or diagram  /drawing", tone: "muted", actions: { click: DRAWING_ACTION } } },
+			{ id: "composer", k: "editor", p: { text: f.draft, cursor: f.cursor ?? f.draft.length, anchor: f.anchor ?? null, ...(f.ghost ? { ghost: f.ghost } : {}), sendable: f.sendable === true, placeholder: PLACEHOLDER } },
+		],
 	};
 	return [
 		{
