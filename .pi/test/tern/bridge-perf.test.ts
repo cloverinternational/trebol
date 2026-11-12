@@ -235,8 +235,9 @@ describe("Tern bridge keystroke cost vs session length", () => {
 			const fresh = new TranscriptProjector();
 			for (const e of events) fresh.apply(e);
 			for (const change of late) change(fresh);
-			// Clocks of live groups read Date.now(); compare without them.
-			const strip = (nodes: TspNode[]) => JSON.parse(JSON.stringify(nodes, (k, v) => (k === "age" ? undefined : v)));
+                        // Live groups read Date.now() for age, and a tool without duration_ms
+                        // makes took Date.now() - startedAt. Compare without either clock.
+                        const strip = (nodes: TspNode[]) => JSON.parse(JSON.stringify(nodes, (k, v) => (k === "age" || k === "took" ? undefined : v)));
 			expect(strip(warm.nodes(expanded))).toEqual(strip(fresh.nodes(expanded)));
 		};
 		for (let i = 0; i < 12; i++) {

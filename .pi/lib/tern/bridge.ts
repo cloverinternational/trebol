@@ -21,7 +21,8 @@ import { editingBanner, imageAttachments, MESSAGE_EDIT, MESSAGE_EDIT_CANCEL, MES
 import { buildTreeModel, DEFAULT_TREE_FILTER, nextFilter, sessionTreePickerNode, TREE_FILTERS, type TreeFilter, type TreeModel, type TreeRow } from "./session-tree.ts";
 import { encodeTspBlob, projectTranscript, type TspMessage, type TspNode, type TspView, type TspWriter, TernInlineSurface } from "./tsp.ts";
 import { composerNodes, modelDisplayName, type GitFacts, type WorkFacts } from "./composer-view.ts";
-import { artifactNodes, previewFile, type ArtifactPreview } from "./artifact-previews.ts";
+import { ARTIFACT_ANNOTATE, artifactFromNodeId, artifactNodes, previewFile, type ArtifactPreview } from "./artifact-previews.ts";
+import { ANNOTATE_ADD, ANNOTATE_CANCEL, ANNOTATE_CELL, ANNOTATE_NOTE_ID, ANNOTATE_PIN, ANNOTATE_REMOVE, ANNOTATE_SEND, addMark, annotateNodes, annotatePayload, annotatePng, annotateSession, annotateSheet, cellFromNodeId, cellPoint, editNote, nudgeCursor, pinFromNodeId, removeSelected, selectPin, type AnnotateSession } from "./annotate.ts";
 import { readMcpStatus, subscribeMcpStatus } from "../tools/mcp-status.ts";
 import type { McpToolDefinitionLike } from "../tools/mcp-inventory.ts";
 import { McpController } from "./mcp-controller.ts";
@@ -33,7 +34,7 @@ import { commitIndex, discardPaths, readCommitDiff, readFileDiff, stagePaths, un
 import { PI_GIT_CSS, gitHelpNodes, gitPanelNodes, gitPanelRefs, type GitDiffMode, type GitPanelRef, type GitSidebarStyle } from "./git-panel.ts";
 import { contextDismissNode, contextPanelNodes, readContextBreakdown } from "./context-panel.ts";
 import { patchArtifactPaths } from "../tools/swarm-artifacts.ts";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { readGitFacts } from "./git-facts.ts";
 import { PI_COMPOSER_CSS } from "./composer-style.ts";
 import { PI_ASK_CSS } from "./ask-style.ts";
@@ -54,12 +55,12 @@ import { goalLine, isAbortedAssistant, isCancellationError, isFailedAssistant, i
 import { DraftEditor, isLargePaste, type HostEdit } from "./draft-edit.ts";
 import { ATTACHMENT_LIMITS, ATTACHMENT_REMOVE, attachmentChips, attachmentFromNodeId, attachmentPayload, attachmentSummary, loadAttachment, parseDroppedPaths, type Attachment, type ImageContentLike } from "./attachments.ts";
 import { getNativeClipboard } from "@earendil-works/pi-tui";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { extractBashDisplayText } from "../tools/swarm-bash.ts";
 import { queueGroups, queueNodes } from "./queue-view.ts";
-import { DRAWING_ACTION, drawingAction, type DrawingDeps } from "./drawing.ts";
+import { canvasControlAvailable, captureCanvas, capturePreview, DRAWING_ACTION, DRAWING_DISCARD, DRAWING_SEND, drawingAction, previewKey, resolveOwned, type CanvasOwner, type DrawingDeps } from "./drawing.ts";
 
 export interface PiEventLike {
 	type: string;
@@ -114,6 +115,10 @@ export interface PiSessionLike {
 }
 
 const GIT_STATUS_TTL_MS = 10_000;
+// The whiteboard preview's poll cadence: fast while a drawn canvas exists, slow when there is nothing
+// to watch, so an idle session pays one `ctl state` every few seconds and nothing else.
+const DRAWING_ACTIVE_MS = 1500;
+const DRAWING_IDLE_MS = 12_000;
 const modelFavoritesPath = () => join(process.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi", "agent"), "tern-model-favorites.json");
 
 function loadModelFavorites(): Set<string> {
@@ -1300,6 +1305,20 @@ export class PiTernBridge {
 	readonly #ui: TernExtensionUI;
 	readonly #clipboard: NonNullable<BridgeOptions["clipboard"]>;
 	readonly #drawing?: DrawingDeps;
+	// The live whiteboard preview: the last good cropped canvas, the key it was captured under, and the
+	// key after which it is hidden (a Hide click or an attach) until the canvas changes again.
+	#drawingPreview?: { blob: { id: string; mime: string; base64: string }; width: number; height: number; shapes: number };
+	#drawingKey?: string;
+	#drawingHiddenKey?: string;
+	#drawingTimer: ReturnType<typeof setTimeout> | undefined;
+	#drawingPolling = false;
+	// The whiteboard this Pi instance opened, by canvas hash. Another tab's canvas is never adopted: the
+	// focused one is only sometimes ours, and with several panes "focused" always names exactly one.
+	#drawingOwner?: CanvasOwner;
+	// A picture being marked up: the stage occupies the composer slot until it is sent or discarded. The
+	// generated sheet places every pin, so it is re-sent only when a mark or the crosshair moves.
+	#annotate?: AnnotateSession;
+	#annotateCss?: string;
 	// Images and files waiting above the composer for the next submit (attachments.ts).
 	#attachments: Attachment[] = [];
 	#attachmentSeq = 0;
@@ -1380,15 +1399,227 @@ export class PiTernBridge {
 			return;
 		}
 		try {
-			const result = await drawingAction(this.#drawing);
+			const result = await drawingAction(this.#drawing, this.#drawingOwner);
+			if (result.owner) this.#drawingOwner = result.owner;
+			// A canvas now exists: leave the idle cadence so the preview appears as soon as ink does.
+			this.#scheduleDrawingPoll(DRAWING_ACTIVE_MS);
 			if (result.status === "attached") {
 				this.attachPaths([result.path]);
-				this.notice(`Attached drawing (${result.width}×${result.height}, ${result.shapes} ${result.shapes === 1 ? "shape" : "shapes"}) from the whiteboard`);
+				this.notice(`Attached drawing (${result.width}×${result.height}, ${result.shapes} ${result.shapes === 1 ? "shape" : "shapes"})${result.source === "document" ? " rendered from the canvas document (screenshot unavailable)" : " from the whiteboard"}${result.textOmitted ? "; text labels are outlined, not lettered" : ""}`);
 			} else if (result.status === "opened") {
-				this.notice("Whiteboard opened beside this pane — draw, then run /drawing again to attach it.");
+				this.notice("Whiteboard opened beside this pane — sketch away; a live preview with an Attach drawing button appears in the composer.");
 			} else {
-				this.notice("Whiteboard ready — draw, then run /drawing again to attach the drawing.");
+				this.notice("Whiteboard ready — sketch something and the composer preview attaches it.");
 			}
+		} catch (error) {
+			this.notice(`drawing failed: ${error instanceof Error ? error.message : String(error)}`);
+		}
+	}
+
+	#scheduleDrawingPoll(ms: number): void {
+		clearTimeout(this.#drawingTimer);
+		this.#drawingTimer = setTimeout(() => void this.#pollDrawing(), ms);
+	}
+
+	/**
+	 * The newest previewable picture in the transcript becomes the annotation stage. The bytes are read
+	 * from its path: restored previews keep their blob id but drop the base64 payload, and the original
+	 * file is the only honest source for the overlay copy.
+	 */
+	#openAnnotate(ref?: { itemId: string; index: number }): void {
+		// A card's Mark up action names its own preview; the command takes the newest one.
+		if (ref) {
+			const preview = this.#projector.item(ref.itemId)?.artifacts?.[ref.index];
+			if (preview && this.#startAnnotate(preview)) return;
+		}
+		const items = [...this.#projector.items];
+		for (let i = items.length - 1; i >= 0; i--) {
+			const previews = items[i].artifacts ?? [];
+			for (let j = previews.length - 1; j >= 0; j--) {
+				if (this.#startAnnotate(previews[j])) return;
+			}
+		}
+		this.notice("No previewable picture in this session yet — ask the agent for a PNG or SVG first");
+	}
+
+	/** Opens one preview on the stage. False when the file or the blob is gone, so the caller can try another. */
+	#startAnnotate(preview: ArtifactPreview): boolean {
+		if (!preview.blob || !preview.blob.mime.startsWith("image/")) return false;
+		let bytes: Buffer;
+		try {
+			bytes = readFileSync(preview.path);
+		} catch {
+			return false;
+		}
+		this.#annotate = annotateSession(preview.blob.id, preview.name, preview.path, preview.blob.mime, bytes);
+		this.#annotateCss = undefined;
+		this.#render();
+		this.notice("Mark the picture: click or use the arrows, Enter pins, type the note, then Send.");
+		return true;
+	}
+
+	/**
+	 * Sends the marks the two ways they are useful: a copy of the picture with numbered discs (what the
+	 * model sees) and the coordinate/note payload (what it can act on). The copy is attached, not sent, so
+	 * the user still owns the message. A format this machine cannot decode still gets its coordinates and
+	 * says so instead of pretending an unmarked picture carries the marks.
+	 */
+	async #sendAnnotate(): Promise<void> {
+		const session = this.#annotate;
+		if (!session || this.#closed) return;
+		if (session.marks.length === 0) {
+			this.notice("No marks yet — place a pin, then send");
+			return;
+		}
+		const count = session.marks.length;
+		let attached: string | undefined;
+		if (session.source.decodable) {
+			try {
+				const png = annotatePng(readFileSync(session.source.path), session.marks);
+				if (png) {
+					// The session's workspace is where the annotated copies belong; the drawing workspace is
+					// only a second opinion when the frontend did not provide the session cwd.
+					const workspace = this.#session.sessionManager?.getCwd?.() ?? this.#drawing?.workspace ?? process.cwd();
+					const dir = join(workspace, "artifacts", "annotations");
+					mkdirSync(dir, { recursive: true });
+					const file = join(dir, `${session.source.name.replace(/\.[^.]+$/, "")}-annotated-${Date.now().toString(36)}.png`);
+					writeFileSync(file, png);
+					this.attachPaths([file]);
+					attached = file;
+				}
+			} catch (error) {
+				this.notice(`marked copy failed, sending coordinates only: ${error instanceof Error ? error.message : String(error)}`);
+			}
+		}
+		// The path travels in the text as well as the chip, so a model that cannot take the image (or a
+		// chip whose blob never connected) can still open the marked copy by path.
+		const payload = annotatePayload(session, attached ? this.#shownPath(attached) : undefined);
+		// Close the card first, so the composer that receives the payload is the one on screen.
+		this.#annotate = undefined;
+		this.#annotateCss = undefined;
+		const body = this.#draft.trimEnd();
+		this.setDraft(`${body}${body ? "\n\n" : ""}${payload}\n`);
+		this.#render();
+		this.notice(attached
+			? `Attached the marked picture and ${count} mark${count === 1 ? "" : "s"} with coordinates`
+			: `Added ${count} mark${count === 1 ? "" : "s"} with coordinates; ${session.source.mime} has no overlay copy here`);
+	}
+
+	/** A Mermaid diagram is text: its source is the editable form, and the composer is the editor. */
+	#openDiagram(): void {
+		const fence = /```mermaid[ \t]*\r?\n([\s\S]*?)```/i;
+		const items = [...this.#projector.items];
+		for (let i = items.length - 1; i >= 0; i--) {
+			const item = items[i];
+			if (item.role !== "assistant") continue;
+			const match = fence.exec(item.text);
+			if (!match) continue;
+			this.setDraft(`Revise this Mermaid diagram. Keep everything I did not touch, and say what changed in one line.\n\n\`\`\`mermaid\n${match[1].trim()}\n\`\`\`\n\nChange: `);
+			this.notice("The diagram source is in the composer — edit it, then send");
+			return;
+		}
+		this.notice("No Mermaid diagram in the transcript yet");
+	}
+
+	/**
+	 * The composer's live whiteboard preview: re-captured only when *our* canvas's ink or camera changes
+	 * (previewKey), cropped to that canvas pane, never stealing focus. Another pane's canvas is never
+	 * previewed, and a capture that fails keeps the last good frame; the next poll retries.
+	 */
+	async #pollDrawing(): Promise<void> {
+		if (!this.#drawing || this.#drawingPolling || this.#closed) return;
+		this.#drawingPolling = true;
+		try {
+			const state = await this.#drawing.ctl(["state"]);
+			// Our canvas only. If it is gone the user closed that tab; clear rather than preview another.
+			const canvas = canvasControlAvailable(state) ? resolveOwned(state, this.#drawingOwner) : undefined;
+			if (canvas === undefined && this.#drawingOwner !== undefined) {
+				this.#drawingOwner = undefined;
+				this.#drawingPreview = undefined;
+				this.#drawingKey = undefined;
+				this.#drawingHiddenKey = undefined;
+				this.#render();
+			}
+			const drawn = canvas !== undefined && Number(canvas.shapes ?? 0) > 0 ? canvas : undefined;
+			const key = previewKey(drawn);
+			if (key === undefined) {
+				// Nothing drawn anywhere: idle. Clear on the transition only, so an idle poll never repaints.
+				this.#scheduleDrawingPoll(DRAWING_IDLE_MS);
+				if (this.#drawingPreview !== undefined || this.#drawingKey !== undefined) {
+					this.#drawingPreview = undefined;
+					this.#drawingKey = undefined;
+					this.#drawingHiddenKey = undefined;
+					this.#render();
+				}
+				return;
+			}
+			this.#scheduleDrawingPoll(DRAWING_ACTIVE_MS);
+			if (this.#drawingHiddenKey !== undefined) {
+				if (key === this.#drawingHiddenKey) return; // hidden after Hide or Attach; the next stroke brings it back
+				this.#drawingHiddenKey = undefined;
+			}
+			if (key === this.#drawingKey && this.#drawingPreview !== undefined) return; // settled canvas
+			const preview = await capturePreview(this.#drawing, drawn);
+			if (!preview.ok) return;
+			const blob = { id: createHash("sha256").update(preview.bytes).digest("hex"), mime: "image/png", base64: preview.bytes.toString("base64") };
+			// The blob precedes the frame that references it, as with artifact previews.
+			for (const chunk of encodeTspBlob(blob.id, blob.mime, blob.base64)) this.#write(chunk);
+			this.#drawingKey = key;
+			this.#drawingPreview = { blob, width: preview.width, height: preview.height, shapes: preview.shapes };
+			this.#render();
+		} catch {
+			// A failed poll (Tern restarting, a control error) retries on the next tick, quietly.
+			this.#scheduleDrawingPoll(DRAWING_ACTIVE_MS);
+		} finally {
+			this.#drawingPolling = false;
+		}
+	}
+
+	/** Hides the preview until the canvas changes again; the next stroke brings it back. */
+	#hideDrawingPreview(): void {
+		if (this.#drawingPreview === undefined && this.#drawingKey === undefined) return;
+		this.#drawingHiddenKey = this.#drawingKey;
+		this.#drawingPreview = undefined;
+		this.#render();
+	}
+
+	/** The preview's Attach control: capture the focused canvas and add it as a normal image attachment. */
+	async #sendDrawing(): Promise<void> {
+		if (!this.#drawing || this.#closed) return;
+		try {
+			const state = await this.#drawing.ctl(["state"]);
+			const canvas = canvasControlAvailable(state) ? resolveOwned(state, this.#drawingOwner) : undefined;
+			if (!canvas || Number(canvas.shapes ?? 0) < 1) {
+				this.notice(this.#drawingOwner === undefined
+					? "Nothing is drawn yet — sketch on the whiteboard, then attach"
+					: "That whiteboard is gone (its tab was closed) — run /drawing to open a new one");
+				return;
+			}
+			if (this.#attachments.length >= ATTACHMENT_LIMITS.maxAttachments) {
+				this.notice(`Attachment limit reached (${ATTACHMENT_LIMITS.maxAttachments}); remove one first`);
+				return;
+			}
+			const result = await captureCanvas(this.#drawing, canvas);
+			if (result.status !== "attached") {
+				this.notice(result.status === "empty" ? "The whiteboard is empty — nothing to attach" : "The whiteboard is not focused; click its pane, then attach");
+				return;
+			}
+			// Write the file's path into the composer before anything can fail to attach: the drawing is on
+			// disk either way, and a path the agent can read is the fallback when the image does not connect.
+			this.#appendPath("Drawing", result.path);
+			const attachment = loadAttachment(result.path, this.#attachmentSeq + 1);
+			if (!attachment) {
+				this.notice("The drawing capture could not be attached; its path is in the composer so the agent can still read it");
+				return;
+			}
+			this.#attachmentSeq++;
+			if (attachment.blob) for (const chunk of encodeTspBlob(attachment.blob.id, attachment.blob.mime, attachment.blob.base64)) this.#write(chunk);
+			this.#attachments.push(attachment);
+			// The chip now carries the drawing; the preview yields until the next stroke changes it.
+			this.#drawingHiddenKey = this.#drawingKey;
+			this.#drawingPreview = undefined;
+			this.notice(`Attached drawing (${result.width}×${result.height}, ${result.shapes} ${result.shapes === 1 ? "shape" : "shapes"})${result.source === "document" ? ", rendered from the canvas document" : ""} — it goes with your next message${result.textOmitted ? " (text labels are outlined)" : ""}`);
+			this.#render();
 		} catch (error) {
 			this.notice(`drawing failed: ${error instanceof Error ? error.message : String(error)}`);
 		}
@@ -1471,6 +1702,9 @@ export class PiTernBridge {
 		this.#syncSession();
 		this.#refreshGit();
 		this.#gitTimer = setInterval(() => this.#refreshGit(), GIT_STATUS_TTL_MS);
+		// The whiteboard preview follows the live canvas on its own cadence: the first poll is eager, so a
+		// canvas already drawn in this window surfaces promptly; nothing left to watch idles down to slow.
+		if (this.#drawing) this.#scheduleDrawingPoll(DRAWING_ACTIVE_MS);
 		this.#render();
 	}
 
@@ -1548,6 +1782,7 @@ export class PiTernBridge {
 	// level, git status of Pi's cwd, session cost. OMP's tok/s, focus crumbs and shell mode have no Pi source.
 	#dock(): TspNode[] {
 		// An open ask or /btw flow takes over the input slot: its inline card replaces the composer.
+		if (this.#annotate) return annotateNodes(this.#annotate);
 		if (this.#dialog?.active) return this.#dialog.nodes(this.#columns);
 		if (this.#btw?.active) return this.#btw.nodes();
 		// Tern-only affordance: the bar draws ctrl+b as a button only while that chord would really move work
@@ -1582,6 +1817,12 @@ export class PiTernBridge {
 			// A phone-width bar gives Send a real touch target and keeps secondary facts from crowding it.
 			compact: this.#columns < 56,
 			...(this.#attachments.length ? { chips: attachmentChips(this.#attachments) } : {}),
+			// The live whiteboard row sits above the chips; hidden after an attach or a Hide until the canvas changes.
+			...(this.#drawingPreview && this.#drawingHiddenKey === undefined
+				? { drawing: { shapes: this.#drawingPreview.shapes, image: { blob: this.#drawingPreview.blob.id, width: this.#drawingPreview.width, height: this.#drawingPreview.height } } }
+				: {}),
+			// A live Pi Voice take publishes an amplitude meter; the composer draws it on the editor.
+			wave: this.#ui.meterFacts(),
 		}, this.#editing ? [editingBanner(this.#editing)] : []), ...this.#ui.widgetNodes("belowEditor")];
 	}
 
@@ -2210,6 +2451,14 @@ export class PiTernBridge {
 	#render(): void {
 		if (this.#closed) return;
 		this.#syncSession();
+		// The annotation sheet is the only way a mark gets a position: TSP nodes cannot carry one.
+		if (this.#annotate) {
+			const css = annotateSheet(this.#annotate);
+			if (css !== this.#annotateCss) {
+				this.#annotateCss = css;
+				this.#surface.stylesheet("annotate", css);
+			}
+		}
 		const gitFocus = this.#gitView && this.#gitFocus ? (this.#gitFocus === "summary" ? "git-summary" : "git-body-field") : undefined;
 		const focus = this.#ui.focusId ?? (this.#workViewId !== undefined ? "bg-search" : undefined) ?? (this.#stepInspector ? "work-inspector-search" : undefined) ?? (this.#mcpManager.open ? this.#mcpManager.focusId : undefined) ?? gitFocus ?? (this.#treePickerOpen ? "session-tree-picker" : this.#modelPickerOpen ? "model-picker-sheet" : "composer");
 		const transcript = this.#projector.nodes(this.#toolOutputExpanded, { currentTask: this.#currentTask(), messageFocus: this.#messageFocus, editing: this.#editing?.itemId, busy: this.#busy });
@@ -2291,6 +2540,26 @@ export class PiTernBridge {
 	moveDialogTab(delta: number): void {
 		if (this.#closed || !this.#dialog?.active) return;
 		this.#dialog.moveTab(delta);
+	}
+
+	/** A path the agent can open: workspace-relative when it lives inside the session's cwd. */
+	#shownPath(path: string): string {
+		const cwd = this.#session.sessionManager?.getCwd?.();
+		if (!cwd) return path;
+		const rel = relative(cwd, path);
+		return rel && !rel.startsWith("..") && !isAbsolute(rel) ? rel : path;
+	}
+
+	/**
+	 * Writes a generated image's path into the composer on its own line. The chip is the picture; this is
+	 * the durable reference when the picture does not reach the model — a non-vision model, a blob that
+	 * never connected, or a conversation resumed where the image data no longer travels.
+	 */
+	#appendPath(label: string, path: string): void {
+		const line = `${label}: ${this.#shownPath(path)}`;
+		if (this.#draft.includes(line)) return;
+		const body = this.#draft.trimEnd();
+		this.setDraft(`${body}${body ? "\n\n" : ""}${line}\n`);
 	}
 
 	appendDraft(text: string): void {
@@ -2512,7 +2781,7 @@ export class PiTernBridge {
 
 	// The composer takes Tern's `send` only when nothing else owns Enter; otherwise Tern holds the prompt.
 	#composerSendable(): boolean {
-		return !this.#closed && this.#workViewId === undefined && !this.#stepInspector && !this.#mcpManager.open && !this.#ui.active && !this.#dialog?.active && !this.#btw?.active && !this.#modelPickerOpen && !this.#treePickerOpen;
+		return !this.#closed && !this.#annotate && this.#workViewId === undefined && !this.#stepInspector && !this.#mcpManager.open && !this.#ui.active && !this.#dialog?.active && !this.#btw?.active && !this.#modelPickerOpen && !this.#treePickerOpen;
 	}
 
 	// Tern's atomic `send` goes through the normal submit path but is not the user's draft: a half-typed
@@ -2528,7 +2797,7 @@ export class PiTernBridge {
 	// replaced by typing, ⌫, ⌘X or a paste, or a drawn-line ↑/↓/Home/End move. A stale event (keys in
 	// flight) is dropped, as the protocol asks.
 	applyNativeEdit(edit: HostEdit): void {
-		if (this.#closed || this.#ui.active || this.#dialog?.active || this.#btw?.active || this.#modelPickerOpen || this.#treePickerOpen) return;
+		if (this.#closed || this.#annotate || this.#ui.active || this.#dialog?.active || this.#btw?.active || this.#modelPickerOpen || this.#treePickerOpen) return;
 		const inserted = typeof edit.text === "string" ? edit.text : "";
 		const removed = edit.from !== edit.to;
 		const kind: Edit = inserted && !removed ? { kind: "type", text: inserted } : !inserted && removed ? { kind: "backspace" } : { kind: "set" };
@@ -2766,6 +3035,70 @@ export class PiTernBridge {
 	// Routes one parsed TSP message. Returns the promise of any submitted prompt, for tests.
 	handle(msg: TspMessage): Promise<void> | undefined {
 		if (this.#closed) return undefined;
+		// Marking up a picture owns the input slot. A click names a grid cell (TSP has no pointer
+		// coordinates), the arrows nudge the crosshair by a percent, Enter drops a pin, and the note is a
+		// native editor so typing never has to be reconstructed from key events.
+		if (this.#annotate && msg.verb === "e" && !this.#ui.active) {
+			const session = this.#annotate;
+			const b = msg.body;
+			const close = () => { this.#annotate = undefined; this.#annotateCss = undefined; };
+			if (b.ev === "action") {
+				const act = String(b.act ?? "");
+				if (act === ANNOTATE_CANCEL) close();
+				else if (act === ANNOTATE_SEND) { void this.#sendAnnotate(); return undefined; }
+				else if (act === ANNOTATE_ADD) addMark(session);
+				else if (act === ANNOTATE_REMOVE) removeSelected(session);
+				else if (act === ANNOTATE_CELL) {
+					const cell = cellFromNodeId(b.id);
+					if (cell) session.cursor = cellPoint(cell.row, cell.col);
+					session.noteFocused = false;
+				} else if (act === ANNOTATE_PIN) {
+					const pin = pinFromNodeId(b.id);
+					if (pin !== undefined) selectPin(session, pin);
+					session.noteFocused = false;
+				}
+				this.#render();
+				return undefined;
+			}
+			if (b.ev === "focus" && b.id === ANNOTATE_NOTE_ID) {
+				session.noteFocused = true;
+				return undefined;
+			}
+			if (b.ev === "edit" && b.id === ANNOTATE_NOTE_ID) {
+				editNote(session, Number(b.from ?? 0), Number(b.to ?? 0), typeof b.text === "string" ? b.text : "", typeof b.cursor === "number" ? b.cursor : undefined);
+				this.#render();
+				return undefined;
+			}
+			if (b.ev === "paste" && b.id === ANNOTATE_NOTE_ID && typeof b.text === "string") {
+				const at = session.noteCursor ?? session.note.length;
+				editNote(session, at, at, b.text);
+				this.#render();
+				return undefined;
+			}
+			if (b.ev === "key") {
+				const key = String(b.key ?? "");
+				if (session.noteFocused) {
+					// The note editor owns arrows and text; Esc hands the keys back to the crosshair.
+					if (key === "escape") { session.noteFocused = false; this.#render(); }
+					return undefined;
+				}
+				if (key === "escape") close();
+				else if (key === "left") nudgeCursor(session, -0.01, 0);
+				else if (key === "right") nudgeCursor(session, 0.01, 0);
+				else if (key === "up") nudgeCursor(session, 0, -0.01);
+				else if (key === "down") nudgeCursor(session, 0, 0.01);
+				else if (key === "enter") addMark(session);
+				else if (key === "backspace") removeSelected(session);
+				else if (key === "tab" && session.marks.length > 0) {
+					const pins = session.marks.map((mark) => mark.n);
+					const at = session.selected === undefined ? -1 : pins.indexOf(session.selected);
+					selectPin(session, pins[(at + 1) % pins.length]);
+				}
+				this.#render();
+				return undefined;
+			}
+			return undefined;
+		}
 		if (this.#workViewId !== undefined && msg.verb === "e" && !this.#ui.active) {
 			const b = msg.body;
 			if (b.ev === "action" && b.act === "bg.close") { this.#closeWorkView(); return; }
@@ -3014,6 +3347,19 @@ export class PiTernBridge {
 			void this.#openDrawing();
 			return undefined;
 		}
+		if (act === DRAWING_SEND) {
+			void this.#sendDrawing();
+			return undefined;
+		}
+		if (act === DRAWING_DISCARD) {
+			this.#hideDrawingPreview();
+			return undefined;
+		}
+		if (act === ARTIFACT_ANNOTATE) {
+			const ref = artifactFromNodeId(msg.body.id);
+			if (ref) this.#openAnnotate(ref);
+			return undefined;
+		}
 		if (act === "submit.followUp") return this.submitFollowUp(submittedText(msg.body));
 		if (act === MESSAGE_FOCUS || act === MESSAGE_EDIT || act === MESSAGE_RESEND) {
 			const item = messageItemFromNode(msg.body.id);
@@ -3244,6 +3590,8 @@ export class PiTernBridge {
 			if (route.name === "context") this.#openContextView();
 			else if (route.name === "work") this.#openWorkView("all");
 			else if (route.name === "drawing") void this.#openDrawing();
+			else if (route.name === "annotate") this.#openAnnotate();
+			else if (route.name === "diagram") this.#openDiagram();
 			else this.#render();
 			return Promise.resolve();
 		}
@@ -3540,6 +3888,8 @@ export class PiTernBridge {
 	close(): void {
 		this.#workUnsubscribe?.();
 		this.#workUnsubscribe = null;
+		clearTimeout(this.#drawingTimer);
+		this.#drawingTimer = undefined;
 		clearInterval(this.#workViewTimer);
 		this.#workViewTimer = undefined;
 		if (this.#closed) return;

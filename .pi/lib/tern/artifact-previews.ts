@@ -4,6 +4,18 @@ import { basename } from "node:path";
 import { citationFor, classifyArtifact, mimeOf, pdfFirstPagePng, readHead, sizeLimitFor, type ArtifactKind } from "../tools/swarm-artifacts.ts";
 import type { TspNode } from "./tsp.ts";
 
+/** Card action that opens the annotation stage for that preview. */
+export const ARTIFACT_ANNOTATE = "artifact.annotate";
+
+/** The preview a card action names: `<item>-art-<i>-annotate`. */
+export function artifactFromNodeId(id: unknown): { itemId: string; index: number } | undefined {
+	if (typeof id !== "string") return undefined;
+	const match = /^(.*)-art-(\d+)-annotate$/.exec(id);
+	if (!match) return undefined;
+	const index = Number(match[2]);
+	return Number.isInteger(index) && index >= 0 ? { itemId: match[1], index } : undefined;
+}
+
 /** A picture Tern can draw: `id` is the SHA-256 of `bytes`, which Tern re-checks on receipt. */
 export interface ArtifactBlob {
   id: string;
@@ -70,7 +82,21 @@ export function artifactNodes(itemId: string, previews: readonly ArtifactPreview
       k: "image",
       p: { blob: preview.blob.id, alt: preview.name, title: preview.citation, path: preview.path, max: { h: "24lines" } },
     };
-    return { id, k: "card", p: { head, role: "pi.artifact", tone: "accent" }, c: [picture, cite] };
+    // A picture the agent showed is also a picture you can mark up: the action opens the stage on this
+    // exact preview rather than guessing which one you meant.
+    const annotate: TspNode = {
+      id: `${id}-annotate`,
+      k: "text",
+      p: {
+        role: "pi.artifact.action",
+        wrap: "none",
+        tone: "accent",
+        title: "Mark up this picture: click or arrows, note each spot, send it back",
+        actions: { click: ARTIFACT_ANNOTATE },
+        spans: [{ t: "Mark up", s: "accent" }],
+      },
+    };
+    return { id, k: "card", p: { head, role: "pi.artifact", tone: "accent" }, c: [picture, cite, annotate] };
   });
 }
 

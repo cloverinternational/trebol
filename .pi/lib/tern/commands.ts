@@ -48,7 +48,11 @@ export const BRIDGE_COMMANDS: ReadonlyArray<{ name: string; description: string;
 	// only way back to work that has already settled now that the dock carries no recent-work button.
 	{ name: "work", description: "Inspect running and recent background work", icon: "agent" },
 	// Opens Tern's native whiteboard, or attaches the drawing on it. The composer's + runs the same path.
-	{ name: "drawing", description: "Draw or diagram in Tern's whiteboard, then attach it to the message", icon: "pen" },
+	{ name: "drawing", description: "Draw or diagram in Tern's whiteboard; the composer preview attaches it", icon: "pen" },
+	// Marks up the newest picture in the transcript and hands the agent its coordinates and notes.
+	{ name: "annotate", description: "Mark up the newest picture: click or arrows, note each spot, send it back", icon: "pen" },
+	// Mermaid renders from source, so the source is what can be edited.
+	{ name: "diagram", description: "Edit the last Mermaid diagram's source in the composer", icon: "code" },
 ];
 
 // OMP's slash-command icon names (its builtin table; commands without one fall back to "action").
