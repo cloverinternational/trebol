@@ -26,7 +26,11 @@ function registeredCommands(debug: string | undefined): string[] {
 }
 
 test("registers the voice command and voice settings", () => {
-  assert.deepEqual(registeredCommands(undefined), ["voice", "voice-settings", "transcribe"]);
+  assert.deepEqual(registeredCommands(undefined), [
+    "voice",
+    "voice-settings",
+    "transcribe",
+  ]);
 });
 
 test("the renamed debug flag registers only the renamed onboarding command", () => {
@@ -42,7 +46,11 @@ test("the old debug flag is not a compatibility alias", () => {
   const previous = process.env.PI_TRANSCRIBE_DEBUG;
   process.env.PI_TRANSCRIBE_DEBUG = "1";
   try {
-    assert.deepEqual(registeredCommands(undefined), ["voice", "voice-settings", "transcribe"]);
+    assert.deepEqual(registeredCommands(undefined), [
+      "voice",
+      "voice-settings",
+      "transcribe",
+    ]);
   } finally {
     if (previous === undefined) delete process.env.PI_TRANSCRIBE_DEBUG;
     else process.env.PI_TRANSCRIBE_DEBUG = previous;

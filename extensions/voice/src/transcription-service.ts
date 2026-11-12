@@ -82,6 +82,8 @@ type ReusableBackend = Pick<
   TranscribeCppBackend,
   "prepare" | "transcribe" | "dispose"
 > & {
+  /** A remote backend does its own language handling; no local detector. */
+  readonly remote?: boolean;
   startStream?: (
     options?: TranscriptionOptions,
   ) => Promise<DictationStream | undefined>;
@@ -465,7 +467,9 @@ export class TranscriptionService {
     state.ready.resolve();
     this.startDrain(state);
     // Warm the detector while the user speaks; a failure resurfaces at detection.
-    if (state.policy.kind === "detect") await this.ensureDetector().catch(() => undefined);
+    if (!backend.remote && state.policy.kind === "detect") {
+      await this.ensureDetector().catch(() => undefined);
+    }
     await state.submission.promise;
 
     if (!state.submitted) {
@@ -581,7 +585,11 @@ export class TranscriptionService {
     return {
       decode: async (chunk, clip) => {
         signal.throwIfAborted();
-        const chosen = await (choice ??= this.chooseLanguage(settings, policy, clip, signal));
+        const chosen = await (choice ??= backend.remote
+          ? Promise.resolve<{ language?: string; warning?: string }>({
+              language: fixedLanguage(policy),
+            })
+          : this.chooseLanguage(settings, policy, clip, signal));
         warning = chosen.warning;
         signal.throwIfAborted();
         return backend.transcribe(chunk, transcriptionOptions(settings, chosen.language, signal));

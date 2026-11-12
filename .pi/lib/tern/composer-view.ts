@@ -3,7 +3,7 @@
 // omp-chat-reader.css (glass card, context hairline, chips, fold, caption, folder) render it 1:1.
 // Elements OMP shows that Pi has no source for are omitted, never faked.
 import type { TspNode } from "./tsp.ts";
-import { DRAWING_ACTION } from "./drawing.ts";
+import { DRAWING_ACTION, DRAWING_DISCARD, DRAWING_SEND } from "./drawing.ts";
 
 export interface ContextFacts {
 	tokens: number | null;
@@ -59,6 +59,16 @@ export interface ComposerFacts {
 	/** Attachment chips (attachments.ts), drawn above the editor line. */
 	chips?: TspNode;
 	/**
+	 * The live whiteboard preview (drawing.ts): drawn while a focused canvas holds ink. The row carries
+	 * the drawing itself as a thumbnail, its shape count, and the one control that sends it.
+	 */
+	drawing?: DrawingPreviewFacts;
+	/**
+	 * A live microphone take (Pi Voice). The amplitude history becomes one native `chart` bar each,
+	 * drawn as a strip directly on top of the editor. Absent when nothing is recording.
+	 */
+	wave?: MeterFacts;
+	/**
 	 * A phone-width composer bar. Keeps the primary action as a labelled touch target instead of a
 	 * keycap, and drops secondary facts that would push Send off the row.
 	 */
@@ -69,6 +79,49 @@ export interface ComposerFacts {
 	 * state, never a second way to start it, so it cannot offer a click that does nothing.
 	 */
 	backgroundable?: boolean;
+}
+
+export interface DrawingPreviewFacts {
+	/** Shape count on the canvas when the preview was captured. */
+	shapes: number;
+	/** The cropped canvas as a blob Tern already holds (sent before the frame that references it). */
+	image: { blob: string; width: number; height: number };
+}
+
+export interface MeterFacts {
+	/** Amplitude history, oldest to newest, each 0–1. */
+	levels: readonly number[];
+	elapsedMs: number;
+	modelState: "loading" | "ready" | "failed";
+	microphoneStopped?: boolean;
+}
+
+function formatMeterTime(ms: number): string {
+	const total = Math.max(0, Math.floor(ms / 1000));
+	return `${Math.floor(total / 60)}:${(total % 60).toString().padStart(2, "0")}`;
+}
+
+/**
+ * A phone-width composer cannot give 96 columns distinguishable pixels; collapse buckets by peak so
+ * the envelope keeps its shape while every bar stays wide enough to read as a bar, not a dotted line.
+ */
+function waveSeries(levels: readonly number[], compact: boolean | undefined): Array<{ value: number }> {
+	const target = compact ? 48 : levels.length;
+	if (levels.length <= target) return levels.map((value) => ({ value }));
+	const out: Array<{ value: number }> = [];
+	for (let column = 0; column < target; column += 1) {
+		const from = Math.floor((column * levels.length) / target);
+		const to = Math.max(from + 1, Math.floor(((column + 1) * levels.length) / target));
+		let peak = 0;
+		for (let index = from; index < to; index += 1) peak = Math.max(peak, levels[index] ?? 0);
+		out.push({ value: peak });
+	}
+	return out;
+}
+
+function waveMeta(wave: MeterFacts, compact: boolean | undefined): string {
+	const model = compact ? "" : wave.modelState === "loading" ? "loading model" : wave.modelState === "failed" ? "model failed" : "";
+	return [formatMeterTime(wave.elapsedMs), model, wave.microphoneStopped ? "mic stopped" : ""].filter(Boolean).join(" · ");
 }
 
 export const PLACEHOLDER = "What are we cooking?";
@@ -256,12 +309,57 @@ export function composerNodes(f: ComposerFacts, above: TspNode[] = []): TspNode[
 			{ id: "composer", k: "editor", p: { text: f.draft, cursor: f.cursor ?? f.draft.length, anchor: f.anchor ?? null, ...(f.ghost ? { ghost: f.ghost } : {}), sendable: f.sendable === true, placeholder: PLACEHOLDER } },
 		],
 	};
+	// The live whiteboard: the drawing itself as a thumbnail, its live facts, and its send path. One quiet
+	// row; the primary control is the only accent in it, because it is the one thing the row is for.
+	const drawing = f.drawing ? {
+		id: "drawing-preview",
+		k: "row",
+		p: { role: "pi.composer.drawing-preview", gap: "sm", align: "center" },
+		c: [
+			{ id: "drawing-preview.img", k: "image", p: { role: "pi.composer.drawing.image", blob: f.drawing.image.blob, alt: "Whiteboard drawing", w: f.drawing.image.width, h: f.drawing.image.height, max: { w: "24ch", h: "6lines" } } },
+			{ id: "drawing-preview.facts", k: "text", p: { role: "pi.composer.drawing-facts", text: `${f.drawing.shapes} ${f.drawing.shapes === 1 ? "shape" : "shapes"} · live`, tone: "muted", wrap: "none" } },
+			{ id: "drawing-preview.send", k: "button", p: { role: "pi.composer.drawing-send", text: "Attach drawing", variant: "primary", size: "sm", title: "Attach the whiteboard drawing to this message", actions: { click: DRAWING_SEND } } },
+			{ id: "drawing-preview.hide", k: "button", p: { role: "pi.composer.drawing-hide", text: "Hide", variant: "quiet", size: "sm", title: "Hide the preview; the next stroke brings it back", actions: { click: DRAWING_DISCARD } } },
+		],
+	} as TspNode : undefined;
+	// A live take: one bar per amplitude column, sized by Tern from the series, and the take's own facts
+	// beside it. Rendered only while a meter is published, so the composer spends no row when idle.
+	const wave = f.wave ? {
+		id: "composer-wave",
+		k: "row",
+		p: { role: "pi.composer.wave", gap: "sm", align: "center" },
+		c: [
+			{
+				id: "composer-wave-chart",
+				k: "chart",
+				p: {
+					role: "pi.composer.wave.chart",
+					kind: "bars",
+					size: "sm",
+					token: "accent",
+					grow: 1,
+					aria: "Live microphone waveform",
+					series: waveSeries(f.wave.levels, f.compact),
+				},
+			},
+			{
+				id: "composer-wave-meta",
+				k: "text",
+				p: {
+					role: "pi.composer.wave.meta",
+					tone: "muted",
+					wrap: "none",
+					text: waveMeta(f.wave, f.compact),
+				},
+			},
+		],
+	} as TspNode : undefined;
 	return [
 		{
 			id: "composer-col",
 			k: "col",
 			p: { role: "omp.editor", ...(f.busy ? { tone: "pending" } : {}) },
-			c: [...above, ...(f.context ? [contextMeter(f.context)] : []), ...(f.chips ? [f.chips] : []), line, bar],
+			c: [...above, ...(f.context ? [contextMeter(f.context)] : []), ...(drawing ? [drawing] : []), ...(f.chips ? [f.chips] : []), ...(wave ? [wave] : []), line, bar],
 		},
 	];
 }

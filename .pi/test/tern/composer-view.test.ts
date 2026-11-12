@@ -72,6 +72,61 @@ describe("OMP composer port", () => {
 		expect(find([col], "composer").p.text).toBe("hello");
 	});
 
+	it("shows the live drawing preview only while drawn, with its send path", () => {
+		expect(find(composerNodes({ draft: "", busy: false }), "drawing-preview")).toBeUndefined();
+		const [col] = composerNodes({ draft: "", busy: false, drawing: { shapes: 3, image: { blob: "b1", width: 30, height: 40 } } });
+		const row = find([col], "drawing-preview");
+		expect(row?.k).toBe("row");
+		expect(find([row], "drawing-preview.img")?.p).toMatchObject({ blob: "b1", w: 30, h: 40, alt: "Whiteboard drawing" });
+		expect(find([row], "drawing-preview.facts")?.p.text).toBe("3 shapes · live");
+		expect(find([row], "drawing-preview.send")?.p).toMatchObject({ text: "Attach drawing", variant: "primary", actions: { click: "drawing.send" } });
+		expect(find([row], "drawing-preview.hide")?.p).toMatchObject({ text: "Hide", actions: { click: "drawing.discard" } });
+		// The preview reads as one column of things going with the message: it sits above the editor line.
+		const ids = col.c.map((n: any) => n.id);
+		expect(ids.indexOf("drawing-preview")).toBeLessThan(ids.indexOf("composer-line"));
+	});
+
+	it("draws a live take as a native waveform strip directly above the editor", () => {
+		const levels = [0, 0.2, 0.9, 0.42];
+		const [col] = composerNodes({
+			draft: "",
+			busy: false,
+			wave: { levels, elapsedMs: 65_000, modelState: "ready", microphoneStopped: false },
+		});
+		expect(col.c.map((n: any) => n.p.role)).toEqual(["pi.composer.wave", "omp.composer.line", "omp.composer.bar"]);
+		const chart = find([col], "composer-wave-chart");
+		expect(chart.p).toMatchObject({
+			kind: "bars",
+			size: "sm",
+			token: "accent",
+			grow: 1,
+			series: levels.map((value) => ({ value })),
+		});
+		expect(find([col], "composer-wave-meta").p.text).toBe("1:05");
+	});
+
+	it("omits the waveform row when nothing is recording", () => {
+		const [col] = composerNodes({ draft: "", busy: false });
+		expect(find([col], "composer-wave")).toBeUndefined();
+		expect(col.c.map((n: any) => n.p.role)).toEqual(["omp.composer.line", "omp.composer.bar"]);
+	});
+
+	it("collapses the waveform to readable columns and shortens its facts on a phone-width bar", () => {
+		const levels = Array.from({ length: 96 }, (_, index) => index / 95);
+		const [col] = composerNodes({
+			draft: "",
+			busy: false,
+			compact: true,
+			wave: { levels, elapsedMs: 7000, modelState: "loading" },
+		});
+		const series = find([col], "composer-wave-chart").p.series as Array<{ value: number }>;
+		expect(series).toHaveLength(48);
+		// Buckets keep each pair's peak, so the envelope's shape survives the collapse.
+		expect(series[0].value).toBeCloseTo(1 / 95);
+		expect(series.at(-1)?.value).toBe(1);
+		expect(find([col], "composer-wave-meta").p.text).toBe("0:07");
+	});
+
 	it("folds the effort glyph into the model chip when Tern has the effort kind, else a separate chip", () => {
 		const base = { draft: "", busy: false, model: "M", thinking: "high" };
 		expect(find(composerNodes({ ...base, effortKind: true }), "model-effort")?.k).toBe("effort");

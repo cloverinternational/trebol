@@ -7,10 +7,48 @@ type UiTheme = ExtensionContext["ui"]["theme"];
 const WIDGET_KEY = STATUS_WIDGET_KEY;
 /** Repaint interval shared by every surface that draws the meter. */
 export const METER_UPDATE_MS = 50;
+/** Tern rebuilds a chart whole, so its waveform updates slower than the TUI's text meter. */
+const TERN_METER_UPDATE_MS = 80;
 const LEVEL_GAIN = 36;
 const DECAY = 0.65;
+/** Amplitude columns kept for Tern's waveform strip; ~3 s of history at 32 ms capture chunks. */
+export const WAVE_COLUMNS = 96;
+/**
+ * The strip is a level meter, not a linear sample plot. Spoken word sits around −27 dBFS RMS with
+ * peaks near −10; a linear (or sqrt) gain maps the loud half of speech onto 1.0, which is what made
+ * the first version look permanently maxed out. Map a fixed dB window instead: everything at or
+ * below the floor is silence (so room noise draws no bars), and the ceiling leaves the top of the
+ * strip for the loudest syllables instead of clamping a third of the take.
+ */
+const WAVE_FLOOR_DB = -48;
+const WAVE_CEIL_DB = -12;
 const BLOCKS = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"] as const;
 const BAND_EDGES_HZ = [80, 160, 250, 400, 650, 1000, 1600, 2500, 4000, 6000] as const;
+
+type TernMeterState = {
+  levels: number[];
+  elapsedMs: number;
+  modelState: MeterModelState;
+  microphoneStopped: boolean;
+};
+type TernMeterPublish = (state: TernMeterState | undefined) => void;
+
+/**
+ * Tern exposes `ternMeter` on its uiContext (ext-ui.ts), which lets an extension hand the composer
+ * real amplitude data instead of a text line. It is absent in Pi's TUI, where the widget line is used.
+ */
+function ternMeterOf(ctx: ExtensionContext): TernMeterPublish | undefined {
+  const ui = ctx.ui as unknown as { ternMeter?: unknown };
+  return typeof ui.ternMeter === "function" ? (ui.ternMeter as TernMeterPublish).bind(ui) : undefined;
+}
+
+/** RMS → 0–1 on the waveform strip's fixed dB scale; exported for the calibration test. */
+export function waveformLevel(rms: number): number {
+  if (!(rms > 0)) return 0;
+  const db = 20 * Math.log10(rms);
+  if (db <= WAVE_FLOOR_DB) return 0;
+  return Math.min(1, (db - WAVE_FLOOR_DB) / (WAVE_CEIL_DB - WAVE_FLOOR_DB));
+}
 
 function floorPowerOfTwo(value: number): number {
   return 2 ** Math.floor(Math.log2(value));
@@ -155,11 +193,14 @@ export type MeterModelState = "loading" | "ready" | "failed";
 /** Peak-hold band levels computed from capture chunks. */
 export class SpectrumAnalyzer {
   readonly bands: number[] = Array.from({ length: BAND_EDGES_HZ.length - 1 }, () => 0);
+  /** Peak envelope history, one column per capture chunk, shaped for a waveform strip. */
+  readonly levels: number[] = Array.from({ length: WAVE_COLUMNS }, () => 0);
   private re: Float64Array | undefined;
   private im: Float64Array | undefined;
 
   reset(): void {
     this.bands.fill(0);
+    this.levels.fill(0);
     this.re = undefined;
     this.im = undefined;
   }
@@ -174,6 +215,14 @@ export class SpectrumAnalyzer {
     for (let index = 0; index < this.bands.length; index += 1) {
       this.bands[index] = Math.max(energies[index] ?? 0, (this.bands[index] ?? 0) * DECAY);
     }
+    let energy = 0;
+    for (let index = 0; index < samples.length; index += 1) {
+      const sample = samples[index] ?? 0;
+      energy += sample * sample;
+    }
+    const rms = samples.length > 0 ? Math.sqrt(energy / samples.length) : 0;
+    this.levels.push(waveformLevel(rms));
+    if (this.levels.length > WAVE_COLUMNS) this.levels.shift();
   }
 }
 
@@ -215,10 +264,12 @@ export class RecordingMeter {
   private modelState: MeterModelState = "loading";
   private microphoneStopped = false;
   private hints: string | undefined;
+  private ternMeter: TernMeterPublish | undefined;
 
   start(ctx: ExtensionContext, hints: string): void {
     if (!ctx.hasUI) return;
     this.ctx = ctx;
+    this.ternMeter = ternMeterOf(ctx);
     this.hints = hints;
     this.startedAt = Date.now();
     this.analyzer.reset();
@@ -240,7 +291,7 @@ export class RecordingMeter {
     this.analyzer.push(samples);
     const now = Date.now();
     if (now < this.nextPaintAt) return;
-    this.nextPaintAt = now + METER_UPDATE_MS;
+    this.nextPaintAt = now + (this.ternMeter ? TERN_METER_UPDATE_MS : METER_UPDATE_MS);
     this.paint();
   }
 
@@ -248,6 +299,8 @@ export class RecordingMeter {
     // Callers transitioning to another status on the same slot pass
     // clearWidget: false so the widget area never collapses between states.
     if (options?.clearWidget !== false) this.ctx?.ui.setWidget(WIDGET_KEY, undefined);
+    this.ternMeter?.(undefined);
+    this.ternMeter = undefined;
     this.ctx = undefined;
     this.lastLine = undefined;
     this.hints = undefined;
@@ -256,6 +309,16 @@ export class RecordingMeter {
   private paint(): void {
     const ctx = this.ctx;
     if (!ctx) return;
+
+    if (this.ternMeter) {
+      this.ternMeter({
+        levels: [...this.analyzer.levels],
+        elapsedMs: Date.now() - this.startedAt,
+        modelState: this.modelState,
+        microphoneStopped: this.microphoneStopped,
+      });
+      return;
+    }
 
     const line = renderMeterLine(ctx.ui.theme, {
       bands: this.analyzer.bands,

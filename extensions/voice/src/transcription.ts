@@ -6,16 +6,11 @@ import type {
   Stream,
   TranscribeModel,
 } from "transcribe-cpp";
-import { convertChineseOutput, shouldConvertChinese } from "./chinese.js";
 import { describeError, log, writeLog, type LogLevel } from "./log.js";
-import type { ChineseOutput } from "./settings.js";
+import { finishTranscript, type TranscriptOptions } from "./transcript-text.js";
 
-export type TranscriptionOptions = {
+export type TranscriptionOptions = TranscriptOptions & {
   signal?: AbortSignal;
-  language?: string;
-  chineseOutput?: ChineseOutput;
-  /** Chinese is a preferred or chosen language: convert any Chinese text. */
-  chineseEnabled?: boolean;
 };
 
 export type DictationStream = {
@@ -35,23 +30,6 @@ function validateLanguage(
       `Configured language ${language} is not supported by this model. Open /voice-settings and choose another language.`,
     );
   }
-}
-
-/**
- * Shared final step for batch and streaming output: trim, then apply the
- * Chinese script preference (see shouldConvertChinese). Keeping this in one
- * place keeps the two paths from drifting.
- */
-async function finishTranscript(
-  text: string,
-  detectedLanguage: string,
-  options: TranscriptionOptions,
-): Promise<string> {
-  const trimmed = text.trim();
-  const language = detectedLanguage || options.language || "";
-  return shouldConvertChinese(trimmed, { chineseEnabled: options.chineseEnabled ?? false, language })
-    ? convertChineseOutput(trimmed, options.chineseOutput ?? "simplified")
-    : trimmed;
 }
 
 class TranscribeCppDictationStream implements DictationStream {

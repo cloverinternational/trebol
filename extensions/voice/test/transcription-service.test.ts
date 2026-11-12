@@ -492,3 +492,29 @@ test("an empty recording never reaches stream finalize", async () => {
   assert.deepEqual(events, ["stream:start", "stream:reset", "batch:0"]);
   await service.shutdown();
 });
+
+test("a remote backend supplies text and skips the local detector", async () => {
+  const events: string[] = [];
+  const service = new TranscriptionService(() => ({
+    remote: true,
+    async prepare() {
+      events.push("prepare");
+    },
+    async transcribe(samples) {
+      events.push(`remote:${samples[0]}`);
+      return "remote text";
+    },
+    async dispose() {
+      events.push("dispose");
+    },
+  }));
+
+  const reservation = service.reserveDictation(settings("unused"));
+  await reservation.ready;
+  reservation.feed(pcm(4));
+  const result = await reservation.submit(pcm(4));
+
+  assert.equal(result.text, "remote text");
+  assert.deepEqual(events, ["prepare", "remote:4"]);
+  await service.shutdown();
+});

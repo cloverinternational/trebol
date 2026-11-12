@@ -2,7 +2,7 @@
   "name": "@pi-swarm/voice",
   "version": "0.2.0",
   "private": true,
-  "description": "Local speech-to-text for Pi, vendored into the Trebol extension pack",
+  "description": "Speech-to-text for Pi: local capture with remote (LAN/Tailscale) or local transcription",
   "type": "module",
   "license": "MIT",
   "files": [

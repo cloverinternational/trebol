@@ -107,6 +107,30 @@ export const PI_COMPOSER_CSS = `
   cursor: pointer;
 }
 [data-role='pi.composer.drawing']:hover { color: var(--t1); background: var(--l1); }
+
+/* The live whiteboard preview: one quiet row above the chips — the drawing itself as a thumbnail, its
+   live facts, and the single primary way to send it. Tern's image kind already draws the ring and
+   radius, and the buttons already draw their variants, so this only settles spacing and reads small. */
+[data-role='pi.composer.drawing-preview'] { padding: 2px 0 1px; }
+[data-role='pi.composer.drawing-facts'] { color: var(--t3); font-size: calc(var(--sf-fs, 13px) * 11 / 13); }
+
+/* The live microphone take: a native bar chart laid directly on the composer, so the input box grows a
+   waveform instead of a text line. Bars are centred rather than bottom-aligned, which turns the series
+   into one waveform envelope mirrored around a centre line — the DJ shape — without a canvas or per-frame
+   image blobs. Size stays one step below the editor so the strip never competes with typed text. */
+[data-role='pi.composer.wave'] { padding: 3px 2px 1px; min-width: 0; }
+[data-role='pi.composer.wave.chart'] { min-width: 0; flex: 1 1 auto; }
+[data-role='pi.composer.wave.chart'] .bars { align-items: center; }
+[data-role='pi.composer.wave.chart'] .bars .b { border-radius: 1px; min-height: 1px; }
+[data-role='pi.composer.wave.meta'] {
+  flex: 0 0 auto;
+  padding-left: 2px;
+  color: var(--t3);
+  font-size: calc(var(--sf-fs, 13px) * 10 / 13);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 /* /btw card, inline in the composer slot: the newest exchange reads as body text, the input row is the boundary. */
 [data-role='pi.btw.question'] { color: var(--t2); }
 [data-role='pi.btw.answer'] { color: var(--t1); overflow-wrap: anywhere; }

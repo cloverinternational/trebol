@@ -27,6 +27,7 @@ type Ctx = {
 	editor(t: string, p?: string): Promise<string | undefined>;
 	notify(m: string, type?: string): void;
 	setWidget(k: string, c: unknown, o?: unknown): void;
+	ternMeter(state: unknown): void;
 	custom(f: unknown): Promise<unknown>;
 	setEditorText(t: string): void;
 	getEditorText(): string;
@@ -137,6 +138,26 @@ describe("TernExtensionUI", () => {
 		ctx.setEditorText("draft");
 		expect(draft()).toBe("draft");
 		expect(ctx.getEditorText()).toBe("draft");
+	});
+
+	it("publishes a bounded live meter for the composer and clears it", () => {
+		const { h } = host();
+		const ui = new TernExtensionUI(h, {});
+		const ctx = ui.context() as unknown as Ctx;
+		expect(ui.meterFacts()).toBeUndefined();
+		ctx.ternMeter({ levels: [0.2, 2, -1, Number.NaN], elapsedMs: 4200, modelState: "ready", microphoneStopped: true });
+		expect(ui.meterFacts()).toEqual({
+			levels: [0.2, 1, 0],
+			elapsedMs: 4200,
+			modelState: "ready",
+			microphoneStopped: true,
+		});
+		expect(h.render).toHaveBeenCalled();
+		ctx.ternMeter(undefined);
+		expect(ui.meterFacts()).toBeUndefined();
+		// An extension cannot hand the composer anything that is not a finite amplitude history.
+		ctx.ternMeter({ levels: ["x"], elapsedMs: 1, modelState: "ready" });
+		expect(ui.meterFacts()).toBeUndefined();
 	});
 
 	it("custom panels without a Tern counterpart are disposed and resolve undefined", async () => {

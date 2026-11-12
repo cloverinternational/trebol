@@ -11,6 +11,7 @@ import { isMacOSPermissionDenied } from "./audio-errors.js";
 import { logStep, watchEventLoop } from "./log.js";
 import { DictationController } from "./dictation-controller.js";
 import { VoiceKeys } from "./keybindings.js";
+import { RemoteAsrBackend, remoteAsrConfig } from "./remote-asr.js";
 import { requestReadyAfterReload, takeReadyRequest } from "./ready-handoff.js";
 import type { TranscribeSettings } from "./settings.js";
 import { displayShortcut } from "./shortcut-core.js";
@@ -50,7 +51,7 @@ function captureErrorMessage(error: unknown): string {
 
 function transcriptionErrorMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
-  return `Local transcription failed: ${message}`;
+  return `Transcription failed: ${message}`;
 }
 
 export function createPiVoiceRuntime(
@@ -70,7 +71,11 @@ export function createPiVoiceRuntime(
   let audioModulePromise: Promise<typeof import("./audio.js")> | undefined;
   let visualizerModulePromise: Promise<typeof import("./visualizer.js")> | undefined;
   const voiceActivity = new VoiceActivityDetection();
-  const transcriptionService = new TranscriptionService(undefined, (pcm, signal) => voiceActivity.scoreClip(pcm, signal));
+  const remoteAsr = remoteAsrConfig();
+  const transcriptionService = new TranscriptionService(
+    remoteAsr ? () => new RemoteAsrBackend(remoteAsr) : undefined,
+    (pcm, signal) => voiceActivity.scoreClip(pcm, signal),
+  );
 
   function loadAudio(): Promise<typeof import("./audio.js")> {
     return (audioModulePromise ??= import("./audio.js"));
@@ -168,8 +173,19 @@ export function createPiVoiceRuntime(
       ctx.ui.notify(settingsReadWarning, "warning");
     }
 
-    if (settings && existsSync(settings.model.path)) {
+    if (settings && (remoteAsr || existsSync(settings.model.path))) {
       return { configured: settings, setUp: false, completedFirstRun: false };
+    }
+
+    if (!settings && ctx.mode !== "tui") {
+      // Tern cannot render the onboarding panel. Fail fast so runExclusive
+      // releases the operation instead of leaving it latched behind a panel
+      // that will never resolve.
+      ctx.ui.notify(
+        "Pi Voice is not configured. Run `pi -nt` in a terminal, open /voice-settings once, then return to Tern.",
+        "error",
+      );
+      return { configured: undefined, setUp: false, completedFirstRun: false };
     }
 
     const previous = settings;
@@ -203,7 +219,7 @@ export function createPiVoiceRuntime(
         "Pi Voice is not configured. Ask the user to run /voice-settings in Pi's interactive TUI once to choose and download a local model, then retry transcribe_file.",
       );
     }
-    if (!existsSync(settings.model.path)) {
+    if (!remoteAsr && !existsSync(settings.model.path)) {
       throw new Error(
         `The configured transcription model is missing: ${settings.model.path}. Ask the user to run /voice-settings and choose a model again, then retry transcribe_file.`,
       );
@@ -413,7 +429,7 @@ export function createPiVoiceRuntime(
     const { clearTranscribeWidget, showTranscribeStatus } = await loadVisualizer();
     logStep("loading settings");
     await loadSettingsOnce();
-    if (settings && existsSync(settings.model.path)) {
+    if (remoteAsr || (settings && existsSync(settings.model.path))) {
       showTranscribeStatus(ctx, "Starting microphone…");
     } else {
       // Setup panes replace only the editor, so a status line set here or by

@@ -16,6 +16,37 @@ export const UI_PROMPT_LIST_ID = "ui-prompt-list";
 export const UI_PROMPT_INPUT_ID = "ui-prompt-input";
 const ITEM_PREFIX = "ui-opt-";
 const WIDGET_WIDTH = 200;
+/** Most recent amplitude columns a meter may publish; the composer draws one bar each. */
+const METER_MAX_LEVELS = 128;
+
+function normalizeMeter(state: unknown): TernMeterState | undefined {
+	if (state === undefined || state === null) return undefined;
+	if (typeof state !== "object") return undefined;
+	const raw = state as { levels?: unknown; elapsedMs?: unknown; modelState?: unknown; microphoneStopped?: unknown };
+	if (!Array.isArray(raw.levels)) return undefined;
+	const levels = raw.levels
+		.filter((level): level is number => typeof level === "number" && Number.isFinite(level))
+		.slice(-METER_MAX_LEVELS)
+		.map((level) => Math.min(1, Math.max(0, level)));
+	if (levels.length === 0) return undefined;
+	const elapsedMs = typeof raw.elapsedMs === "number" && Number.isFinite(raw.elapsedMs) ? Math.max(0, raw.elapsedMs) : 0;
+	const modelState = raw.modelState === "ready" || raw.modelState === "failed" ? raw.modelState : "loading";
+	return { levels, elapsedMs, modelState, microphoneStopped: raw.microphoneStopped === true };
+}
+
+/**
+ * A live recording meter an extension publishes through `ui.ternMeter`. It is not a Pi API: it exists
+ * only on Tern's uiContext, so features that own their own TUI rendering (Pi Voice's meter) can hand
+ * the composer real amplitude data instead of a text line. Values are clamped and bounded here because
+ * the object comes from an extension, not from our own code.
+ */
+export type TernMeterState = {
+	/** Amplitude history, oldest to newest, each 0–1. */
+	levels: readonly number[];
+	elapsedMs: number;
+	modelState: "loading" | "ready" | "failed";
+	microphoneStopped?: boolean;
+};
 
 type NotifyType = "info" | "warning" | "error";
 
@@ -54,6 +85,7 @@ export class TernExtensionUI {
 	readonly #theme: unknown;
 	#queue: Prompt[] = [];
 	#widgets = new Map<string, { lines: string[]; placement: "aboveEditor" | "belowEditor" }>();
+	#meter: TernMeterState | undefined;
 	#toolsExpanded = false;
 	// A natively drawn custom panel and the function that closes it (pane close, dispose).
 	#panel: { view: TuiPanel; close(): void } | undefined;
@@ -89,6 +121,8 @@ export class TernExtensionUI {
 			setWorkingIndicator: () => {},
 			setHiddenThinkingLabel: () => {},
 			setWidget: (key: string, content: unknown, options?: { placement?: "aboveEditor" | "belowEditor" }) => this.#setWidget(key, content, options?.placement),
+			// Tern-only: a live amplitude meter for the composer. Pi extensions feature-detect it.
+			ternMeter: (state: unknown) => this.#setMeter(state),
 			setFooter: () => {},
 			setHeader: () => {},
 			setTitle: () => {},
@@ -200,6 +234,18 @@ export class TernExtensionUI {
 			this.#widgets.set(key, { lines, placement });
 		} else return; // Component factories need a TUI owner.
 		this.#host.render();
+	}
+
+	#setMeter(state: unknown): void {
+		const next = normalizeMeter(state);
+		if (next === undefined && this.#meter === undefined) return;
+		this.#meter = next;
+		this.#host.render();
+	}
+
+	/** The live meter, or undefined when nothing is recording. Consumed by the composer. */
+	meterFacts(): TernMeterState | undefined {
+		return this.#meter;
 	}
 
 	// Plain-text widgets, placed around the composer like Pi's TUI.
