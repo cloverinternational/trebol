@@ -285,29 +285,172 @@ loads the three sheets the bridge registers (composer, work, startup) and replay
   it; states come from recorded sessions, not from live keystrokes; and `tree` omits elements scrolled out of
   view. None of those are claimed as covered.
 
-### Drawing in Tern's whiteboard (2026-11-09)
+### Drawing in Tern's whiteboard (2026-11-11)
 
-The composer's `+` and `/drawing` open Tern's native whiteboard and attach what is drawn on it. Both run
-`PiTernBridge.#openDrawing`; the runner injects `drawing` deps that call `tern ctl`. The installed Tern is
-**0.9.13 (8c6dfbd)**; its `ctl canvas` family (`new`, `tool`, `draw`, `rect`, `text`, `key`, `select-all`,
-`look`, `wait`) is not in the pinned 0.9.5-era `docs/reference/tern-site`, so it was verified against the
-live binary rather than inferred from the docs:
+The composer's `+` and `/drawing` open Tern's native whiteboard; once a focused canvas holds ink the
+composer shows a **live preview** of it with one `Attach drawing` button and a `Hide` control. Both the
+open path and the preview run through `PiTernBridge`; the runner injects `drawing` deps that call
+`tern ctl`. The installed Tern is **0.9.13 (8c6dfbd)**; its `ctl canvas` family (`new`, `tool`, `draw`,
+`rect`, `text`, `key`, `select-all`, `look`, `wait`) is not in the pinned 0.9.5-era
+`docs/reference/tern-site`, so it was verified against the live binary rather than inferred from the docs:
 
 - `tern ctl canvas new` opened a canvas block (pane became the focused `div.cv-surface`); `ctl state`
-  reported it under `canvas_blocks` with `id`, `shapes`, `tool`, `camera`, `look`, `paper`.
+  reported it under `canvas_blocks` with `id`, `shapes`, `tool`, `camera`, `look`, `paper`,
+  `phase`, `focused`, `synced`. `camera` and `shapes` are the preview's change key.
 - `tern ctl canvas tool draw` then `tern ctl canvas draw 80,80 180,120 260,200 320,140` raised `shapes`
   from 0 to 1.
-- `tern ctl shot <name>` wrote `target/shots/tern/live/<name>.png` plus its layout relative to the app's cwd;
-  `tern ctl dump section.tn-pane.canvas` gave the focused pane's box. The captured pane was 547.61×1379.31
-  CSS px at scale 1. A Python/Pillow crop of that box (548×1380) contained ink; the committed path instead
-  uses `png-crop.ts` (Node `zlib`, RGB/RGBA 8-bit) so ImageMagick is not required.
-- `node --experimental-strip-types tools/e2e/tern-drawing.ts` PASS: opened its own canvas, drew one stroke,
-  captured 139×1388 with 88 ink pixels and 1 shape, then closed the canvas it created.
+- `tern ctl shot <name>` writes `target/shots/tern/live/<name>.png` plus its layout relative to the
+  **app process's** cwd; `tern ctl dump section.tn-pane.canvas` gives the focused pane's box. The name
+  must match `[A-Za-z0-9_.-]+`: absolute paths are rejected (`shot: name must match …`), so the crop root
+  is wherever that process was started. Observed 2026-11-11: the desktop app was relaunched with cwd `/`, so
+  `ctl shot` fails with `cannot write target/shots/tern/live: Permission denied (os error 13)` and rejects
+  absolute names (`shot: name must match [A-Za-z0-9_.-]+, got …`); `shot` takes exactly one argument, so
+  there is no output switch. The screenshot path therefore cannot run in that environment at all.
+
+**Screenshot-free capture (2026-11-11).** Tern persists each canvas at
+`<XDG_STATE_HOME>/.local/state/tern/canvases/<canvas hash>/canvas.json`, where the hash is the block's
+`canvas:<hash>` in `ctl state`. Probed live on 0.9.13: `canvas new` → block id `canvas:<`32 hex`>`, and the
+document appeared under that exact directory within ~3 s of `canvas draw`, before the canvas was closed.
+Format 2: `{format, meta:{look,paper}, shapes:[…]}` with `ink` (`props.points` as x,y,pressure triples
+relative to `shape.x/y`, `props.size`), `geo` (`form`, `w`, `h`, `stroke`), and `text` (`text`, `w`, `h`,
+`style`). `canvas-doc.ts` reads that document and rasterizes it with the existing pure-Node `zlib` PNG
+encoder: ink strokes stamped along their segments at 2× and box-downsampled, rect/ellipse outlines, and a
+text shape drawn as its box only (no font rasterizer; the capture reports `textOmitted`). `captureCanvas`
+and `capturePreview` try `ctl shot` first and fall back to the document on any shot error, retrying a
+document that lags the state's shape count; both return `source: "screen" | "document"`. This makes the
+drawing work in the very environment where the screenshot cannot be written; a healthy app started from a
+writable directory still gets the pixel-honest screenshot (real glyphs and colors).
+- The 0.9.13 `tree` reply carries `tag`, `class`, `text` and `rect` only — no node props — so a blob
+  reference is verified from the TSP frames the bridge writes (`b;id=<sha>;mime=…;` precedes the `f` frame
+  whose `drawing-preview.img` carries that `blob`), not from `ctl tree`.
+
+Live preview behavior (2026-11-11): the bridge polls `ctl state` every 1.5 s while a drawn canvas exists and
+every 12 s otherwise; when `previewKey` (id + shapes + camera) changes it re-captures with
+`capturePreview` (passive: no focus steal; an unnamed pane box is skipped, keeping the last good frame) and
+sends the cropped PNG as a blob before the frame that paints `pi.composer.drawing-preview` (image, shape
+count, `Attach drawing` = `drawing.send`, `Hide` = `drawing.discard`). Attach captures the focused canvas
+and adds an ordinary image chip, so it travels with the next submit like a paste; the preview yields until the
+next stroke. A settled canvas re-renders nothing.
+
+### Marking up a picture the agent presented (2026-11-11)
+
+The question this answers: can the user draw on an agent's screenshot/mock and have the agent understand
+"not here"? TSP cannot carry a pointer position — an action names a node, never a coordinate — and a
+node's props only hold flex/size, so nothing can be absolutely placed by props alone. Two platform facts
+make it possible anyway, both verified on **0.9.13 (8c6dfbd)**:
+
+- a program stylesheet (`stylesheet(name, css)`) can address any node by `data-id` and accepts
+  `position: absolute` (Tern's CSS supports `static|relative|absolute|fixed|sticky`);
+- an image's element can carry a `padding-top` that encodes its aspect ratio, which makes the container
+  exactly picture space, so a percentage `left/top` is a percentage of the picture.
+
+`annotate.ts` builds the stage (image + 16×9 clickable grid + pins + crosshair), and
+`annotateSheet(session)` emits the per-node rules; the bridge re-sends that sheet only when a mark or
+the crosshair moves. A click on a cell is the coarse position (the cell's centre), arrows nudge one
+percent, Enter pins, the note is a native editor. Send writes a PNG with numbered discs burned in under
+`<session cwd>/artifacts/annotations/`, attaches it as an ordinary image chip, and appends the
+coordinate payload (x%,y% + note per mark, plus one JSON block) to the draft — the user still sends.
+
+Probed and rejected as the alternative (freehand over the screenshot inside the whiteboard):
+`tern ctl clipboard file <png>` reports `ok`, but no `canvas key` chord form is accepted for paste —
+`ctrl+v`, `cmd+v`, `mod+v`, `Control+v`, `ctrl-v`, `shift+v` and a bare `v` all fail with
+`canvas key <key>: expected escape|delete|enter|space|tab|left|right|up|down or <chord>` — and
+`ctl canvas --help` lists no image/paste verb, so there is no scriptable image import into the canvas.
+Rather than pretend, the overlay is composited by us and the coordinates travel with it. Mermaid is
+rendered from source, so `/diagram` edits the source in the composer instead of pretending a diagram
+has pixels to mark.
+
+Live/render verification: `tools/e2e/tern-annotate.mjs` replays the real bridge into a headless
+`tern serve` and measures with `ctl tree`: card painted, stage `844×422` (the 320×160 picture's exact
+2:1), the picture filling the stage, the clicked grid cell, the crosshair, the pin at that cell's
+centre, and the note box; five right-arrow keys move the crosshair 41 px (≈5% of 844) and it keeps its
+16 px size, which proves the generated sheet is replaced rather than installed once. Unit coverage:
+`.pi/test/tern/annotate.test.ts` and `.pi/test/tern/annotate-bridge.test.ts`.
+
+**Paths in the composer (2026-11-11).** An attached image is not guaranteed to reach the model: a
+non-vision model receives paths instead of images, a blob can fail to connect, and a resumed session no
+longer carries the bytes. Both generated pictures therefore name their file in the input box as well as
+attaching it: a drawing writes `Drawing: artifacts/tern-drawings/<name>.png`, and a marked picture's
+payload carries `Saved copy: artifacts/annotations/<name>.png` (plus the same `annotated` field in its
+JSON). Paths are workspace-relative when they are inside the session cwd and absolute otherwise. The
+drawing path is written *before* the chip is loaded, so a failed attachment still leaves a readable
+reference; the annotate path is written only when the copy was really produced.
+
+### One drawing per Tern instance (2026-11-11)
+
+The app normally runs many tabs and several sessions at once; probed live, this machine had seven tabs
+("pi" repeated five times, one with two panes) and two sessions. `ctl state` reports **every** canvas
+block with a pane id and a `canvas:<hash>`, and marks exactly one `focused`. Two things followed from
+that, both fixed:
+
+- Picking "the focused canvas" chose whichever tab was in front, not the pane that pressed the button.
+  The bridge now records the canvas it created (`openCanvas` diffs `canvas:<hash>` before/after
+  `canvas new`, preferring the focused one if two appear) and resolves **only by that hash**
+  (`resolveOwned`); a pane id is used only when no hash was reported. Two empty canvases were probed to
+  have different hashes, so the key is unique even before ink exists. With no owner, `/drawing` opens a
+  canvas rather than adopting the focused one; a closed canvas clears the preview and is not silently
+  replaced by a neighbour.
+- The passive preview used `ctl shot` + `dump section.tn-pane.canvas`, which describe the **focused**
+  pane. A preview of an unfocused canvas would therefore photograph a different tab's drawing. Now an
+  unfocused canvas previews from the hash-addressed document only; the screenshot path runs only when
+  our canvas is the focused one. Attach still focuses our own pane before shooting, so the
+  pixel-honest path stays correct.
+
+Surfaces are per pane: an `o` id lives in that pane's scrollback (`f`/`x` go to the first open surface
+with it *in this pane*) and a program stylesheet is confined to its surface, so two Pi panes both
+claiming `sf:"pi"` do not share a document or a sheet. The annotation card is therefore instance-safe
+without an id: its state is in the bridge, its blob is content-addressed by SHA-256, and its generated
+pins are placed by a surface-scoped sheet.
+
+Verification: `.pi/test/tern/drawing.test.ts` (ownership matching by hash vs a focused neighbour, closed
+canvas, pane-id fallback, owned-empty focus, open-when-missing, unfocused preview from the document
+with zero `shot`/`dump` calls, and choosing the focused block when two appear) — 27 tests, plus the
+bridge preview lifecycle which now opens its own canvas. `tools/e2e/tern-drawing-preview.mjs` still
+passes.
+
+Verification: `.pi/test/tern/drawing.test.ts` (PNG round-trip/crop, canvas choice, open, empty, capture,
+`previewKey`, passive preview capture, ambiguous-pane skip, and the bridge lifecycle: first preview, settled
+no-op, re-capture on ink change with the blob frame ordering, attach → chip, stroke returns the preview after
+attach and after Hide, empty canvas previews nothing) — 16 tests; composer-view 16, commands 45, attachments 18,
+dock 34, all passing (113 in the adjacent suites). Live: `node --experimental-strip-types
+tools/e2e/tern-drawing.ts` (open, draw, capture, close) and `node --experimental-strip-types
+tools/e2e/tern-drawing-preview.mjs` — the latter replays the real bridge into a headless `tern serve` with a
+fake `ctl` and asserts the preview row paints above the editor line with a real image box and both buttons, and
+that a changed canvas re-captures into the newest blob frame. It PASSED 2026-11-11. `tools/e2e/tern-drawing.ts` also PASSED against the real `ctl` in the /-cwd environment: capture and preview both reported `source=document`, 248×138, 1072 ink pixels, 1 shape.
 
 Rules kept: an empty canvas is refused instead of attaching a blank page; the crop is the canvas pane only, so
 other panes never reach the model; several canvases require the user to focus one; `/drawing` is a local
-bridge command and never reaches the model. Tests: `.pi/test/tern/drawing.test.ts` plus the composer, dock and
-command suites (68 targeted tests at the time of writing). Not verified: pointer-drawn input by a human (the
-stroke here came from `canvas draw`), non-1 device scale factors, the Windows/macOS capture roots, and the
-web/iOS clients, which have no whiteboard. `npm run lint:tern` still needs `NODE_OPTIONS=--experimental-strip-types`
-to import `bridge.ts`, and its 24 `type-scale` errors on `omp.composer.extras` 11.5px predate this change.
+bridge command and never reaches the model. Not verified: pointer-drawn input by a human (strokes come from
+`canvas draw`), non-1 device scale factors, the Windows/macOS capture roots, the web/iOS clients, which have no
+whiteboard, and a live end-to-end run against the real `ctl` on 2026-11-11, blocked by the app-cwd shot
+permission above. `npm run lint:tern` still needs `NODE_OPTIONS=--experimental-strip-types` to import
+`bridge.ts`, and its 24 `type-scale` errors on `omp.composer.extras` 11.5px predate this change.
+
+### Voice waveform on the composer (2026-11-11)
+
+Pi Voice's recording meter used to be a text widget above the composer. Tern now exposes a
+Tern-only `ui.ternMeter` on its extension uiContext; the extension feature-detects it and
+publishes a sanitized amplitude history (RMS per 32 ms capture chunk, 96 columns, ~3 s of
+scrollback, one update per 80 ms because Tern rebuilds a chart whole). Levels use a fixed
+−48…−12 dBFS window (`waveformLevel`) rather than a linear gain: measured on 60 s of public
+Commons speech, the old `sqrt(rms * 14)` pinned 31% of chunks at 1.0, while the dB scale pins
+1.2% and keeps p10/p50/p90 at 0.16/0.56/0.84. A phone-width composer collapses the 96 columns
+to 48 by peak and drops the model note so bars stay at least 2 px wide. `composer-view.ts`
+draws it as `pi.composer.wave`: a native `chart` (`kind: bars`, `size: sm`) directly above the
+editor line, with the take's elapsed time and model state beside it. The composer stylesheet
+centres the bars so each column grows symmetrically around a centre line, turning the series
+into one waveform envelope instead of a bottom-aligned bar chart. Pi's TUI is unchanged and
+still renders `renderMeterLine` on the `pi-voice-meter` widget; the text transcribe/ready
+statuses still use that slot after the take ends.
+
+Verification: `.pi/test/tern/composer-view.test.ts` (the strip's role, series, facts, and its
+absence while idle), `.pi/test/tern/ext-ui.test.ts` (meter clamping, clearing, and rejection of
+a non-amplitude payload), `extensions/voice/test/visualizer.test.ts` (scrollback and reset), and
+`node --experimental-strip-types tools/e2e/tern-voice-wave.mjs`, which replays the real bridge
+into a headless `tern serve` and measured the chart at 782×33 px, 96 bars, ending 9 px above the
+editor row and disappearing when the meter is cleared. `tools/e2e/voice-wave-calibration.mjs`
+downloads the speech, runs the real analyzer, and renders at 320/390/900/1400 px: every bar stays
+inside the composer card, the 48/96 column split follows the width, silent input draws 2 px stubs,
+and the card returns from 117 px to its 72 px idle height when the take ends. Not verified: a live
+microphone take in a visible Tern window and frame rate under sustained recording.
+
