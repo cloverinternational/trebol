@@ -125,10 +125,10 @@ describe("hoja_list", () => {
 
 describe("hoja_get", () => {
 	it("looks the issue up server-side by identifier, so age never matters", async () => {
-		const { client, calls } = fakeClient({ issues: { nodes: [detail] } });
+		const { client, calls } = fakeClient({ issues: { nodes: [detail] }, task: detail });
 		const result = await getTool(client).execute("id", { identifier: " trebol-1 " });
 		expect(calls[0].query).toBe(HOJA_QUERIES.get);
-		expect(calls[0].variables).toMatchObject({ filter: { identifier: { eq: "TREBOL-1" } }, comments: 10 });
+		expect(calls[0].variables).toMatchObject({ id: "TREBOL-1", comments: 10 });
 		expect(calls[0].query).not.toContain("250");
 		const data = body(result);
 		expect(data).toMatchObject({
@@ -146,17 +146,22 @@ describe("hoja_get", () => {
 	});
 
 	it("passes the requested comment count and warns when the page may be partial", async () => {
-		const { client, calls } = fakeClient({ issues: { nodes: [detail] } });
+		const { client, calls } = fakeClient({ issues: { nodes: [detail] }, task: detail });
 		const data = body(await getTool(client).execute("id", { identifier: "TREBOL-1", comments: 2 }));
 		expect(calls[0].variables.comments).toBe(2);
 		expect(data.commentsNote).toContain("older ones may exist");
 	});
 
-	it("reports a miss as an error instead of returning another issue", async () => {
-		const { client } = fakeClient({ issues: { nodes: [detail] } });
-		const miss = await getTool(client).execute("id", { identifier: "TREBOL-999" });
-		expect(miss.isError).toBe(true);
-		expect(body(miss).error).toContain("not found");
+	it("reports a miss as an error instead of inventing an issue", async () => {
+		// A direct lookup by id has no filter to ignore: the server either knows the
+		// identifier (live, retired or raw id) or answers null. Both a null and an
+		// absent field must read as not-found, never as an empty object.
+		for (const response of [{ task: null }, {}]) {
+			const { client } = fakeClient(response);
+			const miss = await getTool(client).execute("id", { identifier: "TREBOL-999" });
+			expect(miss.isError, JSON.stringify(response)).toBe(true);
+			expect(body(miss).error).toContain("not found");
+		}
 	});
 
 	it("refuses a malformed identifier or comment count without calling Hoja", async () => {
@@ -178,7 +183,7 @@ describe("hoja-mode read-only guarantee", () => {
 	});
 
 	it("sends only those documents and never caller text, for a wide spread of inputs", async () => {
-		const { client, calls } = fakeClient({ issues: { nodes: [detail] } });
+		const { client, calls } = fakeClient({ issues: { nodes: [detail] }, task: detail });
 		const tools = hojaTools(client);
 		await tools[0].execute("id", {});
 		await tools[0].execute("id", { state: "closed", assignee: "x", project: "y", team: "z", updatedSince: "2026-01-01", limit: 3 });
@@ -284,5 +289,56 @@ describe("hoja-mode registration", () => {
 		await command.handler("off", ctx);
 		hooks.get("session_start")!();
 		expect(prompt().systemPrompt).toContain(HOJA_RULE);
+	});
+});
+
+describe("hoja_get resolves the identifiers the API itself issues (HOJA-523)", () => {
+	// The HOJA-472 migration renumbered the board; the canonical identifiers are
+	// TEAM-N-<slot>-<n>, with slots lowercased at odd depths. hoja_get must accept
+	// them and must not uppercase a case-significant slot.
+	const recursive = {
+		...detail, identifier: "HOJA-416-A-5", url: "https://hoja.hoja.work/hoja/issue/HOJA-416-A-5",
+		comments: { nodes: [] },
+	};
+
+	it("looks a current recursive identifier up through issue(id:), not the list filter", async () => {
+		const { client, calls } = fakeClient({ task: recursive });
+		const data = body(await getTool(client).execute("id", { identifier: "HOJA-416-A-5" }));
+		expect(calls[0].query).toBe(HOJA_QUERIES.get);
+		expect(calls[0].variables).toMatchObject({ id: "HOJA-416-A-5" });
+		expect(data).toMatchObject({ identifier: "HOJA-416-A-5", title: "Open item" });
+	});
+
+	it("preserves a case-significant depth-2 slot", async () => {
+		const deep = { ...recursive, identifier: "HOJA-416-A-1-a-1" };
+		const { client, calls } = fakeClient({ task: deep });
+		const data = body(await getTool(client).execute("id", { identifier: "hoja-416-A-1-a-1" }));
+		expect(calls[0].variables).toMatchObject({ id: "HOJA-416-A-1-a-1" });
+		expect(data.identifier).toBe("HOJA-416-A-1-a-1");
+	});
+
+	it("answers a retired flat identifier with the issue under its current identifier", async () => {
+		// The server resolves the alias; the client must present the answer
+		// instead of discarding it for not matching the requested text.
+		const { client, calls } = fakeClient({ task: recursive });
+		const data = body(await getTool(client).execute("id", { identifier: "HOJA-8" }));
+		expect(calls[0].variables).toMatchObject({ id: "HOJA-8" });
+		expect(data).toMatchObject({ identifier: "HOJA-416-A-5" });
+	});
+
+	it("still reports a genuinely nonexistent identifier as not found", async () => {
+		const { client } = fakeClient({ task: null });
+		const miss = await getTool(client).execute("id", { identifier: "HOJA-99999" });
+		expect(miss.isError).toBe(true);
+		expect(body(miss).error).toContain("not found");
+	});
+
+	it("keeps refusing text that is not an identifier, without calling Hoja", async () => {
+		const { client, calls } = fakeClient({ task: recursive });
+		for (const identifier of ["", "not-an-issue", "HOJA-", "-A-1", "HOJA-416-A-"]) {
+			const r = await getTool(client).execute("id", { identifier });
+			expect(r.isError, identifier).toBe(true);
+		}
+		expect(calls).toHaveLength(0);
 	});
 });

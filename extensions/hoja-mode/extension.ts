@@ -137,8 +137,33 @@ function recoveryNote(discovery: ProjectDiscovery, taskIds: string[]): string {
  *  filters travel as typed variables (IssueFilter), which GraphQL parses as data, never as query text. */
 export const HOJA_QUERIES = {
 	list: `query ($first: Int!, $filter: IssueFilter) { issues(first: $first, filter: $filter) { nodes { identifier title priority createdAt updatedAt state { name } assignee { name } project { name } } } }`,
-	get: `query ($first: Int!, $filter: IssueFilter, $comments: Int!) { issues(first: $first, filter: $filter) { nodes { identifier title description priority createdAt updatedAt url state { name type } team { key } assignee { name } project { name } comments(first: $comments) { nodes { body createdAt user { name } } } } } }`,
+	// One issue by identifier or id. This is the resolver that consults the alias
+	// ledger, so a retired flat identifier (HOJA-8) answers with the issue under
+	// its current recursive identifier. Asking the *list* filter instead meant a
+	// second lookup path with different semantics: the two diverged, and every
+	// renumbered issue read as missing through this tool (HOJA-523, trebol#457).
+	get: `query ($id: String!, $comments: Int!) { task(id: $id) { identifier title description priority createdAt updatedAt url state { name type } team { key } assignee { name } project { name } comments(first: $comments) { nodes { body createdAt user { name } } } } }`,
 } as const;
+
+/**
+ * TEAM-123, or the recursive TEAM-123-A-1 / TEAM-123-A-1-a-1 the HOJA-472 migration
+ * issues. Slots are case-significant (lowercased at odd depths), so only the team
+ * key is uppercased; upper-casing the whole identifier made every depth>=2 issue
+ * unresolvable by its own canonical text.
+ */
+// Grammar from HOJA-472: TEAM "-" number, then zero or more "-" slot "-" number.
+// The tail alternates letters/digits, which is what separates a real recursive id
+// from arbitrary hyphenated text such as "not-an-issue".
+export const IDENTIFIER_PATTERN = /^[A-Za-z][A-Za-z0-9_]*-[0-9]+(?:-[A-Za-z]{1,2}-[0-9]+)*$/;
+
+export function normalizeIdentifier(raw: unknown): string {
+	const shown = String(raw ?? "").trim();
+	if (!IDENTIFIER_PATTERN.test(shown)) {
+		throw new Error(`identifier must look like TEAM-123 or TEAM-123-A-1, for example TREBOL-237 (got "${shown}")`);
+	}
+	const dash = shown.indexOf("-");
+	return shown.slice(0, dash).toUpperCase() + shown.slice(dash);
+}
 
 /** Workflow state groups: these two types are what "closed" means in Hoja. */
 export const CLOSED_STATE_TYPES = ["completed", "canceled"] as const;
@@ -244,15 +269,14 @@ export function hojaTools(client: Gql) {
 			...HOJA_GET_CONTRACT,
 			async execute(_id: string, params: GetQuery) {
 				try {
-					const wanted = String(params.identifier ?? "").trim().toUpperCase();
-					if (!/^[A-Z0-9]+-\d+$/.test(wanted)) throw new Error(`identifier must look like TEAM-123, for example TREBOL-237 (got "${params.identifier ?? ""}")`);
+					const wanted = normalizeIdentifier(params.identifier);
 					const requested = integer(params.comments, "comments", DEFAULT_COMMENTS, 1, MAX_COMMENTS);
-					// Server-side lookup by identifier: works for any issue, however old, without paginating the board.
-					const nodes = (await client.gql<{ issues: { nodes: IssueDetail[] } }>(HOJA_QUERIES.get, {
-						first: 2, filter: { identifier: { eq: wanted } }, comments: requested,
-					})).issues.nodes;
-					// Never present a different issue as the answer if the server ignores the filter.
-					const detail = nodes.find(i => i.identifier.toUpperCase() === wanted);
+					// One issue by identifier or id. The server resolves live identifiers,
+					// retired aliases and raw ids through the same clause, so this tool
+					// cannot drift from the rest of the API.
+					const detail = (await client.gql<{ task: IssueDetail | null }>(HOJA_QUERIES.get, {
+						id: wanted, comments: requested,
+					})).task ?? null;
 					if (!detail) return text({ error: `issue ${wanted} not found. Check the identifier (TEAM-NUMBER).` }, true);
 					const { comments: rawComments, ...issue } = detail;
 					const comments = (rawComments?.nodes ?? []).map(c => ({ author: c.user?.name ?? "unknown", createdAt: c.createdAt, body: clip(c.body, COMMENT_BODY_LIMIT) }));
