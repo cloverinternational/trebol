@@ -543,14 +543,31 @@ export function registerSwarmPrompt(pi: PromptExtensionAPI): void {
       .filter((value): value is string => typeof value === "string" && value.trim() !== "")
       .filter((value) => !base.includes(value));
     if (contributed.length) base = `${base}\n\n${contributed.join("\n\n")}`;
+    // gitStatus/currentDate change between prompts. Left in the system prompt they
+    // re-bill everything after them on every repo change (A/B: 45k cached -> 0).
+    // Carry them in a per-prompt message instead: earlier copies stay in history
+    // unchanged, so the request only ever grows at the end.
+    const volatile = splitVolatileContext(base);
+    base = volatile.systemPrompt;
     if (assembled) assembled.systemPrompt = base;
     if (assembled) assembledPromptKinds.set(hash(base), (ctx as { hasUI?: boolean }).hasUI === true ? "interactive" : "headless");
-    const result = assembled ? { systemPrompt: base } : undefined;
+    const result: { systemPrompt?: string; message?: { customType: string; content: string; display: boolean } } = assembled || volatile.context ? { systemPrompt: base } : {};
+    if (volatile.context) result.message = { customType: VOLATILE_CONTEXT_TYPE, content: volatile.context, display: false };
     if (footerExplanationRequested(String(event.prompt ?? "")) && selectedBaseIsForge(cwd)) {
-      return { ...(result ?? {}), message: { customType: "pi-swarm-footer-explanation-guidance", content: FOOTER_EXPLANATION_PROMPT, display: false } };
+      const content = volatile.context ? `${volatile.context}\n\n${FOOTER_EXPLANATION_PROMPT}` : FOOTER_EXPLANATION_PROMPT;
+      return { ...result, message: { customType: "pi-swarm-footer-explanation-guidance", content, display: false } };
     }
-    return result;
+    return result.systemPrompt !== undefined || result.message ? result : undefined;
    }, { warmup: false });
+}
+
+export const VOLATILE_CONTEXT_TYPE = "swarm-volatile-context";
+const VOLATILE_BLOCK = /\n*<swarmos_context>[\s\S]*?<\/swarmos_context>\n*/g;
+/** Removes every `<swarmos_context>` block from the prompt and returns the last one as message text. */
+export function splitVolatileContext(systemPrompt: string): { systemPrompt: string; context?: string } {
+  const blocks = systemPrompt.match(VOLATILE_BLOCK);
+  if (!blocks) return { systemPrompt };
+  return { systemPrompt: systemPrompt.replace(VOLATILE_BLOCK, "\n\n").trim(), context: blocks.at(-1)!.trim() };
 }
 function selectedBaseIsForge(cwd: string): boolean { return resolveActiveSystemPrompt(cwd).kind === "forge" && cliIsolation().systemPrompt === undefined; }
 export default function swarmPromptExtension(pi: PromptExtensionAPI): void { registerSwarmPrompt(pi); }

@@ -310,12 +310,15 @@ export function capabilityManifestSignature(modeID: string, tools: readonly Tool
 /**
  * Swarm appends the manifest to the CURRENT user turn only when the signature
  * changed since the last emission for this conversation, and keeps it on that
- * turn's request-history entry for every provider call within the turn. The
- * durable transcript stays clean, so earlier turns never carry it.
+ * turn's request-history entry for every provider call within the turn.
+ * Unlike Swarm, a turn keeps its manifest on later turns too: dropping it
+ * rewrites that user message and invalidates the provider prompt cache from
+ * there on. The durable transcript still stays clean.
  */
 export class CapabilityManifestState {
   private lastSignature?: string;
   private turnKey?: string;
+  private readonly emitted = new Map<string, string>();
   apply(messages: readonly MessageLike[], modeID: string, tools: readonly ToolSummary[]): MessageLike[] | undefined {
     let index = -1;
     for (let i = messages.length - 1; i >= 0; i--) if (messages[i].role === "user") { index = i; break; }
@@ -323,19 +326,23 @@ export class CapabilityManifestState {
     const current = messages[index];
     const key = turnKeyOf(current, index);
     const signature = capabilityManifestSignature(modeID, tools);
-    if (this.turnKey !== key) {
-      if (this.lastSignature === signature) return undefined;
+    if (this.turnKey !== key && this.lastSignature !== signature) {
       this.lastSignature = signature;
       this.turnKey = key;
+      this.emitted.set(key, buildCapabilityManifest(modeID, tools));
     }
-    const manifest = buildCapabilityManifest(modeID, tools);
-    const content = current.content;
-    let next: unknown;
-    if (typeof content === "string") next = content + "\n\n" + manifest;
-    else if (Array.isArray(content) && content.length > 0 && content.every(isTextBlock)) next = (content as TextBlock[]).map(b => b.text).join("") + "\n\n" + manifest;
-    else return undefined;
-    const out = [...messages];
-    out[index] = { ...current, content: next };
+    let out: MessageLike[] | undefined;
+    messages.forEach((message, i) => {
+      if (message.role !== "user") return;
+      const manifest = this.emitted.get(turnKeyOf(message, i));
+      if (manifest === undefined) return;
+      const content = message.content;
+      let next: unknown;
+      if (typeof content === "string") next = content + "\n\n" + manifest;
+      else if (Array.isArray(content) && content.length > 0 && content.every(isTextBlock)) next = (content as TextBlock[]).map(b => b.text).join("") + "\n\n" + manifest;
+      else return;
+      (out ??= [...messages])[i] = { ...message, content: next };
+    });
     return out;
   }
 }

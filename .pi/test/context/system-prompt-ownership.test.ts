@@ -79,10 +79,12 @@ describe("system-prompt ownership", () => {
     expect(selected?.message?.content).toContain("FIRST complete answer");
     expect(selected?.systemPrompt).toContain("[FIRST RESPONSE EXPLANATION CHECK]");
     const unrelated: any = await handler({ systemPrompt: "Pi base", prompt: "Fix a test", systemPromptOptions: { cwd } }, { cwd, hasUI: true });
-    expect(unrelated?.message).toBeUndefined();
+    expect(unrelated?.message?.customType).not.toBe("pi-swarm-footer-explanation-guidance");
+    expect(unrelated?.message?.content ?? "").not.toContain("FIRST complete answer");
     savePromptStore(cwd, { prompts: [], active: PI_DEFAULT_PROMPT });
     const piBase: any = await handler({ systemPrompt: "Pi base", prompt: question, systemPromptOptions: { cwd } }, { cwd, hasUI: true });
-    expect(piBase?.message).toBeUndefined();
+    expect(piBase?.message?.customType).not.toBe("pi-swarm-footer-explanation-guidance");
+    expect(piBase?.message?.content ?? "").not.toContain("FIRST complete answer");
   });
 
   it("honors the explicit Pi-base selection", async () => {

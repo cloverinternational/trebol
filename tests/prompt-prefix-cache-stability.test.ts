@@ -9,12 +9,13 @@ import { registerSwarmPrompt, resetWorkspaceContextCache } from "../extensions/s
 function harness() {
   const handlers = new Map<string, (event: any, ctx?: any) => any>();
   registerSwarmPrompt({ on: (name: string, handler: (event: any, ctx?: any) => any) => handlers.set(name, handler) } as any);
-  return async (cwd: string, sessionId: string) => {
+  const turn = async (cwd: string, sessionId: string) => {
     const event = { systemPrompt: "", systemPromptOptions: { cwd } };
     const ctx = { cwd, hasUI: true, sessionManager: { getSessionId: () => sessionId } };
-    const patch = await handlers.get("before_agent_start")!(event, ctx);
-    return String(patch?.systemPrompt ?? "");
+    return await handlers.get("before_agent_start")!(event, ctx);
   };
+  const run = async (cwd: string, sessionId: string) => String((await turn(cwd, sessionId))?.systemPrompt ?? "");
+  return Object.assign(run, { turn });
 }
 
 function gitRepo() {
@@ -44,11 +45,23 @@ describe("system prompt keeps a byte-stable prefix while the repo file census ch
 
     const again = await runTurn(dir, "session-1");
     expect(census(again)).toBe("1");
-    // Everything up to the volatile tail (<swarmos_context>: git status + date) is
-    // byte-identical, so the provider's cached prefix survives the file change.
-    let common = 0;
-    while (common < before.length && common < again.length && before[common] === again[common]) common++;
-    expect(common).toBeGreaterThanOrEqual(before.indexOf("<swarmos_context>"));
+    // git status + date travel in a per-prompt message, so the whole system
+    // prompt is byte-identical and the provider's cached prefix survives.
+    expect(again).toBe(before);
+    expect(before).not.toContain("<swarmos_context>");
+  });
+
+  it("delivers git status and date as a per-prompt message that reflects repo changes", async () => {
+    const dir = gitRepo();
+    const runTurn = harness();
+    const first = await runTurn.turn(dir, "session-1");
+    expect(first.message.customType).toBe("swarm-volatile-context");
+    expect(first.message.content).toContain("<swarmos_context>");
+    writeFileSync(join(dir, "c.txt"), "x\n");
+    const second = await runTurn.turn(dir, "session-1");
+    expect(second.systemPrompt).toBe(first.systemPrompt);
+    expect(second.message.content).toContain("c.txt");
+    expect(first.message.content).not.toContain("c.txt");
   });
 
   it("re-reads the census for a new session so a later prompt is not stale", async () => {

@@ -114,8 +114,9 @@ export function registerSwarmTransportParity(pi: Pi): void {
     let changed = false;
     const slots = expandHookSlots(messages);
     if (slots) { messages = slots; changed = true; }
-    const replayed = replayHookOrder(messages);
-    if (replayed) { messages = replayed; changed = true; }
+    // Earlier [prompt, hook] pairs are deliberately NOT flipped to Swarm's
+    // replay order: rewriting history on the next prompt broke the provider
+    // prompt cache from the first message (6/6 measured prompts, 5 cached 0).
     // Swarm's registry only holds the tools it exposes; a Pi tool that is
     // registered but gated off the surface (e.g. `bash` in the interactive
     // TUI) is unknown to the model and must error like one.
@@ -183,23 +184,3 @@ export function expandHookSlots(messages: readonly any[], options: { ephemeralPo
   return changed ? out : undefined;
 }
 
-/**
- * Swarm persists a user_prompt_submit hook message before the prompt it was
- * emitted for, so every run after the live one replays [hook, prompt] where
- * the live run sent [prompt, hook]. Mirror that flip for completed turns.
- */
-export function replayHookOrder(messages: readonly any[]): any[] | undefined {
-  const out = [...messages];
-  let changed = false;
-  // The live turn spans every provider call until the NEXT user prompt, so
-  // only pairs that precede the latest prompt are replayed from persistence.
-  let lastPrompt = -1;
-  out.forEach((m, i) => { if (m?.role === "user") lastPrompt = i; });
-  for (let i = 0; i + 1 < out.length; i++) {
-    const prompt = out[i], hook = out[i + 1];
-    if (prompt?.role !== "user" || hook?.role !== "custom" || hook?.customType !== HOOK_SLOT_TYPE) continue;
-    if (i >= lastPrompt) continue; // live turn: keep prompt → hook
-    out[i] = hook; out[i + 1] = prompt; changed = true; i++;
-  }
-  return changed ? out : undefined;
-}
