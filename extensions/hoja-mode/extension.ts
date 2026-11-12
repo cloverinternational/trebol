@@ -154,15 +154,23 @@ export const HOJA_QUERIES = {
 // Grammar from HOJA-472: TEAM "-" number, then zero or more "-" slot "-" number.
 // The tail alternates letters/digits, which is what separates a real recursive id
 // from arbitrary hyphenated text such as "not-an-issue".
-export const IDENTIFIER_PATTERN = /^[A-Za-z][A-Za-z0-9_]*-[0-9]+(?:-[A-Za-z]{1,2}-[0-9]+)*$/;
+export const IDENTIFIER_PATTERN = /^[A-Za-z][A-Za-z0-9_]*-[0-9]+(?:-[A-Za-z]+-[0-9]+)*$/;
 
 export function normalizeIdentifier(raw: unknown): string {
 	const shown = String(raw ?? "").trim();
 	if (!IDENTIFIER_PATTERN.test(shown)) {
 		throw new Error(`identifier must look like TEAM-123 or TEAM-123-A-1, for example TREBOL-237 (got "${shown}")`);
 	}
-	const dash = shown.indexOf("-");
-	return shown.slice(0, dash).toUpperCase() + shown.slice(dash);
+	const [team, ...rest] = shown.split("-");
+	// rest is number, slot, number, slot, ... . A slot's case is fixed by the
+	// grammar (uppercase for an even-depth parent, lowercase for an odd one), so
+	// canonicalise it rather than making a pasted lowercase id look missing.
+	const canonical = rest.map((segment, index) => {
+		if (index < 1 || index % 2 === 0) return segment;
+		const slot = (index + 1) / 2;
+		return slot % 2 === 1 ? segment.toUpperCase() : segment.toLowerCase();
+	});
+	return [team.toUpperCase(), ...canonical].join("-");
 }
 
 /** Workflow state groups: these two types are what "closed" means in Hoja. */
@@ -268,8 +276,13 @@ export function hojaTools(client: Gql) {
 			label: "Hoja get",
 			...HOJA_GET_CONTRACT,
 			async execute(_id: string, params: GetQuery) {
+				// Shown verbatim: a rejected identifier is the caller's input, not a
+				// secret, and the redacted generic failure made a typo indistinguishable
+				// from an outage (trebol#458).
+				let wanted: string;
+				try { wanted = normalizeIdentifier(params.identifier); }
+				catch (e) { return text({ error: e instanceof Error ? e.message : String(e) }, true); }
 				try {
-					const wanted = normalizeIdentifier(params.identifier);
 					const requested = integer(params.comments, "comments", DEFAULT_COMMENTS, 1, MAX_COMMENTS);
 					// One issue by identifier or id. The server resolves live identifiers,
 					// retired aliases and raw ids through the same clause, so this tool

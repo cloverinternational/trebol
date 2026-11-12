@@ -342,3 +342,23 @@ describe("hoja_get resolves the identifiers the API itself issues (HOJA-523)", (
 		expect(calls).toHaveLength(0);
 	});
 });
+
+describe("hoja_get canonicalises identifier case (HOJA-523)", () => {
+	it("accepts a pasted identifier whose slots are the wrong case", async () => {
+		const { client, calls } = fakeClient({ task: { ...detail, identifier: "HOJA-416-A-30-ad-1" } });
+		const data = body(await getTool(client).execute("id", { identifier: "hoja-416-a-30-ad-1" }));
+		expect(calls[0].variables).toMatchObject({ id: "HOJA-416-A-30-ad-1" });
+		expect(data.identifier).toBe("HOJA-416-A-30-ad-1");
+	});
+});
+
+describe("hoja_get names why an identifier was refused (trebol#458)", () => {
+	it("shows the identifier-shape message instead of the redacted generic failure", async () => {
+		const { client } = fakeClient({ task: null });
+		const r = await getTool(client).execute("id", { identifier: "not-an-issue" });
+		expect(r.isError).toBe(true);
+		const { error } = body(r);
+		expect(error).toContain("identifier must look like");
+		expect(error).not.toContain("no raw error details");
+	});
+});
