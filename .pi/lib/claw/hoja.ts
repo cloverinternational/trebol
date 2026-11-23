@@ -177,12 +177,13 @@ export class HojaClient {
 		return id;
 	}
 
-	async createIssue(r: Resolved, title: string, description: string, state = "In Progress", options: { parentId?: string } = {}): Promise<IssueRef> {
+	async createIssue(r: Resolved, title: string, description: string, state = "In Progress", options: { parentId?: string; priority?: number } = {}): Promise<IssueRef> {
 		const d = await this.gql<any>(`mutation($input: IssueCreateInput!) { issueCreate(input: $input) { success issue { id identifier } } }`, {
 			input: {
 				title: title.slice(0, 250), description, teamId: r.teamId, projectId: r.projectId, assigneeId: r.assigneeId, stateId: this.stateId(r, state),
 				// Only send a parent that an existing issue provided; a caller can never guess an id.
 				...(options.parentId ? { parentId: options.parentId } : {}),
+				...(Number.isInteger(options.priority) && options.priority! >= 0 && options.priority! <= 4 ? { priority: options.priority } : {}),
 			},
 		});
 		if (!d.issueCreate?.success || !d.issueCreate.issue) throw new Error("Hoja issueCreate did not succeed");
@@ -218,6 +219,14 @@ export class HojaClient {
 		const d = await this.gql<any>(`{ issues(first: 50, filter: { description: { contains: ${JSON.stringify(marker)} } }) { nodes { id identifier description } } }`);
 		const hit = (d.issues?.nodes ?? []).find((n: { description?: string }) => n.description?.includes(marker));
 		return hit ? { id: hit.id, identifier: hit.identifier } : undefined;
+	}
+
+	/** Reconciliation without any text in the issue: issues with exactly this title in this project created since
+	 *  `since`, with their bodies so the caller can match the exact description it sent. */
+	async findIssuesByTitle(title: string, projectId: string, since: string): Promise<{ id: string; identifier: string; description: string }[]> {
+		const filter = { title: { eq: title.slice(0, 250) }, project: { id: { eq: projectId } }, createdAt: { gte: since } };
+		const d = await this.gql<any>(`query($filter: IssueFilter) { issues(first: 20, filter: $filter) { nodes { id identifier description } } }`, { filter });
+		return (d.issues?.nodes ?? []).map((n: any) => ({ id: n.id, identifier: n.identifier, description: n.description ?? "" }));
 	}
 
 	async comment(issueId: string, body: string): Promise<void> {

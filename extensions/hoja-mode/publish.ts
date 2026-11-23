@@ -5,20 +5,25 @@
  * session journal. Once linked, `lifecycle.ts` keeps that issue truthful: current questions and progress in one
  * bounded description block, one evidence comment on accepted completion, then Done.
  *
- * Only an issue this session provably owns (its description carries `hoja-task:<session>:<task>`) is ever written to.
+ * Only an issue this session provably owns (the journal records that this session created it) is ever written to.
  * A reused or shared issue is never moved, closed or commented on: the session's work becomes a sub-issue beneath it,
  * so linking to someone else's umbrella can never rewrite it.
  *
+ * The issue itself carries no machine text: its description is the task's own Markdown and its acceptance checklist.
+ *
  * Retry safety has two halves and both are required:
- *   1. Intent before write. The `reconciling` record (marker, project, expected parent) is journaled *before* the
- *      create request leaves the process, so a crash or kill mid-request still leaves a durable trail.
- *   2. Never re-create an unconfirmed write. A `reconciling` task is reconciled by searching Hoja for its marker
- *      (server-side description filter) and validating the read-back. A marker miss is still ambiguous, not proof
- *      that nothing was created, so the task stays `reconciling` until a human resolves it by naming an issue.
+ *   1. Intent before write. The `reconciling` record (title, body digest, project, expected parent, time) is
+ *      journaled *before* the create request leaves the process, so a crash or kill mid-request still leaves a
+ *      durable trail.
+ *   2. Never re-create an unconfirmed write. A `reconciling` task is reconciled by a server-side search for issues
+ *      with exactly its title in its project created since the intent, and accepted only when exactly one of them has
+ *      exactly the body that was sent. A miss is still ambiguous, not proof that nothing was created, so the task
+ *      stays `reconciling` until a human resolves it by naming an issue. (Records written by earlier versions carry a
+ *      marker instead and are reconciled by it.)
  */
 import { HojaProjectError, HojaRequestError, type HojaClient, type IssueRef, type IssueView, type Resolved } from "../../.pi/lib/claw/hoja.ts";
 import {
-	hasLinkMarker, hiddenMarker, lifecycleWriterOf, managedSection, syncTask, taskFacts,
+	commentDigest, hasLinkMarker, lifecycleWriterOf, managedSection, syncTask, taskFacts,
 	type LifecycleState, type TaskFacts,
 } from "./lifecycle.ts";
 
@@ -33,8 +38,8 @@ export type HojaTaskState = "linked" | "reconciling" | "skipped" | "failed";
 
 /** One durable fact about a task: either it is linked to an issue, or the last attempt's outcome.
  *
- * `projectId` and `expectedParentIssueId` are written with the pre-write intent so reconciliation can prove that a
- * marker hit is the issue this task meant to create, not merely text that contains the marker. */
+ * `title`, `bodyDigest`, `projectId` and `expectedParentIssueId` are written with the pre-write intent so
+ * reconciliation can prove that a search hit is the issue this task meant to create. */
 export type HojaTaskRecord = {
 	taskId: string;
 	state: HojaTaskState;
@@ -48,7 +53,13 @@ export type HojaTaskRecord = {
 	/** Set when the project a caller named could not be resolved and the repository's configured project was used
 	 *  instead, so the model learns the issue landed somewhere other than where it asked. */
 	substitutedFrom?: string;
+	/** Legacy: the description marker earlier versions wrote. Still the task's stable key in the journal. */
 	marker?: string;
+	/** Exact title and body digest of an in-flight create, for marker-free reconciliation. */
+	title?: string;
+	bodyDigest?: string;
+	/** `created` when this session created the issue: the ownership proof lifecycle writes rely on. */
+	origin?: "created";
 	reason?: string;
 	/** Proof of what this session may write to, plus the outcome of its last lifecycle pass. */
 	lifecycle?: LifecycleState;
@@ -56,11 +67,12 @@ export type HojaTaskRecord = {
 export type HojaRecords = Record<string, HojaTaskRecord>;
 
 /** The subset of HojaClient publication needs. Structural, so a test double stays trivial. */
-export type HojaWriter = Pick<HojaClient, "resolve" | "createIssue" | "readIssue" | "findIssueByMarker" | "findIssueByIdentifier">;
+export type HojaWriter = Pick<HojaClient, "resolve" | "createIssue" | "readIssue" | "findIssueByMarker" | "findIssueByIdentifier">
+	& Partial<Pick<HojaClient, "findIssuesByTitle">>;
 
 export interface PublishContext {
 	enabled: boolean;
-	/** Session identity, used only to keep markers unique across chats. */
+	/** Session identity, used only to keep task keys unique across chats. */
 	sessionKey: string;
 	/** Project used when a task names none (`HOJA_PROJECT`). */
 	project?: string;
@@ -95,6 +107,7 @@ export type PublishCandidate = {
 	taskId: string;
 	subject: string;
 	description?: string;
+	priority?: number;
 	parentTaskId?: string;
 	status: string;
 	op: any;
@@ -112,12 +125,15 @@ export function taskMarker(sessionKey: string, taskId: string): string {
 	return `hoja-task:${session}:${task}`;
 }
 
-export function issueDescription(input: { description?: string; taskId: string; sessionKey: string; marker: string; managed?: string }): string {
-	// The marker is an HTML comment, so the rendered issue shows only the task's own text and its checklist. The
-	// marker already names the session and the task; a visible "tracked by" line would only repeat it.
-	const body = (input.description ?? "").trim();
-	return [body, hiddenMarker(input.marker), input.managed ?? ""].filter(Boolean).join("\n\n");
+/** The issue body: the task's own Markdown, then its acceptance checklist. Nothing else. */
+export function issueDescription(input: { description?: string; managed?: string }): string {
+	return [(input.description ?? "").trim(), input.managed ?? ""].filter(Boolean).join("\n\n");
 }
+
+/** TaskManage priority names to Hoja's integers (1 urgent, 2 high, 3 medium, 4 low). Unknown names send nothing. */
+export const PRIORITY_VALUES: Readonly<Record<string, number>> = { urgent: 1, high: 2, medium: 3, low: 4 };
+export const priorityValue = (priority: unknown): number | undefined =>
+	typeof priority === "string" ? PRIORITY_VALUES[priority.trim().toLowerCase()] : undefined;
 
 /** Newest record per task wins; malformed entries are ignored rather than failing a session start. */
 export function replayHojaRecords(entries: readonly unknown[]): HojaRecords {
@@ -176,7 +192,8 @@ function candidateFor(result: any, op: any, task: any, records: HojaRecords): { 
 		candidate: {
 			taskId: String(task.id),
 			subject: String(task.subject ?? op.subject ?? "").trim(),
-			description: typeof op.description === "string" ? op.description : undefined,
+			description: typeof op.description === "string" ? op.description : typeof task.description === "string" ? task.description : undefined,
+			priority: priorityValue(task.priority ?? op.priority),
 			parentTaskId,
 			status: String(task.status ?? "pending"),
 			op,
@@ -215,7 +232,7 @@ const record = (taskId: string, state: HojaTaskState, at: string, extra: Partial
 
 function linkRecord(candidate: PublishCandidate, issue: IssueRef, project: string, at: string, parentIdentifier?: string, substitutedFrom?: string, scope: "owned" | "adopted" = "owned"): HojaTaskRecord {
 	return record(candidate.taskId, "linked", at, {
-		issueId: issue.id, identifier: issue.identifier, project,
+		issueId: issue.id, identifier: issue.identifier, project, ...(scope === "owned" ? { origin: "created" as const } : {}),
 		...(parentIdentifier ? { parentIdentifier } : {}),
 		...(substitutedFrom ? { substitutedFrom } : {}),
 		lifecycle: { scope },
@@ -225,12 +242,29 @@ function linkRecord(candidate: PublishCandidate, issue: IssueRef, project: strin
 /** What a read-back must prove before an issue is adopted or recorded as this task's issue. A marker that another
  *  issue happens to contain, a different project, or a different parent all mean "not ours": the record stays
  *  `reconciling` and no second issue is created. */
-export function readbackMismatch(view: IssueView, expected: { marker: string; projectId?: string; parentIssueId?: string }): string | undefined {
-	// Exact marker line, so task #1 can never adopt task #10's issue (`…:1` is a prefix of `…:10`).
-	if (!hasLinkMarker(view.description, expected.marker)) return "marker_missing";
+export function readbackMismatch(view: IssueView, expected: { marker?: string; bodyDigest?: string; projectId?: string; parentIssueId?: string }): string | undefined {
+	// Legacy records: the exact marker line, so task #1 can never adopt task #10's issue (`…:1` is a prefix of `…:10`).
+	if (expected.marker && !hasLinkMarker(view.description, expected.marker)) return "marker_missing";
+	if (expected.bodyDigest && commentDigest(view.description) !== expected.bodyDigest) return "body_mismatch";
 	if (expected.projectId && view.projectId !== expected.projectId) return "project_mismatch";
 	if ((expected.parentIssueId || undefined) !== (view.parentId || undefined)) return "parent_mismatch";
 	return undefined;
+}
+
+/** How far before the journaled intent a server-side creation time may fall (clock skew between the two hosts). */
+const RECONCILE_SKEW_MS = 15 * 60_000;
+
+/** Marker-free reconciliation of an in-flight create: issues with exactly this title in this project, created since
+ *  the intent, whose body is exactly the one sent and which no other task already owns. Anything but exactly one such
+ *  issue is no proof, so the caller keeps the task blocked. */
+async function findByFingerprint(writer: HojaWriter, previous: HojaTaskRecord, applied: HojaRecords): Promise<IssueRef | undefined> {
+	if (!writer.findIssuesByTitle || !previous.title || !previous.projectId) return undefined;
+	const since = new Date(Date.parse(previous.at) - RECONCILE_SKEW_MS);
+	if (Number.isNaN(since.getTime())) return undefined;
+	const taken = new Set(Object.values(applied).filter(r => r.taskId !== previous.taskId && r.issueId).map(r => r.issueId));
+	const hits = (await writer.findIssuesByTitle(previous.title, previous.projectId, since.toISOString()))
+		.filter(hit => !taken.has(hit.id) && commentDigest(hit.description) === previous.bodyDigest);
+	return hits.length === 1 ? { id: hits[0].id, identifier: hits[0].identifier } : undefined;
 }
 
 /**
@@ -265,11 +299,11 @@ export async function publishBatch(params: unknown, batch: unknown, context: Pub
 	//    the earlier write landed; a marker miss stays ambiguous, because absence in a filtered search is not proof
 	//    that nothing was created, and re-creating on that assumption is exactly how duplicates happen.
 	for (const previous of Object.values(context.records)) {
-		if (previous.state !== "reconciling" || !previous.marker) continue;
+		if (previous.state !== "reconciling" || !(previous.bodyDigest || previous.marker)) continue;
 		if (!active()) return stopped();
 		let hit: IssueRef | undefined;
 		try {
-			hit = await writer.findIssueByMarker(previous.marker);
+			hit = previous.bodyDigest ? await findByFingerprint(writer, previous, applied) : await writer.findIssueByMarker(previous.marker!);
 		} catch {
 			block(previous);
 			continue;
@@ -286,14 +320,16 @@ export async function publishBatch(params: unknown, batch: unknown, context: Pub
 			block(previous);
 			continue;
 		}
-		if (readbackMismatch(view, { marker: previous.marker, projectId: previous.projectId, parentIssueId: previous.expectedParentIssueId })) {
+		const proof = previous.bodyDigest ? { bodyDigest: previous.bodyDigest } : { marker: previous.marker };
+		if (readbackMismatch(view, { ...proof, projectId: previous.projectId, parentIssueId: previous.expectedParentIssueId })) {
 			block(previous);
 			continue;
 		}
 		set(record(previous.taskId, "linked", at(), {
-			issueId: view.id, identifier: view.identifier, project: previous.project, marker: previous.marker,
+			issueId: view.id, identifier: view.identifier, project: previous.project, marker: previous.marker, origin: "created",
 			...(previous.projectId ? { projectId: previous.projectId } : {}),
 			...(view.parentIdentifier ? { parentIdentifier: view.parentIdentifier } : {}),
+			lifecycle: { scope: "owned" },
 		}));
 	}
 
@@ -416,52 +452,49 @@ export async function publishBatch(params: unknown, batch: unknown, context: Pub
 		}
 		const parentIssueId = parent?.state === "linked" ? parent.issueId : undefined;
 		const marker = taskMarker(context.sessionKey, candidate.taskId);
-		// The managed block is part of the create: acceptance questions are visible from the first read, with no
-		// extra write and no separate issue per question.
-		const description = issueDescription({
-			description: candidate.description, taskId: candidate.taskId, sessionKey: context.sessionKey, marker,
-			managed: managedSection(candidate.facts),
-		});
-		// Durable intent before the request leaves the process. A crash here leaves `reconciling` with everything
-		// reconciliation needs (marker, project, expected parent), so the next run adopts instead of re-creating.
-		set(record(candidate.taskId, "reconciling", at(), {
-			reason: "write_in_flight", marker, project: resolved.project, projectId: resolved.projectId,
+		// The checklist is part of the create: acceptance questions are visible from the first read, with no extra
+		// write and no separate issue per question.
+		const description = issueDescription({ description: candidate.description, managed: managedSection(candidate.facts) });
+		const title = candidate.subject.slice(0, 250);
+		// Everything reconciliation needs to recognise this exact create later, without any text in the issue.
+		const fingerprint = {
+			marker, title, bodyDigest: commentDigest(description), project: resolved.project, projectId: resolved.projectId,
 			...(parentIssueId ? { expectedParentIssueId: parentIssueId } : {}),
-		}));
+		};
+		// Durable intent before the request leaves the process. A crash here leaves `reconciling` with that fingerprint,
+		// so the next run adopts instead of re-creating.
+		set(record(candidate.taskId, "reconciling", at(), { reason: "write_in_flight", ...fingerprint }));
 		if (!active()) return stopped();
 		let created: IssueRef;
 		try {
-			created = await writer.createIssue(resolved, candidate.subject, description, state, parentIssueId ? { parentId: parentIssueId } : {});
+			created = await writer.createIssue(resolved, title, description, state, {
+				...(parentIssueId ? { parentId: parentIssueId } : {}),
+				...(candidate.priority !== undefined ? { priority: candidate.priority } : {}),
+			});
 		} catch (error) {
-			// An ambiguous failure may have committed. Record the marker so the next attempt reconciles first.
+			// An ambiguous failure may have committed. Keep the fingerprint so the next attempt reconciles first.
 			if (error instanceof HojaRequestError && error.ambiguous)
-				set(record(candidate.taskId, "reconciling", at(), {
-					reason: "ambiguous_write", marker, project: resolved.project, projectId: resolved.projectId,
-					...(parentIssueId ? { expectedParentIssueId: parentIssueId } : {}),
-				}));
+				set(record(candidate.taskId, "reconciling", at(), { reason: "ambiguous_write", ...fingerprint }));
 			else set(record(candidate.taskId, "failed", at(), { reason: "create_failed", project: resolved.project }));
 			continue;
 		}
 		// Past this point the issue exists. If the session went away we journal nothing more: the intent above already
-		// marks the task unconfirmed, and the next run reconciles it by marker instead of creating a second issue.
+		// marks the task unconfirmed, and the next run reconciles it by fingerprint instead of creating a second issue.
 		if (!active()) return stopped();
 		let view: IssueView;
 		try {
 			view = await writer.readIssue(created.id);
 		} catch {
 			set(record(candidate.taskId, "reconciling", at(), {
-				reason: "readback_unverified", issueId: created.id, identifier: created.identifier, marker,
-				project: resolved.project, projectId: resolved.projectId,
-				...(parentIssueId ? { expectedParentIssueId: parentIssueId } : {}),
+				reason: "readback_unverified", issueId: created.id, identifier: created.identifier, ...fingerprint,
 			}));
 			continue;
 		}
-		const mismatch = readbackMismatch(view, { marker, projectId: resolved.projectId, parentIssueId });
+		// The server returned this id for this create, so identity is proved; the read-back proves where it landed.
+		const mismatch = view.id !== created.id ? "id_mismatch" : readbackMismatch(view, { projectId: resolved.projectId, parentIssueId });
 		if (mismatch) {
 			set(record(candidate.taskId, "reconciling", at(), {
-				reason: "readback_mismatch", issueId: created.id, identifier: created.identifier, marker,
-				project: resolved.project, projectId: resolved.projectId,
-				...(parentIssueId ? { expectedParentIssueId: parentIssueId } : {}),
+				reason: "readback_mismatch", issueId: created.id, identifier: created.identifier, ...fingerprint,
 			}));
 			continue;
 		}
@@ -535,7 +568,7 @@ const LIFECYCLE_GUIDANCE: Record<string, string> = {
 	completion_unaccepted: "the task is marked completed but at least one acceptance question has no answer, so the issue was NOT closed. Answer the question with evidence on the task, then complete it again.",
 	comment_failed: "Hoja rejected the completion comment, so the issue was left open. A later batch retries it.",
 	comment_ambiguous: "the completion comment may or may not have been posted. The issue was left open and the comment is never repeated automatically; check it with hoja_get.",
-	comment_unverified: "the completion comment could not be read back after writing, so the issue was left open. Check it with hoja_get; the next batch reconciles by marker.",
+	comment_unverified: "the completion comment could not be read back after writing, so the issue was left open. Check it with hoja_get; the next batch reconciles by the comment text.",
 	comment_unconfirmed: "an earlier completion comment is unconfirmed. No second comment was posted and the issue stays open; read its comments with hoja_get before deciding.",
 	comment_pending: "an earlier completion comment was journaled but its outcome is unknown (the chat stopped mid-write). No second comment was posted; read the issue's comments with hoja_get before deciding.",
 	state_failed: "Hoja rejected the workflow transition; the issue keeps its current state. A later batch retries.",
@@ -545,7 +578,7 @@ const LIFECYCLE_GUIDANCE: Record<string, string> = {
 	state_unresolved: "the project or team workflow states could not be resolved, so the issue's state was left unchanged.",
 	state_target_mismatch: "the resolved project/team is not the issue's own team and project, so no state id was written.",
 	shared_unowned:
-		"this issue was not proven to belong to this task (its description lacks this session's marker), so nothing was written to it. Set metadata.hojaProject and let publication create a session issue, or link an issue this session owns.",
+		"this issue was not created by this session for this task, so nothing was written to it. Set metadata.hojaProject and let publication create a session issue, or link an issue this session owns.",
 	shared_target_mismatch: "the shared issue's team differs from the resolved project's team, so no session sub-issue was created and nothing was written.",
 	shared_project_unresolved: "a session sub-issue under the shared issue could not be created because the project did not resolve; the shared issue was left untouched.",
 	subissue_failed: "the session sub-issue under the shared issue was rejected, so no lifecycle write was made to either issue.",

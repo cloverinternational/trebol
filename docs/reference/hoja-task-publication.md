@@ -204,92 +204,105 @@ linked issue by `extensions/hoja-mode/lifecycle.ts`.
 
 | Task event | Hoja write |
 | --- | --- |
-| Issue created | description: the task's text, the hidden marker, and the managed block with the acceptance checklist |
-| Any update while linked | managed block rewritten **only** when its content differs (questions, answered/unanswered) |
+| Issue created | description: the task's own Markdown, then the `## Acceptance criteria` checklist; priority sent with the create |
+| Any update while linked | checklist rewritten **only** when its content differs (questions, answered/unanswered) |
 | Task `pending` / `in_progress` | issue state set to `Todo` / `In Progress` (read back), including reopening a `Done` issue |
 | Completion accepted locally | one evidence-bearing comment, then state `Done` |
-| Completion with an unanswered question | block updated, no comment, no close (`completion_unaccepted`) |
+| Completion with an unanswered question | checklist updated, no comment, no close (`completion_unaccepted`) |
 | Plain update, no Hoja metadata | syncs the linked issue; never creates or adopts |
 
-**Questions are not issues.** They live inside the managed block:
+**Nothing machine-readable is written into an issue.** The description and the
+completion comment are plain Markdown that read the same rendered in Hoja and
+raw in a tool result (`hoja_get`). Questions are not issues; they are the
+checklist:
 
-```text
+```markdown
 Add Git totals to the Tern startup card.
 
-<!-- hoja-task:<session>:1 -->
-
-<!-- hoja-managed:start -->
-**Acceptance criteria**
+## Acceptance criteria
 
 - [x] What changed, and where?
 - [ ] Which checks verified it?
-<!-- hoja-managed:end -->
 ```
 
-The issue renders as the task's own text and a checklist; nothing else is
-visible. Markers are HTML comments, which Markdown renderers hide. The block
-carries no status line (the issue's workflow state is the status) and no
-question ids or answers (the answers, with evidence, are the completion
-comment):
+No status line (the issue's workflow state is the status), no question ids, no
+answers (the completion comment carries them), no markers or HTML comments. A
+task without questions has no section. The completion comment is a short
+report:
 
-```text
-**Completed:** Tern Git totals
+```markdown
+**Done.** All 2 acceptance criteria are answered below.
 
-- **What changed, and where?**
-  Summary totals in the overlay.
-  Evidence: `.pi/lib/tern/startup-card.ts#L304`
+1. **What changed, and where?**
 
-<!-- hoja-answer:<session>:1:<revision> -->
+   Summary totals in the overlay.
+
+   Evidence: `.pi/lib/tern/startup-card.ts#L304`
+
+2. **Which checks verified it?**
+
+   vitest .pi/test/tools (470 passed).
+
+   Evidence: `tool:Bash#4`
 ```
 
-Only that block is rewritten. Everything before and after the markers — the
-human-written description, including its trailing whitespace — is preserved
-byte-for-byte, and an issue written before the block existed simply gains one.
-The write is not trusted: the issue is read back and must equal exactly the
-merged text (block present, outside text untouched) before anything else
+Question, answer and evidence are separate paragraphs of one numbered item, so
+they never run together on a soft line break; `;`-separated evidence references
+become separate code spans.
+
+**The section is found by its heading.** Only the last `## Acceptance criteria`
+heading and the checklist directly under it are rewritten (or, on an issue
+written by an earlier version, the `<!-- hoja-managed:start/end -->` block).
+Everything before and after — the human-written description, including its
+trailing whitespace and any earlier heading of the same name a human wrote —
+is preserved byte-for-byte; an issue without the section gains one, and a task
+whose questions were all removed loses it. The write is not trusted: the issue
+is read back and must equal exactly the merged text before anything else
 happens. A server that ignores the write or normalizes the description records
 `description_unverified` and the pass stops.
 
-**Ownership is proved, not assumed.** A write is allowed only when the issue
-description has a line exactly equal to `<!-- hoja-task:<session>:<task> -->`
-(or, for issues written by earlier versions, the visible
-`Link marker: hoja-task:<session>:<task>`). Substring matching is never used:
-task #1's marker is a prefix of task #10's, and a description that merely
-quotes a marker in prose is not ownership. Exact line matching is also how a
-legacy link is proven: `TREBOL-577` carries `Link marker:
-hoja-task:<session>:1`, so its task #1 owns it even though its journal record
-predates this feature. A reused issue carries no such line, so:
+**Ownership is proved, not assumed — by the journal, not by text.** A write is
+allowed only when the task's record says this session created that very issue
+(`origin: "created"` and the same issue id), which the create response and its
+read-back establish. A record without that proof (anything adopted with
+`metadata.hojaIssue`, or a record from an older version) owns the issue only if
+its description has this task's legacy marker as a whole line
+(`Link marker: hoja-task:<session>:<task>` or `<!-- hoja-task:… -->`; task #1's
+marker is a prefix of task #10's, so substrings never count). That proof is
+written into the record at once, and the same pass removes the legacy trail —
+the `Tracked by TaskManage task #N` line, this task's marker line and the old
+comment-bounded block — leaving the clean form above. Another task's marker
+line is human text and stays. An issue the session did not create, so:
 
 - the shared issue is **never** written to — not its state, description or
   comments;
-- the session's work becomes **one** sub-issue beneath it, carrying the marker,
-  the managed block and the completion comment;
+- the session's work becomes **one** sub-issue beneath it (proved by the
+  create response's id and parent read-back), carrying the checklist and the
+  completion comment;
 - the record is repointed to that sub-issue, and the shared issue's identifier
   is kept as `parentIdentifier`/`umbrellaIdentifier`.
 
-**Completion is two verified writes.** The comment body ends with
-`<!-- hoja-answer:<session>:<task>:<revision> -->` (earlier versions wrote a
-visible `Answer marker:` line, which is still recognised), where `<revision>` is
-a hash of the accepted question/answer/evidence set. Before writing, existing
-comments are searched for that exact marker line; after writing, the issue is
-read back and the marker must be present. Only then is the state moved to
-`Done`, and the transition itself is read back. A repeated completion, a resume
-or a replayed journal therefore posts nothing and moves nothing. Changed
-answers produce a different revision and therefore exactly one new comment,
-even after the issue was reopened — a stale comment from the earlier revision
-is never mistaken for the new one.
+**Completion is two verified writes.** The comment body is a pure function of
+the accepted questions, answers and evidence, so the body itself is the proof:
+before writing, existing comments are compared with it (by a digest insensitive
+to line endings and trailing whitespace); after writing, the issue is read back
+and the same body must be present. Only then is the state moved to `Done`, and
+the transition itself is read back. A repeated completion, a resume or a
+replayed journal therefore posts nothing and moves nothing. Changed answers
+produce a different body and therefore exactly one new comment, even after the
+issue was reopened. A comment written by an earlier version is recognised by its
+`Answer marker:` line for the same revision.
 
 **Ambiguity never repeats.** Before the comment leaves the process the record
-is journaled `comment: "pending"`; an ambiguous response journals
-`comment: "unconfirmed"` and the pass stops. Both states are ambiguous after a
-crash (the write may have committed), so a later pass **reconciles by marker
-first**: found means "posted" and the pass continues; not found means the pass
-fails closed (`comment_pending`/`comment_unconfirmed`) and posts nothing,
-including for a newer answer revision. An unresolved earlier intent must be
-reconciled before any new revision is written. The same rule covers the
-sub-issue creation intent: both `subissue: "pending"` and
-`subissue: "unconfirmed"` are never retried, and the shared issue stays
-untouched.
+is journaled `comment: "pending"` with the body's digest; an ambiguous response
+journals `comment: "unconfirmed"` and the pass stops. Both states are
+ambiguous after a crash (the write may have committed), so a later pass
+**reconciles by that digest first**: found means "posted" and the pass
+continues; not found means the pass fails closed
+(`comment_pending`/`comment_unconfirmed`) and posts nothing, including for a
+newer answer revision. The same rule covers the sub-issue creation intent:
+both `subissue: "pending"` and `subissue: "unconfirmed"` are never retried, and
+the shared issue stays untouched.
 
 **State writes are targeted, not hoped for.** Progress is not write-only: a
 `pending` task returns its issue to `Todo`, an `in_progress` task moves it to
@@ -303,25 +316,26 @@ issue.
 **Classification stays minimal.** Only a task with no parent, or one explicitly
 marked `metadata: {"hoja": "publish"}`, is a unit of filed work; every other
 child task is a granular step and stays local. A promoted child becomes a
-sub-issue of its parent's issue, and its questions live in its own block — the
-parent's block is never reused for the child's content.
+sub-issue of its parent's issue, and its questions live in its own checklist —
+the parent's checklist is never reused for the child's content.
 
 ## Durable intent, reconciliation and retry
 
 Two mechanisms, both required:
 
 1. **Intent before the write.** Immediately before `createIssue`, the record
-   `{state:"reconciling", reason:"write_in_flight", marker, project, projectId,
-   expectedParentIssueId?}` is journaled as a `hoja-task-link` session entry.
+   `{state:"reconciling", reason:"write_in_flight", title, bodyDigest, project,
+   projectId, expectedParentIssueId?}` is journaled as a `hoja-task-link` session entry.
    The extension's `journal` callback appends it synchronously, so a crash,
    kill or reload after the server committed but before any outcome was
    recorded still leaves a durable trail.
 2. **Never re-create an unconfirmed write.** At the start of every later
-   attempt, each `reconciling` record is searched by its marker
-   (`findIssueByMarker`, server-side description filter) and the hit is read
-   back. It is adopted only when the read-back proves the marker is present,
-   the project id matches the expected one (when known), and the parent id
-   matches the expected one (including "no parent"). A search miss, a search
+   attempt, each `reconciling` record is searched server-side for issues with
+   exactly its title in its project created since the intent (less 15 minutes
+   of clock skew; `findIssuesByTitle`). It is adopted only when exactly one hit
+   that no other task owns has exactly the body that was sent (`bodyDigest`),
+   and its read-back matches the project and the expected parent (including
+   "no parent"). Two identical hits, an edited body, a search miss, a search
    error, an unreadable read-back or any mismatch leaves the record
    `reconciling`: absence in a filtered search is not proof that nothing was
    created. The task is then reported as unresolved and **no create is
@@ -344,9 +358,9 @@ States:
   `create_failed`, `lookup_failed`). Retried when the task appears in a later
   batch.
 
-Every created issue carries `<!-- hoja-task:<session>:<task> -->` in its
-description. The marker alphabet is restricted to `[A-Za-z0-9_-]`, so no caller
-text reaches a query.
+No caller text is interpolated into a query: the title and project id travel as
+GraphQL variables. Records written by earlier versions carry a `marker` instead
+of a fingerprint and are still reconciled by it (`findIssueByMarker`).
 
 The only way out of an unconfirmed record is explicit: the agent finds the
 issue with `hoja_list`/`hoja_get` and links it with `metadata.hojaIssue`. The
@@ -432,24 +446,31 @@ on one. A second read-only check reports team `TREBOL` states as
   TaskManage result succeeded, `status` is `completed`, and every acceptance
   question has an answer. A completed task with an unanswered question records
   `completion_unaccepted` and stays open.
-- **Comments are for completion only.** Progress is the managed `Status:` line,
-  not a comment stream, so issue comments stay a record of accepted outcomes.
+- **Comments are for completion only.** Progress is the issue's workflow state
+  and the checklist, not a comment stream, so issue comments stay a record of
+  accepted outcomes.
 - **A crash mid-comment or mid-sub-issue is never auto-retried.** The journaled
-  `pending` state is ambiguous by design: the next pass reconciles by marker
-  and otherwise fails closed, so a human must check the issue (`hoja_get`) or
+  `pending` state is ambiguous by design: the next pass reconciles by the
+  comment's digest and otherwise fails closed, so a human must check the issue (`hoja_get`) or
   link the found issue explicitly.
-- **Ownership is a line, not a mention.** Editing the marker line in an
-  issue takes ownership away from the task; lifecycle then records
-  `shared_unowned` instead of writing.
+- **Ownership lives in the journal.** Losing the session journal loses
+  ownership: a resumed chat without its `hoja-task-link` entries records
+  `shared_unowned` instead of writing, and the issue must be linked explicitly.
+- **Hand-editing the checklist is overwritten.** The section under the last
+  `## Acceptance criteria` heading belongs to the task; put human notes above
+  or below it.
+- **Reconciling a lost create needs an unchanged body.** If someone edits the
+  new issue before the next pass, the fingerprint no longer matches and the task
+  stays `reconciling` until it is linked with `metadata.hojaIssue`.
 - **State ids are only written to the issue's own team/project.** A chat
   selection pointing at another project cannot move a linked issue's state
   (`state_target_mismatch`); the description is still synchronized.
 - **Comment dedupe reads the most recent 100 comments** (`readIssue`), so the
-  answer marker could in principle fall outside that window on a very busy
+  completion comment could in principle fall outside that window on a very busy
   issue. One comment per task keeps this far from the limit in practice.
 - **No optimistic concurrency (no CAS).** Writes are serialized per chat, but
   there is no revision precondition on `issueUpdate`/`commentCreate`: two
-  sessions writing the same issue can interleave. Marker dedupe protects
+  sessions writing the same issue can interleave. Body dedupe protects
   against a session's own retries, not against a concurrent writer.
 - Local/project metadata is evaluated per operation (see above); a task created
   with `hoja:"local"` and later updated without metadata stays out of Hoja.

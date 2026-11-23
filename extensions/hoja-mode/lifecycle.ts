@@ -1,24 +1,28 @@
 /** Lifecycle synchronization for a Hoja issue this session owns.
  *
- * Publication creates or links an issue; this module keeps that issue truthful afterwards: current acceptance
- * questions and progress live in one bounded description block, and an accepted local completion posts exactly one
- * answer comment and then moves the issue to Done.
+ * Publication creates or links an issue; this module keeps that issue truthful afterwards: the acceptance questions
+ * live in one `## Acceptance criteria` checklist in the description, and an accepted local completion posts exactly
+ * one answer comment and then moves the issue to Done.
  *
- * Ownership is proved, not assumed. A write is allowed only when the issue description carries this session's exact
- * `hoja-task:<session>:<task>` marker. A reused or shared issue does not, so it is never moved, commented on or
- * closed: the session's work becomes one sub-issue beneath it, and the shared issue is left byte-for-byte untouched.
+ * Nothing machine-readable is written into the issue. Descriptions and comments are plain Markdown a person (or a
+ * tool listing the issue) reads as-is; every proof this module needs lives somewhere else:
+ *   - ownership is the session's own journal: an issue this session created (`origin: "created"`, same issue id) is
+ *     owned; a reused or shared issue is not, so it is never moved, commented on or closed. Issues written by earlier
+ *     versions still prove ownership by their exact `Link marker:` / `<!-- hoja-task:… -->` line;
+ *   - the section this module may rewrite is the last `## Acceptance criteria` heading and the checklist under it
+ *     (or the legacy `<!-- hoja-managed -->` block), so text a human adds before or after it is preserved;
+ *   - the completion comment is a pure function of the accepted answers, so an exact body match proves it was posted.
+ *     Changed answers produce a different body and therefore one new comment; an identical repeat posts nothing.
  *
- * Every write is idempotent by construction:
- *   - the managed block is computed from the live description and written only when it differs;
- *   - the completion comment carries a stable answer marker that is looked up before the write, so resume and
- *     repeated completions never post twice;
- *   - a comment whose outcome is unknown is recorded `unconfirmed` and is never repeated blindly — the next attempt
- *     reports it instead of writing again.
+ * Every write is idempotent by construction, and a write whose outcome is unknown is recorded `unconfirmed` and is
+ * never repeated blindly — the next attempt reports it instead of writing again.
  */
 import { HojaRequestError, type IssueRef, type IssueView, type Resolved } from "../../.pi/lib/claw/hoja.ts";
 import type { HojaTaskRecord } from "./publish.ts";
 
-/** Bounded block ownership: text outside these markers belongs to humans and is preserved verbatim. */
+/** The section heading this module owns. Text outside the section belongs to humans and is preserved verbatim. */
+export const CRITERIA_HEADING = "## Acceptance criteria";
+/** Legacy block bounds written by earlier versions; still recognised (and replaced) when an old issue syncs. */
 export const MANAGED_START = "<!-- hoja-managed:start -->";
 export const MANAGED_END = "<!-- hoja-managed:end -->";
 /** The only state this module sets; a team that lacks it records a failure instead of guessing another. */
@@ -39,6 +43,8 @@ export type LifecycleState = {
 	scope: "owned" | "adopted";
 	comment?: "pending" | "posted" | "unconfirmed" | "failed";
 	commentMarker?: string;
+	/** Digest of the completion comment body this pass wrote (or is about to write); the body itself is the proof. */
+	commentDigest?: string;
 	closed?: boolean;
 	subissue?: "pending" | "unconfirmed";
 	umbrellaIdentifier?: string;
@@ -96,49 +102,83 @@ export function acceptedCompletion(facts: TaskFacts): boolean {
 	return facts.status === "completed" && facts.questions.every((question) => !!question.answer);
 }
 
-/** The managed block: the acceptance questions as a checklist. Questions are tracked here, never as separate issues.
- *  The block reads as ordinary Markdown: the issue's workflow state already says whether the work is open, and the
- *  answers (with evidence) go into the completion comment, so neither is repeated here. Question ids are internal. */
+/** The managed section: the acceptance questions as a Markdown checklist, ticked once answered. Questions are tracked
+ *  here, never as separate issues. No status line (the issue's workflow state is the status), no ids, no answers (the
+ *  completion comment carries those). A task without questions has no section at all. */
 export function managedSection(facts: TaskFacts): string {
-	const lines = [MANAGED_START];
-	if (facts.questions.length) {
-		lines.push("**Acceptance criteria**", "");
-		for (const question of facts.questions) lines.push(`- [${question.answer ? "x" : " "}] ${oneLine(question.text) || question.id}`);
-	}
-	lines.push(MANAGED_END);
-	return lines.join("\n");
+	if (!facts.questions.length) return "";
+	return [CRITERIA_HEADING, "", ...facts.questions.map((question) => `- [${question.answer ? "x" : " "}] ${oneLine(question.text) || question.id}`)].join("\n");
 }
 
-/** Replaces only the managed block, keeping every human byte before and after it. Without a block the section is
- *  appended, so an issue written by an older version gains one without losing its description. */
-export function mergeManagedDescription(existing: string, section: string): string {
-	const start = existing.indexOf(MANAGED_START);
-	const end = existing.indexOf(MANAGED_END);
-	if (start !== -1 && end > start) return `${existing.slice(0, start)}${section}${existing.slice(end + MANAGED_END.length)}`;
-	if (!existing) return section;
+const CHECKLIST_ITEM = /^\s*[-*] \[[ xX]\] /;
+
+/** Where the managed section sits in a description: the legacy comment-bounded block when present, else the last
+ *  `## Acceptance criteria` heading plus the checklist directly under it. */
+export function managedRange(text: string): { start: number; end: number } | undefined {
+	const start = text.indexOf(MANAGED_START);
+	const end = text.indexOf(MANAGED_END);
+	if (start !== -1 && end > start) return { start, end: end + MANAGED_END.length };
+	const lines = text.split("\n");
+	let heading = -1;
+	for (let i = lines.length - 1; i >= 0; i--) if (lines[i].trim() === CRITERIA_HEADING) { heading = i; break; }
+	if (heading === -1) return undefined;
+	let last = heading;
+	for (let i = heading + 1; i < lines.length; i++) {
+		if (CHECKLIST_ITEM.test(lines[i])) last = i;
+		else if (lines[i].trim() !== "" || last > heading) break;
+	}
+	const offset = (line: number) => lines.slice(0, line).reduce((sum, value) => sum + value.length + 1, 0);
+	return { start: offset(heading), end: offset(last) + lines[last].length };
+}
+
+/** The visible machine trail earlier versions wrote around an issue's text. Only this task's own marker lines are
+ *  removed; a marker for any other task, or prose that quotes one, is human text and stays. */
+export function stripLegacyTrail(text: string, marker: string): string {
+	const own = new Set([`Link marker: ${marker}`, hiddenMarker(marker)]);
+	const lines = text.split("\n");
+	const kept = lines.filter((line) => !own.has(line.trim()) && !/^Tracked by TaskManage task #[A-Za-z0-9_-]+( in session [A-Za-z0-9_-]+)?\.$/.test(line.trim()));
+	if (kept.length === lines.length) return text;
+	return kept.join("\n").replace(/\n{3,}/g, "\n\n").replace(/^\n+/, "");
+}
+
+/** Replaces only the managed section, keeping every human byte before and after it. Without a section one is
+ *  appended; an empty section removes the old one. With `marker`, the legacy trail of an owned issue is cleaned too. */
+export function mergeManagedDescription(existing: string, section: string, marker?: string): string {
+	const text = marker ? stripLegacyTrail(existing, marker) : existing;
+	const range = managedRange(text);
+	if (range) {
+		const before = text.slice(0, range.start);
+		const after = text.slice(range.end);
+		if (section) return `${before}${section}${after}`;
+		const head = before.replace(/\s+$/, "");
+		const tail = after.replace(/^\s+/, "");
+		return head && tail ? `${head}\n\n${tail}` : head || tail;
+	}
+	if (!section) return text;
+	if (!text) return section;
 	// Keep the human text byte-for-byte, including trailing spaces and newlines; only the separator is added.
-	const separator = existing.endsWith("\n\n") ? "" : existing.endsWith("\n") ? "\n" : "\n\n";
-	return `${existing}${separator}${section}`;
+	const separator = text.endsWith("\n\n") ? "" : text.endsWith("\n") ? "\n" : "\n\n";
+	return `${text}${separator}${section}`;
 }
 
 /** A line-anchored marker match. Ownership and comment dedupe must never use `includes`: `…:1` is a prefix of
- *  `…:10`, and prose can quote a marker it does not own. The marker has to be a whole line: either the hidden form
- *  `<!-- marker -->` written today, or the visible `Label: marker` line written by earlier versions. */
+ *  `…:10`, and prose can quote a marker it does not own. Markers are no longer written; this recognises the two forms
+ *  earlier versions left in issues (`Label: marker`, and `<!-- marker -->`), always as a whole line. */
 export function hasMarkerLine(text: string, label: string, marker: string): boolean {
 	if (!marker) return false;
 	const wanted = new Set([hiddenMarker(marker), `${label}: ${marker}`]);
 	return String(text ?? "").split(/\r?\n/).some((line) => wanted.has(line.trim()));
 }
 
-/** A marker as an HTML comment: Markdown renderers hide it, the description search still finds it. */
+/** The HTML-comment form of a marker, as one earlier version wrote it. */
 export const hiddenMarker = (marker: string): string => `<!-- ${marker} -->`;
 
 /** Collapses a value onto one line so it cannot break the list it sits in. */
 const oneLine = (value: string): string => value.replace(/\s*\r?\n\s*/g, " ").trim();
 
-/** This session's ownership marker for a task, as written by `issueDescription`. */
+/** A legacy ownership marker line for a task. */
 export const hasLinkMarker = (description: string, marker: string): boolean => hasMarkerLine(description, "Link marker", marker);
-/** The completion comment marker, as written by `completionComment`. */
+/** A legacy completion-comment marker line. */
 export const hasAnswerMarker = (comment: string, marker: string): boolean => hasMarkerLine(comment, "Answer marker", marker);
 
 /** Content revision of the accepted answers. A changed answer set produces a different marker (and therefore one new
@@ -155,19 +195,19 @@ export function answerRevision(facts: TaskFacts): string {
 	return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
-/** Stable per-task, per-revision comment marker: proves a completion comment exists before writing another. */
+/** Stable per-task, per-revision key. Kept in the journal (never in the comment) and matched against comments
+ *  written by earlier versions, which carried it as a visible line. */
 export function answerMarker(sessionKey: string, taskId: string, revision: string): string {
 	const session = String(sessionKey ?? "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 64) || "session";
 	const task = String(taskId ?? "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 32) || "task";
 	return `hoja-answer:${session}:${task}:${revision}`;
 }
 
-/** Text outside the managed block, so a write can be proved not to have eaten human description. */
+/** Text outside the managed section, so a write can be proved not to have eaten human description. */
 export function outsideManaged(text: string): { prefix: string; suffix: string } {
-	const start = text.indexOf(MANAGED_START);
-	const end = text.indexOf(MANAGED_END);
-	if (start === -1 || end <= start) return { prefix: text, suffix: "" };
-	return { prefix: text.slice(0, start), suffix: text.slice(end + MANAGED_END.length) };
+	const range = managedRange(text);
+	if (!range) return { prefix: text, suffix: "" };
+	return { prefix: text.slice(0, range.start), suffix: text.slice(range.end) };
 }
 
 /** Evidence references as inline code, one span per `;`-separated reference. */
@@ -176,31 +216,41 @@ function evidenceText(evidence: string): string {
 	return refs.map((ref) => (ref.includes("`") ? ref : `\`${ref}\``)).join(", ");
 }
 
-/** The one evidence-bearing comment a completed task posts to its own issue. Its marker is hidden at the end. */
-export function completionComment(facts: TaskFacts, marker: string): string {
-	const lines = [`**Completed:** ${oneLine(facts.subject)}`];
-	if (facts.questions.length) {
-		lines.push("");
-		for (const question of facts.questions) {
-			// Question, answer and evidence are separate paragraphs of one list item (a soft line break would run them
-			// together); indented continuation lines keep a multi-line answer inside its item.
-			lines.push(`- **${oneLine(question.text) || question.id}**`, "");
-			const answer = (question.answer ?? "(unanswered)").trim().split(/\r?\n/).map((line) => line.trimEnd());
-			for (const line of answer) lines.push(line ? `  ${line}` : "");
-			if (question.evidence) lines.push("", `  Evidence: ${evidenceText(question.evidence)}`);
-			lines.push("");
-		}
-	}
-	if (lines[lines.length - 1] !== "") lines.push("");
-	lines.push(hiddenMarker(marker));
+/** The one evidence-bearing comment a completed task posts to its own issue: a short verdict, then each acceptance
+ *  question with its answer and evidence as one numbered item (question, answer and evidence are separate paragraphs,
+ *  since a soft line break would run them together). Deterministic: the same answers always produce the same body. */
+export function completionComment(facts: TaskFacts): string {
+	const count = facts.questions.length;
+	const lines = [count
+		? `**Done.** ${count === 1 ? "The acceptance criterion is" : `All ${count} acceptance criteria are`} answered below.`
+		: "**Done.**"];
+	facts.questions.forEach((question, index) => {
+		const bullet = `${index + 1}. `;
+		const indent = " ".repeat(bullet.length);
+		lines.push("", `${bullet}**${oneLine(question.text) || question.id}**`, "");
+		const answer = (question.answer ?? "(unanswered)").trim().split(/\r?\n/).map((line) => line.trimEnd());
+		for (const line of answer) lines.push(line ? `${indent}${line}` : "");
+		if (question.evidence) lines.push("", `${indent}Evidence: ${evidenceText(question.evidence)}`);
+	});
 	return lines.join("\n");
+}
+
+/** Content digest of a comment body, insensitive to line endings and surrounding whitespace a server may normalise. */
+export function commentDigest(body: string): string {
+	const canonical = String(body ?? "").replace(/\r\n/g, "\n").split("\n").map((line) => line.trimEnd()).join("\n").trim();
+	let hash = 0x811c9dc5;
+	for (const char of canonical) {
+		hash ^= char.codePointAt(0) ?? 0;
+		hash = Math.imul(hash, 0x01000193);
+	}
+	return `${(hash >>> 0).toString(16).padStart(8, "0")}:${canonical.length}`;
 }
 
 const stateFor = (facts: TaskFacts): string => (facts.status === "in_progress" ? "In Progress" : "Todo");
 
-/** Fresh sub-issue body for a session working beneath a shared issue: the hidden marker, then the managed block. */
-export function subissueDescription(facts: TaskFacts, marker: string): string {
-	return [facts.description, hiddenMarker(marker), managedSection(facts)].filter(Boolean).join("\n\n");
+/** Fresh sub-issue body for a session working beneath a shared issue: the task's text, then its checklist. */
+export function subissueDescription(facts: TaskFacts): string {
+	return [facts.description, managedSection(facts)].filter(Boolean).join("\n\n");
 }
 
 export type SyncArgs = {
@@ -254,9 +304,15 @@ export async function syncTask(args: SyncArgs): Promise<SyncResult> {
 	}
 
 	let lifecycle = current();
-	// Ownership is the exact marker line (hidden or legacy `Link marker:`), never a substring: `…:1` must not match `…:10`, and prose that
-	// quotes a marker is not ownership. A record can predate this feature; the marker in the issue is the proof.
-	let owned = hasLinkMarker(view.description, args.marker);
+	// Ownership is the journal's own fact: this session created this very issue. An issue linked by an older version
+	// proves it with its exact legacy marker line (never a substring: `…:1` must not match `…:10`), and that proof is
+	// written into the record at once, because cleaning the old trail removes the line it came from.
+	const createdHere = record.origin === "created" && record.issueId === view.id;
+	let owned = (createdHere && lifecycle.scope !== "adopted") || hasLinkMarker(view.description, args.marker);
+	if (owned && !createdHere) {
+		save({ ...lifecycle, scope: "owned" }, { origin: "created" });
+		lifecycle = current();
+	}
 
 	// A shared issue is never written to. The session's work goes into one sub-issue beneath it, created once.
 	if (!owned && lifecycle.scope === "adopted") {
@@ -280,7 +336,7 @@ export async function syncTask(args: SyncArgs): Promise<SyncResult> {
 		if (!active()) return { record, stopped: true, writes };
 		let child: IssueRef;
 		try {
-			child = await writer.createIssue(resolved, facts.subject, subissueDescription(facts, args.marker), stateFor(facts), { parentId: view.id });
+			child = await writer.createIssue(resolved, facts.subject, subissueDescription(facts), stateFor(facts), { parentId: view.id });
 		} catch (failure) {
 			// An ambiguous sub-issue is never repeated: a second one would be a duplicate of the session's own work.
 			if (failure instanceof HojaRequestError && failure.ambiguous) {
@@ -300,13 +356,13 @@ export async function syncTask(args: SyncArgs): Promise<SyncResult> {
 			save({ ...current(), subissue: "unconfirmed", error });
 			return { record, stopped: false, writes, error };
 		}
-		if (!hasLinkMarker(readback.description, args.marker) || (readback.parentId || "") !== view.id) {
+		if (readback.id !== child.id || (readback.parentId || "") !== view.id) {
 			error = "subissue_unverified";
 			save({ ...current(), subissue: "unconfirmed", error });
 			return { record, stopped: false, writes, error };
 		}
 		save({ ...lifecycle, scope: "owned", subissue: undefined, umbrellaIdentifier: view.identifier }, {
-			issueId: readback.id, identifier: readback.identifier, parentIdentifier: view.identifier ?? record.parentIdentifier,
+			origin: "created", issueId: readback.id, identifier: readback.identifier, parentIdentifier: view.identifier ?? record.parentIdentifier,
 		});
 		lifecycle = current();
 		view = readback;
@@ -318,7 +374,7 @@ export async function syncTask(args: SyncArgs): Promise<SyncResult> {
 	//    character outside it — the human description — is unchanged.
 	const section = managedSection(facts);
 	let changed = false;
-	const desired = mergeManagedDescription(view.description, section);
+	const desired = mergeManagedDescription(view.description, section, args.marker);
 	if (desired !== view.description) {
 		if (!active()) return { record, stopped: true, writes };
 		try {
@@ -381,16 +437,23 @@ export async function syncTask(args: SyncArgs): Promise<SyncResult> {
 	//    one new comment. An earlier intent is reconciled by its own marker before any new revision is considered.
 	const revision = answerRevision(facts);
 	const commentMarker = answerMarker(args.sessionKey, facts.taskId, revision);
+	const body = completionComment(facts);
+	const digest = commentDigest(body);
+	// A comment is ours when its body is exactly the one this revision produces, or (written by an earlier version)
+	// it carries the revision's marker line.
+	const isOurs = (comment: string, key?: string, bodyDigest?: string) =>
+		(!!bodyDigest && commentDigest(comment) === bodyDigest) || (!!key && hasAnswerMarker(comment, key));
 	const previousMarker = lifecycle.commentMarker;
+	const previousDigest = lifecycle.commentDigest;
 	const unresolved = lifecycle.comment === "pending" || lifecycle.comment === "unconfirmed";
 	if (unresolved) {
 		// The last write may have committed: prove it by its marker. No marker means still ambiguous — fail closed.
-		const earlierFound = !!previousMarker && view.comments.some((body) => hasAnswerMarker(body, previousMarker));
+		const earlierFound = view.comments.some((comment) => isOurs(comment, previousMarker, previousDigest));
 		if (!earlierFound) return fail(lifecycle.comment === "pending" ? "comment_pending" : "comment_unconfirmed");
-		lifecycle = { ...lifecycle, comment: "posted", commentMarker: previousMarker };
+		lifecycle = { ...lifecycle, comment: "posted", commentMarker: previousMarker, commentDigest: previousDigest };
 		save({ ...lifecycle, error: undefined });
 	}
-	const alreadyPosted = view.comments.some((body) => hasAnswerMarker(body, commentMarker));
+	const alreadyPosted = view.comments.some((comment) => isOurs(comment, commentMarker, digest));
 
 	if (!acceptedCompletion(facts)) {
 		// Completed locally but not accepted (a question has no answer): say so, and never close.
@@ -407,10 +470,10 @@ export async function syncTask(args: SyncArgs): Promise<SyncResult> {
 	}
 
 	if (!alreadyPosted) {
-		save({ ...lifecycle, comment: "pending", commentMarker });
+		save({ ...lifecycle, comment: "pending", commentMarker, commentDigest: digest });
 		if (!active()) return { record, stopped: true, writes };
 		try {
-			await writer.comment(view.id, completionComment(facts, commentMarker));
+			await writer.comment(view.id, body);
 		} catch (failure) {
 			// Ambiguous means the comment may exist: record it and never write another one for this revision.
 			if (failure instanceof HojaRequestError && failure.ambiguous) {
@@ -431,13 +494,13 @@ export async function syncTask(args: SyncArgs): Promise<SyncResult> {
 			save({ ...current(), comment: "unconfirmed", error });
 			return { record, stopped: false, writes, error };
 		}
-		if (!check.comments.some((body) => hasAnswerMarker(body, commentMarker))) {
+		if (!check.comments.some((comment) => isOurs(comment, commentMarker, digest))) {
 			error = "comment_unverified";
 			save({ ...current(), comment: "unconfirmed", error });
 			return { record, stopped: false, writes, error };
 		}
 		view = check;
-		lifecycle = { ...lifecycle, comment: "posted", commentMarker };
+		lifecycle = { ...lifecycle, comment: "posted", commentMarker, commentDigest: digest };
 		save({ ...lifecycle, error: undefined });
 	}
 
@@ -447,6 +510,6 @@ export async function syncTask(args: SyncArgs): Promise<SyncResult> {
 	if (stateStop) return stateStop;
 	const alreadyClosed = lifecycle.closed === true && lifecycle.comment === "posted" && lifecycle.commentMarker === commentMarker;
 	if (!changed && !stateChanged && alreadyClosed) return { record, stopped: false, writes };
-	save({ ...lifecycle, comment: "posted", commentMarker, closed: true, error: undefined });
+	save({ ...lifecycle, comment: "posted", commentMarker, commentDigest: digest, closed: true, error: undefined });
 	return { record, stopped: false, writes };
 }
