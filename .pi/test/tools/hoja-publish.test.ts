@@ -14,7 +14,7 @@ type Created = IssueView & { parentId?: string };
 function fakeHoja(options: { issues?: Created[]; ambiguousCreate?: "commit" | "lose"; projects?: string[] } = {}) {
 	const issues = new Map<string, Created>();
 	for (const issue of options.issues ?? []) issues.set(issue.id, issue);
-	const calls = { resolve: [] as unknown[], create: [] as { title: string; description: string; state: string; parentId?: string }[], lookup: [] as string[], markers: [] as string[], stateWrites: 0 };
+	const calls = { resolve: [] as unknown[], create: [] as { title: string; description: string; state: string; parentId?: string }[], lookup: [] as string[], markers: [] as string[], titles: [] as string[], stateWrites: 0 };
 	let next = 1;
 	let ambiguous = options.ambiguousCreate;
 	const writer: HojaWriter = {
@@ -50,6 +50,12 @@ function fakeHoja(options: { issues?: Created[]; ambiguousCreate?: "commit" | "l
 			const hit = [...issues.values()].find(i => i.description.includes(marker));
 			return hit && { id: hit.id, identifier: hit.identifier };
 		},
+		async findIssuesByTitle(title: string, projectId: string, since: string) {
+			calls.titles.push(title);
+			expect(Number.isNaN(Date.parse(since))).toBe(false);
+			return [...issues.values()].filter(i => i.title === title && i.projectId === projectId)
+				.map(i => ({ id: i.id, identifier: i.identifier, description: i.description }));
+		},
 		async findIssueByIdentifier(identifier: string) {
 			calls.lookup.push(identifier);
 			const hit = [...issues.values()].find(i => i.identifier === identifier);
@@ -82,13 +88,16 @@ group("coarse publication is on by default", () => {
 		const outcome = await publish(hoja, operations, batch(created("a", task("1"))), { journal: (r: HojaTaskRecord) => journaled.push(r) });
 
 		expect(statesOf(journaled)).toEqual([["reconciling", "write_in_flight"], ["linked", undefined]]);
-		expect(journaled[0]).toMatchObject({ marker: taskMarker(SESSION, "1"), project: "Trebol", projectId: "proj" });
+		expect(journaled[0]).toMatchObject({ marker: taskMarker(SESSION, "1"), title: "Task 1", project: "Trebol", projectId: "proj" });
+		expect(journaled[0].bodyDigest).toMatch(/^[0-9a-f]{8}:\d+$/);
 		expect(journaled[0].expectedParentIssueId).toBeUndefined();
 		expect(outcome.records).toEqual(journaled);
 		expect(hoja.calls.create).toHaveLength(1);
 		expect(hoja.calls.create[0]).toMatchObject({ title: "Task 1", state: "Todo", parentId: undefined });
 		expect(hoja.calls.create[0].description).toContain("Do the work.");
-		expect(hoja.calls.create[0].description).toContain(taskMarker(SESSION, "1"));
+		// The issue is only the task's Markdown and its checklist: no marker, no tracking line, no HTML comment.
+		expect(hoja.calls.create[0].description).toBe("Do the work.");
+		expect(outcome.applied["1"].origin).toBe("created");
 		expect(outcome.applied["1"]).toMatchObject({ state: "linked", issueId: "issue-1", identifier: "TREBOL-1", project: "Trebol" });
 		expect(hoja.calls.stateWrites).toBe(0);
 	});
@@ -232,11 +241,12 @@ group("retry and resume safety", () => {
 		const hoja = fakeHoja({ ambiguousCreate: "commit" });
 		const operations = params({ key: "a", op: "create", subject: "A", questions: [] });
 		const first = await run(hoja, operations, batch(created("a", task("1"))));
-		expect(first.applied["1"]).toMatchObject({ state: "reconciling", reason: "ambiguous_write", marker: taskMarker(SESSION, "1") });
+		expect(first.applied["1"]).toMatchObject({ state: "reconciling", reason: "ambiguous_write", title: "Task 1" });
 
 		const second = await run(hoja, operations, batch(updated("a", task("1", { status: "in_progress" }))), first.applied);
 		expect(hoja.calls.create).toHaveLength(1);
-		expect(hoja.calls.markers).toEqual([taskMarker(SESSION, "1")]);
+		expect(hoja.calls.titles).toEqual(["Task 1"]);
+		expect(hoja.calls.markers).toEqual([]);
 		expect(second.applied["1"]).toMatchObject({ state: "linked", identifier: "TREBOL-1" });
 		expect(hoja.issues.size).toBe(1);
 	});
@@ -288,7 +298,33 @@ group("retry and resume safety", () => {
 		expect(withParent.calls.create).toHaveLength(0);
 	});
 
-	it("survives a crash between the create and its outcome, then adopts the issue by marker", async () => {
+	it("adopts by fingerprint only when exactly one unlinked issue has exactly the sent body", async () => {
+		const operations = params({ key: "a", op: "create", subject: "A", description: "Body.", questions: [] });
+		const intent = async (hoja: ReturnType<typeof fakeHoja>) => (await run(hoja, operations, batch(created("a", task("1"))))).applied;
+
+		// A human edited the body before reconciliation: not provably ours.
+		const edited = fakeHoja({ ambiguousCreate: "commit" });
+		const editedRecords = await intent(edited);
+		edited.issues.get("issue-1")!.description = "Body, edited.";
+		const a = await run(edited, operations, batch(updated("a", task("1"))), editedRecords);
+		expect(a.applied["1"].state).toBe("reconciling");
+
+		// Two identical issues: ambiguous, so neither is adopted and nothing is re-created.
+		const twins = fakeHoja({ ambiguousCreate: "commit" });
+		const twinRecords = await intent(twins);
+		twins.issues.set("issue-9", { ...twins.issues.get("issue-1")!, id: "issue-9", identifier: "TREBOL-9" });
+		const b = await run(twins, operations, batch(updated("a", task("1"))), twinRecords);
+		expect(b.applied["1"].state).toBe("reconciling");
+		expect(twins.calls.create).toHaveLength(1);
+
+		// The match already belongs to another task: not this one's.
+		const taken = fakeHoja({ ambiguousCreate: "commit" });
+		const takenRecords: HojaRecords = { ...(await intent(taken)), "2": { taskId: "2", state: "linked", at: "t", issueId: "issue-1", identifier: "TREBOL-1" } };
+		const c = await run(taken, operations, batch(updated("a", task("1"))), takenRecords);
+		expect(c.applied["1"].state).toBe("reconciling");
+	});
+
+	it("survives a crash between the create and its outcome, then adopts the issue by its fingerprint", async () => {
 		const hoja = fakeHoja();
 		const journaled: HojaTaskRecord[] = [];
 		let alive = true;
