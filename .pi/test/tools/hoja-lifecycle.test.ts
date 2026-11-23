@@ -126,14 +126,15 @@ group("managed description block", () => {
 		const merged = mergeManagedDescription(before, next);
 		expect(merged.startsWith("Human intro.")).toBe(true);
 		expect(merged.endsWith("Human footer.")).toBe(true);
-		expect(merged).toContain("Status: completed");
-		expect(merged).toContain("- [x] `q1` Done?");
-		expect(merged).not.toContain("Status: pending");
+		expect(merged).toContain("**Acceptance criteria**");
+		expect(merged).toContain("- [x] Done?");
+		expect(merged).not.toContain("Status:");
+		expect(merged).not.toContain("`q1`");
 	});
 
 	it("appends a block to an issue written before the block existed", () => {
 		const merged = mergeManagedDescription("old description", managedSection({ taskId: "1", subject: "s", status: "pending", questions: [] }));
-		expect(merged).toBe(`old description\n\n${MANAGED_START}\nStatus: pending\n${MANAGED_END}`);
+		expect(merged).toBe(`old description\n\n${MANAGED_START}\n${MANAGED_END}`);
 	});
 
 	it("keeps trailing whitespace when it appends a block", () => {
@@ -141,11 +142,17 @@ group("managed description block", () => {
 		const merged = mergeManagedDescription(existing, managedSection({ taskId: "1", subject: "s", status: "pending", questions: [] }));
 		expect(merged.startsWith(existing)).toBe(true);
 		expect(outsideManaged(merged).prefix.startsWith(existing)).toBe(true);
-		expect(merged).toBe(`${existing}\n${MANAGED_START}\nStatus: pending\n${MANAGED_END}`);
+		expect(merged).toBe(`${existing}\n${MANAGED_START}\n${MANAGED_END}`);
 	});
 
-	it("matches the exact Link marker line, never a prefix or quoted prose", () => {
+	it("matches the exact marker line, hidden or legacy, never a prefix or quoted prose", () => {
 		const one = taskMarker(SESSION, "1");
+		expect(hasLinkMarker(`<!-- ${one} -->`, one)).toBe(true);
+		expect(hasLinkMarker(`Body.\n\n  <!-- ${one} -->  \n`, one)).toBe(true);
+		expect(hasLinkMarker(`<!-- ${taskMarker(SESSION, "10")} -->`, one)).toBe(false);
+		expect(hasLinkMarker(`text <!-- ${one} -->`, one)).toBe(false);
+		expect(hasAnswerMarker(`<!-- ${answerMarker(SESSION, "1", "abcd")} -->`, answerMarker(SESSION, "1", "abcd"))).toBe(true);
+		expect(hasAnswerMarker(`<!-- ${answerMarker(SESSION, "10", "abcd")} -->`, answerMarker(SESSION, "1", "abcd"))).toBe(false);
 		expect(hasLinkMarker(`Link marker: ${taskMarker(SESSION, "10")}`, one)).toBe(false);
 		expect(hasLinkMarker(`Link marker: ${one}`, one)).toBe(true);
 		expect(hasLinkMarker(`See ${one} in prose.`, one)).toBe(false);
@@ -172,10 +179,11 @@ group("created issues carry acceptance questions", () => {
 		expect(hoja.calls.create).toHaveLength(1);
 		const description = hoja.calls.create[0].description;
 		expect(description).toContain("Human context.");
-		expect(description).toContain("`q1`");
-		expect(description).toContain("`q2`");
-		expect(description).toContain("Status: pending");
-		expect(description).toContain("not as separate issues");
+		expect(description).toContain("**Acceptance criteria**");
+		expect(description.match(/^- \[ \] /gm)).toHaveLength(2);
+		expect(description).toContain(`<!-- ${taskMarker(SESSION, "1")} -->`);
+		// No visible machine trail: no marker labels, no status line, no question ids.
+		for (const noise of ["Tracked by", "Link marker", "Status:", "`q1`", "not as separate issues"]) expect(description).not.toContain(noise);
 		expect(hoja.issues.size).toBe(1);
 	});
 });
@@ -185,11 +193,11 @@ group("progress and changed questions sync without hoja metadata", () => {
 		const hoja = fakeHoja();
 		const linked = await withRoot(hoja);
 		const progress = await run(hoja, params({ key: "b", op: "update" }),
-			batch(updated("b", task("1", { status: "in_progress", questions: [question("q1")] }))), linked);
+			batch(updated("b", task("1", { status: "in_progress", questions: [question("q1"), question("q2")] }))), linked);
 
 		expect(progress.records.some((r) => r.state === "linked")).toBe(true);
 		expect(hoja.calls.descriptions).toHaveLength(1);
-		expect(hoja.calls.descriptions[0].description).toContain("Status: in_progress");
+		expect(hoja.calls.descriptions[0].description).toContain("- [ ] Question q2");
 		expect(hoja.calls.comments).toHaveLength(0);
 		expect(hoja.calls.states).toEqual([{ issueId: "issue-1", state: "In Progress" }]);
 		expect(hoja.calls.create).toHaveLength(1);
@@ -207,8 +215,9 @@ group("progress and changed questions sync without hoja metadata", () => {
 		const description = hoja.issues.get("issue-1")?.description ?? "";
 		expect(description).toContain("New wording");
 		expect(description).not.toContain("Question q1");
-		expect(description).toContain("`q2`");
-		expect(hoja.calls.descriptions).toHaveLength(2);
+		expect(description).toContain("- [ ] New wording");
+		// Status alone is not in the block (the workflow state carries it), so only the question change is a write.
+		expect(hoja.calls.descriptions).toHaveLength(1);
 	});
 
 	it("reports nothing when a plain update leaves the issue unchanged", async () => {
@@ -238,13 +247,14 @@ group("accepted completion closes an owned issue exactly once", () => {
 
 		expect(hoja.calls.comments).toHaveLength(1);
 		const comment = hoja.calls.comments[0].body;
-		expect(comment).toContain(`Answer marker: ${marker}`);
+		expect(comment).toContain(`<!-- ${marker} -->`);
+		expect(comment).not.toContain("Answer marker");
 		expect(hasAnswerMarker(comment, marker)).toBe(true);
 		expect(comment).toContain("Summary totals added");
 		expect(comment).toContain(".pi/lib/tern/startup-card.ts#L304");
 		expect(hoja.calls.states).toEqual([{ issueId: "issue-1", state: "Done" }]);
 		expect(hoja.issues.get("issue-1")?.state).toBe("Done");
-		expect(hoja.issues.get("issue-1")?.description).toContain("- [x] `q1`");
+		expect(hoja.issues.get("issue-1")?.description).toContain("- [x] ");
 		expect(outcome.applied["1"].lifecycle).toMatchObject({ comment: "posted", closed: true });
 	});
 
@@ -351,9 +361,9 @@ group("parent and child hierarchy", () => {
 		const parentIssue = hoja.issues.get("issue-1");
 		const childIssue = hoja.issues.get("issue-2");
 		expect(childIssue?.parentId).toBe(parentIssue?.id);
-		expect(childIssue?.description).toContain("`cq`");
-		expect(parentIssue?.description).toContain("`pq`");
-		expect(parentIssue?.description).not.toContain("`cq`");
+		expect(childIssue?.description).toContain("Question cq");
+		expect(parentIssue?.description).toContain("Question pq");
+		expect(parentIssue?.description).not.toContain("Question cq");
 		expect(child.applied["2"]).toMatchObject({ parentIdentifier: "TREBOL-1" });
 	});
 });
@@ -378,8 +388,8 @@ group("backfill of an already-linked issue", () => {
 		expect(hoja.calls.create).toHaveLength(0);
 		const issue = hoja.issues.get("issue-1");
 		expect(issue?.state).toBe("Done");
-		expect(issue?.description).toContain("Status: completed");
-		expect(issue?.description).toContain("`q1`");
+		expect(issue?.description).toContain("- [x] What changed?");
+		// The legacy marker line is human-visible history now; it is kept and still proves ownership.
 		expect(issue?.description).toContain("Link marker");
 		expect(hoja.calls.comments).toHaveLength(1);
 		expect(outcome.applied["1"].lifecycle).toMatchObject({ closed: true });
@@ -588,7 +598,7 @@ group("description read-back", () => {
 		const hoja = fakeHoja({ dropHumanText: true });
 		const linked = await withRoot(hoja);
 		const outcome = await run(hoja, params({ key: "b", op: "update" }),
-			batch(updated("b", task("1", { status: "in_progress", questions: [question("q1")] }))), linked);
+			batch(updated("b", task("1", { status: "in_progress", questions: [question("q1"), question("q2")] }))), linked);
 
 		expect(outcome.applied["1"].lifecycle?.error).toBe("description_unverified");
 		expect(hoja.calls.comments).toHaveLength(0);
@@ -650,7 +660,15 @@ group("guidance matches behavior", () => {
 			taskId: "1", subject: "s", status: "completed",
 			questions: [{ id: "q1", text: "Why?", answer: "because", evidence: "file.ts#L5" }],
 		}, "hoja-answer:s:1");
-		expect(body).toContain("because");
-		expect(body).toContain("file.ts#L5");
+		expect(body).toBe("**Completed:** s\n\n- **Why?**\n\n  because\n\n  Evidence: `file.ts#L5`\n\n<!-- hoja-answer:s:1 -->");
+		expect(completionComment({ taskId: "1", subject: "s", status: "completed", questions: [] }, "m")).toBe("**Completed:** s\n\n<!-- m -->");
+	});
+
+	it("keeps a multi-line answer inside its list item and splits evidence references", () => {
+		const body = completionComment({
+			taskId: "1", subject: "s", status: "completed",
+			questions: [{ id: "q1", text: "What?", answer: "line one\nline two", evidence: "a.ts#L1; tool:Bash#2" }],
+		}, "hoja-answer:s:1");
+		expect(body).toContain("  line one\n  line two\n\n  Evidence: `a.ts#L1`, `tool:Bash#2`");
 	});
 });

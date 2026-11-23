@@ -204,8 +204,8 @@ linked issue by `extensions/hoja-mode/lifecycle.ts`.
 
 | Task event | Hoja write |
 | --- | --- |
-| Issue created | description includes the managed block with the acceptance questions and `Status:` |
-| Any update while linked | managed block rewritten **only** when its content differs (status, questions, answers) |
+| Issue created | description: the task's text, the hidden marker, and the managed block with the acceptance checklist |
+| Any update while linked | managed block rewritten **only** when its content differs (questions, answered/unanswered) |
 | Task `pending` / `in_progress` | issue state set to `Todo` / `In Progress` (read back), including reopening a `Done` issue |
 | Completion accepted locally | one evidence-bearing comment, then state `Done` |
 | Completion with an unanswered question | block updated, no comment, no close (`completion_unaccepted`) |
@@ -214,14 +214,32 @@ linked issue by `extensions/hoja-mode/lifecycle.ts`.
 **Questions are not issues.** They live inside the managed block:
 
 ```text
-<!-- hoja-managed:start -->
-Status: completed
+Add Git totals to the Tern startup card.
 
-Acceptance questions (tracked here, not as separate issues):
-- [x] `change-scope` What changed, and where?
-  - Answer: Summary totals in the overlay.
-  - Evidence: .pi/lib/tern/startup-card.ts#L304
+<!-- hoja-task:<session>:1 -->
+
+<!-- hoja-managed:start -->
+**Acceptance criteria**
+
+- [x] What changed, and where?
+- [ ] Which checks verified it?
 <!-- hoja-managed:end -->
+```
+
+The issue renders as the task's own text and a checklist; nothing else is
+visible. Markers are HTML comments, which Markdown renderers hide. The block
+carries no status line (the issue's workflow state is the status) and no
+question ids or answers (the answers, with evidence, are the completion
+comment):
+
+```text
+**Completed:** Tern Git totals
+
+- **What changed, and where?**
+  Summary totals in the overlay.
+  Evidence: `.pi/lib/tern/startup-card.ts#L304`
+
+<!-- hoja-answer:<session>:1:<revision> -->
 ```
 
 Only that block is rewritten. Everything before and after the markers — the
@@ -233,8 +251,9 @@ happens. A server that ignores the write or normalizes the description records
 `description_unverified` and the pass stops.
 
 **Ownership is proved, not assumed.** A write is allowed only when the issue
-description has a line exactly equal to
-`Link marker: hoja-task:<session>:<task>`. Substring matching is never used:
+description has a line exactly equal to `<!-- hoja-task:<session>:<task> -->`
+(or, for issues written by earlier versions, the visible
+`Link marker: hoja-task:<session>:<task>`). Substring matching is never used:
 task #1's marker is a prefix of task #10's, and a description that merely
 quotes a marker in prose is not ownership. Exact line matching is also how a
 legacy link is proven: `TREBOL-577` carries `Link marker:
@@ -248,8 +267,9 @@ predates this feature. A reused issue carries no such line, so:
 - the record is repointed to that sub-issue, and the shared issue's identifier
   is kept as `parentIdentifier`/`umbrellaIdentifier`.
 
-**Completion is two verified writes.** The comment body carries
-`Answer marker: hoja-answer:<session>:<task>:<revision>`, where `<revision>` is
+**Completion is two verified writes.** The comment body ends with
+`<!-- hoja-answer:<session>:<task>:<revision> -->` (earlier versions wrote a
+visible `Answer marker:` line, which is still recognised), where `<revision>` is
 a hash of the accepted question/answer/evidence set. Before writing, existing
 comments are searched for that exact marker line; after writing, the issue is
 read back and the marker must be present. Only then is the state moved to
@@ -324,7 +344,7 @@ States:
   `create_failed`, `lookup_failed`). Retried when the task appears in a later
   batch.
 
-Every created issue carries `Link marker: hoja-task:<session>:<task>` in its
+Every created issue carries `<!-- hoja-task:<session>:<task> -->` in its
 description. The marker alphabet is restricted to `[A-Za-z0-9_-]`, so no caller
 text reaches a query.
 
@@ -418,7 +438,7 @@ on one. A second read-only check reports team `TREBOL` states as
   `pending` state is ambiguous by design: the next pass reconciles by marker
   and otherwise fails closed, so a human must check the issue (`hoja_get`) or
   link the found issue explicitly.
-- **Ownership is a line, not a mention.** Editing the `Link marker:` line in an
+- **Ownership is a line, not a mention.** Editing the marker line in an
   issue takes ownership away from the task; lifecycle then records
   `shared_unowned` instead of writing.
 - **State ids are only written to the issue's own team/project.** A chat

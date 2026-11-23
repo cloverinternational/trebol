@@ -18,7 +18,7 @@
  */
 import { HojaProjectError, HojaRequestError, type HojaClient, type IssueRef, type IssueView, type Resolved } from "../../.pi/lib/claw/hoja.ts";
 import {
-	hasLinkMarker, lifecycleWriterOf, managedSection, syncTask, taskFacts,
+	hasLinkMarker, hiddenMarker, lifecycleWriterOf, managedSection, syncTask, taskFacts,
 	type LifecycleState, type TaskFacts,
 } from "./lifecycle.ts";
 
@@ -113,13 +113,10 @@ export function taskMarker(sessionKey: string, taskId: string): string {
 }
 
 export function issueDescription(input: { description?: string; taskId: string; sessionKey: string; marker: string; managed?: string }): string {
+	// The marker is an HTML comment, so the rendered issue shows only the task's own text and its checklist. The
+	// marker already names the session and the task; a visible "tracked by" line would only repeat it.
 	const body = (input.description ?? "").trim();
-	return [
-		body,
-		`Tracked by TaskManage task #${input.taskId} in session ${input.sessionKey.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 8)}.`,
-		`Link marker: ${input.marker}`,
-		input.managed ?? "",
-	].filter(Boolean).join("\n\n");
+	return [body, hiddenMarker(input.marker), input.managed ?? ""].filter(Boolean).join("\n\n");
 }
 
 /** Newest record per task wins; malformed entries are ignored rather than failing a session start. */
@@ -229,7 +226,7 @@ function linkRecord(candidate: PublishCandidate, issue: IssueRef, project: strin
  *  issue happens to contain, a different project, or a different parent all mean "not ours": the record stays
  *  `reconciling` and no second issue is created. */
 export function readbackMismatch(view: IssueView, expected: { marker: string; projectId?: string; parentIssueId?: string }): string | undefined {
-	// Exact `Link marker:` line, so task #1 can never adopt task #10's issue (`…:1` is a prefix of `…:10`).
+	// Exact marker line, so task #1 can never adopt task #10's issue (`…:1` is a prefix of `…:10`).
 	if (!hasLinkMarker(view.description, expected.marker)) return "marker_missing";
 	if (expected.projectId && view.projectId !== expected.projectId) return "project_mismatch";
 	if ((expected.parentIssueId || undefined) !== (view.parentId || undefined)) return "parent_mismatch";

@@ -367,8 +367,9 @@ group("authoritative queue snapshots", () => {
 		const tool = inst.tools.get("hoja_project");
 		await tool.execute("id", { action: "select", name: "Trebol" }, undefined, undefined, inst.ctx);
 		expect(inst.calls.create).toHaveLength(1);
-		expect(inst.calls.create[0].description).toContain("Yes");
+		expect(inst.calls.create[0].description).toContain("- [x] Done?");
 		expect(inst.calls.comments).toHaveLength(1);
+		expect(inst.calls.comments[0]).toContain("Yes");
 		expect(inst.issues.get("issue-1")?.state).toBe("Done");
 	});
 

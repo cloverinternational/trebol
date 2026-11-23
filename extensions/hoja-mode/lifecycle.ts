@@ -96,16 +96,14 @@ export function acceptedCompletion(facts: TaskFacts): boolean {
 	return facts.status === "completed" && facts.questions.every((question) => !!question.answer);
 }
 
-/** The managed block: status plus the acceptance questions. Questions are tracked here, never as separate issues. */
+/** The managed block: the acceptance questions as a checklist. Questions are tracked here, never as separate issues.
+ *  The block reads as ordinary Markdown: the issue's workflow state already says whether the work is open, and the
+ *  answers (with evidence) go into the completion comment, so neither is repeated here. Question ids are internal. */
 export function managedSection(facts: TaskFacts): string {
-	const lines = [MANAGED_START, `Status: ${facts.status}`];
+	const lines = [MANAGED_START];
 	if (facts.questions.length) {
-		lines.push("", "Acceptance questions (tracked here, not as separate issues):");
-		for (const question of facts.questions) {
-			lines.push(`- [${question.answer ? "x" : " "}] \`${question.id}\` ${question.text}`);
-			if (question.answer) lines.push(`  - Answer: ${question.answer}`);
-			if (question.evidence) lines.push(`  - Evidence: ${question.evidence}`);
-		}
+		lines.push("**Acceptance criteria**", "");
+		for (const question of facts.questions) lines.push(`- [${question.answer ? "x" : " "}] ${oneLine(question.text) || question.id}`);
 	}
 	lines.push(MANAGED_END);
 	return lines.join("\n");
@@ -124,12 +122,19 @@ export function mergeManagedDescription(existing: string, section: string): stri
 }
 
 /** A line-anchored marker match. Ownership and comment dedupe must never use `includes`: `…:1` is a prefix of
- *  `…:10`, and prose can quote a marker it does not own. The marker has to be the whole `Label: value` line. */
+ *  `…:10`, and prose can quote a marker it does not own. The marker has to be a whole line: either the hidden form
+ *  `<!-- marker -->` written today, or the visible `Label: marker` line written by earlier versions. */
 export function hasMarkerLine(text: string, label: string, marker: string): boolean {
 	if (!marker) return false;
-	const wanted = `${label}: ${marker}`;
-	return String(text ?? "").split(/\r?\n/).some((line) => line.trim() === wanted);
+	const wanted = new Set([hiddenMarker(marker), `${label}: ${marker}`]);
+	return String(text ?? "").split(/\r?\n/).some((line) => wanted.has(line.trim()));
 }
+
+/** A marker as an HTML comment: Markdown renderers hide it, the description search still finds it. */
+export const hiddenMarker = (marker: string): string => `<!-- ${marker} -->`;
+
+/** Collapses a value onto one line so it cannot break the list it sits in. */
+const oneLine = (value: string): string => value.replace(/\s*\r?\n\s*/g, " ").trim();
 
 /** This session's ownership marker for a task, as written by `issueDescription`. */
 export const hasLinkMarker = (description: string, marker: string): boolean => hasMarkerLine(description, "Link marker", marker);
@@ -165,25 +170,37 @@ export function outsideManaged(text: string): { prefix: string; suffix: string }
 	return { prefix: text.slice(0, start), suffix: text.slice(end + MANAGED_END.length) };
 }
 
-/** The one evidence-bearing comment a completed task posts to its own issue. */
+/** Evidence references as inline code, one span per `;`-separated reference. */
+function evidenceText(evidence: string): string {
+	const refs = evidence.split(";").map((ref) => oneLine(ref)).filter(Boolean);
+	return refs.map((ref) => (ref.includes("`") ? ref : `\`${ref}\``)).join(", ");
+}
+
+/** The one evidence-bearing comment a completed task posts to its own issue. Its marker is hidden at the end. */
 export function completionComment(facts: TaskFacts, marker: string): string {
-	const lines = [`TaskManage task #${facts.taskId} completed: ${facts.subject}`, "", `Answer marker: ${marker}`];
-	if (!facts.questions.length) lines.push("", "This task recorded no acceptance questions.");
-	else {
-		lines.push("", "Answers:");
+	const lines = [`**Completed:** ${oneLine(facts.subject)}`];
+	if (facts.questions.length) {
+		lines.push("");
 		for (const question of facts.questions) {
-			lines.push(`- \`${question.id}\` ${question.text}`, `  - Answer: ${question.answer ?? "(unanswered)"}`);
-			if (question.evidence) lines.push(`  - Evidence: ${question.evidence}`);
+			// Question, answer and evidence are separate paragraphs of one list item (a soft line break would run them
+			// together); indented continuation lines keep a multi-line answer inside its item.
+			lines.push(`- **${oneLine(question.text) || question.id}**`, "");
+			const answer = (question.answer ?? "(unanswered)").trim().split(/\r?\n/).map((line) => line.trimEnd());
+			for (const line of answer) lines.push(line ? `  ${line}` : "");
+			if (question.evidence) lines.push("", `  Evidence: ${evidenceText(question.evidence)}`);
+			lines.push("");
 		}
 	}
+	if (lines[lines.length - 1] !== "") lines.push("");
+	lines.push(hiddenMarker(marker));
 	return lines.join("\n");
 }
 
 const stateFor = (facts: TaskFacts): string => (facts.status === "in_progress" ? "In Progress" : "Todo");
 
-/** Fresh sub-issue body for a session working beneath a shared issue: marker first, then the managed block. */
+/** Fresh sub-issue body for a session working beneath a shared issue: the hidden marker, then the managed block. */
 export function subissueDescription(facts: TaskFacts, marker: string): string {
-	return [facts.description, `Link marker: ${marker}`, managedSection(facts)].filter(Boolean).join("\n\n");
+	return [facts.description, hiddenMarker(marker), managedSection(facts)].filter(Boolean).join("\n\n");
 }
 
 export type SyncArgs = {
@@ -237,7 +254,7 @@ export async function syncTask(args: SyncArgs): Promise<SyncResult> {
 	}
 
 	let lifecycle = current();
-	// Ownership is the exact `Link marker:` line, never a substring: `…:1` must not match `…:10`, and prose that
+	// Ownership is the exact marker line (hidden or legacy `Link marker:`), never a substring: `…:1` must not match `…:10`, and prose that
 	// quotes a marker is not ownership. A record can predate this feature; the marker in the issue is the proof.
 	let owned = hasLinkMarker(view.description, args.marker);
 
