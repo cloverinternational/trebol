@@ -1144,8 +1144,8 @@ export function registerTaskManage(pi: { registerTool(tool: unknown): void; appe
   options.resolveSessionEvidence ??= reference => resolveToolEvidence(reference, sessionManager);
   pi.registerTool({ name:"TaskManage", label:"Manage tasks", description:"Manage ordered tasks. Optional compact questions {id,text}; Saved answers for unchanged questions are reused; supply missing or replacement {question,answer,evidence} answers. Completion revalidates all evidence. Evidence uses workspace file#heading, file#Lx-Ly, or tool:<ToolName>[#<n>] for a live tool result from this session. Keep detail in files. sequential commits the successful prefix; atomic commits all or rolls back.", parameters:taskManageSchema,
     renderShell: "self",
-    promptSnippet: "TaskManage: track multi-step work with durable ordered tasks.",
-    promptGuidelines: ["Use TaskManage for multi-step work; keep exactly one active task when working sequentially; before starting work set the selected task status=\"in_progress\" and active=true; after verifying a task's acceptance criteria, explicitly update it with status=\"completed\" and activate the next unblocked task."],
+    promptSnippet: "TaskManage: register each user request and its deliverables as durable, evidence-checked tasks.",
+    promptGuidelines: ["Use TaskManage for every user request that changes files or state (not only long work): create the task before acting, one child task per separate deliverable; keep exactly one active task when working sequentially; before starting work set the selected task status=\"in_progress\" and active=true; after verifying a task's acceptance criteria, explicitly update it with status=\"completed\" and activate the next unblocked task; before ending a reply, complete finished tasks or add a note saying what is left."],
     renderCall: presentation.renderCall,
     renderResult: presentation.renderResult,
     execute: async (_id:string, params:Params, signal?:AbortSignal, _onUpdate?: unknown, ctx?: {cwd?: string; ui?: {setWidget(key: string, content: unknown): void}}) => {

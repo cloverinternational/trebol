@@ -11,6 +11,7 @@ import { STDIN_CONFLICT_HOOK_NAME, StdinConflictHook } from "./swarm-stdin-confl
 import { rawPi } from "./swarm-tool-surface.ts";
 import { installToolOutputSpill } from "./swarm-toolout-boundary.ts";
 import { TaskGateResumeBudget, evaluateTaskGateResume } from "./task-gate-resume.ts";
+import { WORK_REGISTRATION_CUSTOM_TYPE, WORK_REGISTRATION_HOOK, WorkRegistrationPolicy } from "./work-registration.ts";
 
 type Pi = any;
 // Pi hands every extension module its own ExtensionAPI object, so a per-object
@@ -125,6 +126,8 @@ export function registerSwarmBuiltinHooks(pi: Pi, options: SwarmBuiltinHookOptio
   // own block message. The budget lives on globalThis (via the module) so a
   // /reload cannot refill it mid-loop.
   const gateResume = new TaskGateResumeBudget();
+  // Every user request registered, and reconciled before the turn ends (work-registration.ts, HOJA-757).
+  const registration = new WorkRegistrationPolicy();
   pi.on("session_start", (_event: any, ctx: any) => { sessionOf(ctx); preContext.clear(); });
   pi.on("session_shutdown", () => { preContext.clear(); });
   // A real user or RPC turn is outside intervention, which legitimately refills
@@ -152,7 +155,15 @@ export function registerSwarmBuiltinHooks(pi: Pi, options: SwarmBuiltinHookOptio
       taskFocused: hasFocusedTask(hookTasks()),
       budget: gateResume,
     });
-    if (decision.action === "none" || !decision.content) return undefined;
+    if (decision.action === "none" || !decision.content) {
+      // Not a gate stop: before settling, make sure the turn's work is registered and its task reconciled. Once per
+      // turn (the policy remembers), never on top of another continuation.
+      if (event?.continue === true || ctx?.hasPendingMessages?.() === true || event?.outcome === "aborted" || event?.outcome === "error") return undefined;
+      const reminder = registration.onSettle(hookTasks());
+      if (!reminder) return undefined;
+      recordHook("taskmanage", "agent_before_settle", { hookName: WORK_REGISTRATION_HOOK }, "executed", "work registration reconcile", reminder);
+      return { continue: true, entries: [...(event?.entries ?? []), { type: "custom_message" as const, customType: WORK_REGISTRATION_CUSTOM_TYPE, content: reminder, display: false }] };
+    }
     recordHook(
       "taskmanage", "agent_before_settle", { hookName: "task-enforcement-hook" }, "executed",
       `${decision.reason}: ${decision.block?.toolName ?? "tool"} (${decision.used}/${decision.limit})`,
@@ -183,7 +194,9 @@ export function registerSwarmBuiltinHooks(pi: Pi, options: SwarmBuiltinHookOptio
       hooks.enforcement.onUserMessage(prompt);
       hooks.maintenance.onUserMessage(hookTasks(), pipeline.budget, session || "session");
     }
-    const { injected } = pipeline.onUserPrompt({ messageAfterReceive, prompt });
+    const { injected: swarmInjected } = pipeline.onUserPrompt({ messageAfterReceive, prompt });
+    const registrationLine = registration.onUserPrompt(prompt, hookTasks());
+    const injected = [swarmInjected, registrationLine].filter(Boolean).join("\n");
     if (!injected) return undefined;
     return { message: { customType: "swarm-hook-context", content: formatHookContext("user_prompt_submit", injected), display: false } };
   });
@@ -202,6 +215,7 @@ export function registerSwarmBuiltinHooks(pi: Pi, options: SwarmBuiltinHookOptio
     const { text, index } = firstText(event?.content);
     const content: any[] | undefined = Array.isArray(event?.content) ? event.content : undefined;
     pipeline.postTool({ toolName: event?.toolName ?? "", params: event?.input ?? {}, toolCallId: event?.toolCallId, failed, output: resultText(content ?? event?.content), ...( { details: event?.details } as any) });
+    registration.onToolResult({ toolName: event?.toolName ?? "", params: event?.input ?? {}, failed, taskManageSucceeded: !failed && !/"status"\s*:\s*"failed"/.test(text) });
     const phc = event?.toolCallId ? preContext.get(event.toolCallId) ?? "" : "";
     if (event?.toolCallId) preContext.delete(event.toolCallId);
     // agent_tools.go drops pre-context only when the tool returned a Go

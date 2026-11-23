@@ -79,8 +79,9 @@ the filing questionnaire. Project creation and issue read-back are still
 pending the user's destination choice; this is not a live-write success claim.
 
 Hoja mode is on by default in every chat. While it is on, a successful
-TaskManage batch is published to Hoja as **coarse** work: one issue per
-top-level task, never one per implementation step. `/hoja off` disables both
+TaskManage batch is published to Hoja as one issue per top-level task, and
+each child of a filed task as a sub-issue of that issue (HOJA-757). Mechanical
+steps marked `hoja:"local"` stay out. `/hoja off` disables both
 publication and the Hoja-first guidance for that chat; `hoja_list`/`hoja_get`
 stay available and read-only.
 
@@ -92,7 +93,8 @@ a Hoja issue.
 | Task | Published | How to change it |
 | --- | --- | --- |
 | Top-level task (`parent_id` absent) | yes | `metadata: {"hoja":"local"}` |
-| Child task (a step) | no | `metadata: {"hoja":"publish"}` |
+| Child task whose parent this chat filed (linked and owned, or filed in the same batch) | yes, as a sub-issue | `metadata: {"hoja":"local"}` |
+| Child task whose parent is local, unfiled or an adopted shared issue | no | `metadata: {"hoja":"publish"}` (deferred until the parent has an issue) |
 | Any task naming an existing issue | links, then files its own work as a sub-issue | `metadata: {"hojaIssue":"TREBOL-123"}` |
 | A read (`op: "get"`/`"list"`) result | never | — |
 
@@ -182,7 +184,7 @@ While filing is unresolved (`no_project` or `project_unresolved`), the
 extension recovers automatically as described above and the chat keeps working;
 nothing is gated.
 
-A promoted child is created as a sub-issue of its parent's issue and the
+A filed child is created as a sub-issue of its parent's issue and the
 hierarchy is read back (`parent { id identifier }`) before it is recorded. If
 the parent has no issue in this chat, the child is **deferred**
 (`skipped`/`parent_unpublished`) and retried on a later batch — it is never
@@ -313,9 +315,11 @@ transition is read back. Completion still requires the accepted-completion
 check first: a completed task with an unanswered question never closes its
 issue.
 
-**Classification stays minimal.** Only a task with no parent, or one explicitly
-marked `metadata: {"hoja": "publish"}`, is a unit of filed work; every other
-child task is a granular step and stays local. A promoted child becomes a
+**Classification stays minimal.** A task with no parent, a child of a task this
+chat filed, or a task explicitly marked `metadata: {"hoja": "publish"}` is a unit
+of filed work; a child marked `hoja:"local"`, or one whose parent is not filed by
+this chat, stays local. Before HOJA-757 every child stayed local unless promoted;
+agents never promoted, so no request was ever broken down in Hoja. A filed child becomes a
 sub-issue of its parent's issue, and its questions live in its own checklist —
 the parent's checklist is never reused for the child's content.
 
