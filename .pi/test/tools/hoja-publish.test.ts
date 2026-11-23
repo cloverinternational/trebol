@@ -102,23 +102,47 @@ group("coarse publication is on by default", () => {
 		expect(hoja.calls.stateWrites).toBe(0);
 	});
 
-	it("keeps child steps local unless they are promoted", async () => {
+	it("files a child of a filed task as its sub-issue, and keeps local steps and children of unfiled parents out (HOJA-757)", async () => {
 		const hoja = fakeHoja();
 		const root = await run(hoja, params({ key: "r", op: "create", subject: "Root", questions: [] }),
 			batch(created("r", task("1"))));
 		expect(root.applied["1"].identifier).toBe("TREBOL-1");
 
-		// A child task without metadata is a local step: no call, no record.
+		// A child of a linked, owned parent is filed as a sub-issue without any metadata.
 		const plain = await run(hoja, params({ key: "c", op: "create", subject: "Step", questions: [] }),
 			batch(created("c", task("2", { parent_id: "1" }))), root.applied);
-		expect(plain.records).toEqual([]);
-		expect(hoja.calls.create).toHaveLength(1);
+		expect(hoja.calls.create).toHaveLength(2);
+		expect(hoja.calls.create[1]).toMatchObject({ parentId: "issue-1" });
+		expect(plain.applied["2"]).toMatchObject({ state: "linked", parentIdentifier: "TREBOL-1" });
 
-		// The same shape marked local is equally silent.
+		// A child marked local stays out of Hoja.
+		const localChild = await run(hoja, params({ key: "m", op: "create", subject: "Run tests", metadata: { hoja: "local" }, questions: [] }),
+			batch(created("m", task("4", { parent_id: "1" }))), plain.applied);
+		expect(localChild.records).toEqual([]);
+		expect(hoja.calls.create).toHaveLength(2);
+
+		// A root marked local is equally silent, and so is a plain child of that unfiled root.
 		const local = await run(hoja, params({ key: "l", op: "create", subject: "Root 2", metadata: { hoja: "local" }, questions: [] }),
-			batch(created("l", task("3"))), plain.applied);
+			batch(created("l", task("3"))), localChild.applied);
 		expect(local.records).toEqual([]);
-		expect(hoja.calls.create).toHaveLength(1);
+		const orphan = await run(hoja, params({ key: "o", op: "create", subject: "Step of local", questions: [] }),
+			batch(created("o", task("5", { parent_id: "3" }))), local.applied);
+		expect(orphan.records).toEqual([]);
+		expect(hoja.calls.create).toHaveLength(2);
+	});
+
+	it("files a root and its children from one batch as an issue with sub-issues (HOJA-757)", async () => {
+		const hoja = fakeHoja();
+		const ops = params(
+			{ key: "r", op: "create", subject: "Request", questions: [] },
+			{ key: "a", op: "create", subject: "Part A", parentTaskId: { ref: "r" }, questions: [] },
+			{ key: "b", op: "create", subject: "Part B", parentTaskId: { ref: "r" }, questions: [] },
+		);
+		const out = await run(hoja, ops, batch(created("r", task("1")), created("a", task("2", { parent_id: "1" })), created("b", task("3", { parent_id: "1" }))));
+		expect(hoja.calls.create).toHaveLength(3);
+		expect(hoja.calls.create[1]).toMatchObject({ parentId: "issue-1" });
+		expect(hoja.calls.create[2]).toMatchObject({ parentId: "issue-1" });
+		expect(out.applied["3"]).toMatchObject({ state: "linked", parentIdentifier: "TREBOL-1" });
 	});
 
 	it("creates a promoted child as a sub-issue of its linked parent and reads the hierarchy back", async () => {

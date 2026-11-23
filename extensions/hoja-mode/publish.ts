@@ -153,7 +153,7 @@ function metadataOf(op: any): Record<string, unknown> | undefined {
 	return isObject(op?.metadata) ? op.metadata as Record<string, unknown> : undefined;
 }
 
-function candidateFor(result: any, op: any, task: any, records: HojaRecords): { candidate?: PublishCandidate; rejected?: string } {
+function candidateFor(result: any, op: any, task: any, records: HojaRecords, publishing: ReadonlySet<string> = new Set()): { candidate?: PublishCandidate; rejected?: string } {
 	const metadata = metadataOf(op);
 	// TaskManage deletes a metadata key when its value is null, so null means "not set", never an invalid value.
 	const flag = metadata?.hoja ?? undefined;
@@ -184,9 +184,14 @@ function candidateFor(result: any, op: any, task: any, records: HojaRecords): { 
 		return {};
 	}
 	const parentTaskId = typeof task.parent_id === "string" && task.parent_id ? task.parent_id : undefined;
-	// Coarse by default: top-level work publishes; child steps stay local unless promoted explicitly.
+	// Top-level work publishes. A child of a task this chat files (linked and owned, or filed in this same batch) is
+	// filed too, as a sub-issue of its parent's issue (HOJA-757: agents never promoted steps, so no work was ever
+	// broken down in Hoja). `local` keeps a mechanical step out; a child of an unfiled or adopted parent stays local.
 	// An update reaches this point only when it carries Hoja metadata, so an unmarked top-level update is deliberate.
-	const major = flag === "publish" || (flag === undefined && !parentTaskId);
+	const parent = parentTaskId ? records[parentTaskId] : undefined;
+	const parentFiled = !!parentTaskId && (publishing.has(parentTaskId) ||
+		(parent?.state === "linked" && !!parent.issueId && (parent as any).lifecycle?.scope !== "adopted"));
+	const major = flag === "publish" || (flag === undefined && (!parentTaskId || parentFiled));
 	if (!major && !namesIssue) return {};
 	return {
 		candidate: {
@@ -214,15 +219,21 @@ export function publishCandidates(params: unknown, batch: unknown, records: Hoja
 	for (const op of operations) if (isObject(op) && typeof op.key === "string") byKey.set(op.key, op);
 	const candidates: PublishCandidate[] = [];
 	const rejected: { taskId: string; reason: string }[] = [];
+	const publishing = new Set<string>();
 	for (const result of results) {
 		if (!isObject(result) || result.status !== "succeeded" || !isObject(result.data)) continue;
 		if (result.op !== "create" && result.op !== "update") continue;
 		const task = (result.data as any).task;
 		if (!isObject(task) || typeof task.id !== "string" || !task.id) continue;
 		const op = byKey.get(String(result.key)) ?? { key: result.key, op: result.op, metadata: undefined };
-		const { candidate, rejected: reason } = candidateFor(result, op, task, records);
+		const { candidate, rejected: reason } = candidateFor(result, op, task, records, publishing);
 		if (reason) rejected.push({ taskId: task.id, reason });
-		else if (candidate) candidates.push(candidate);
+		else if (candidate) {
+			candidates.push(candidate);
+			// Its children in the same batch follow it into Hoja as sub-issues. A parent that adopts a shared issue
+			// (hojaIssue) is not "filed by this chat", so its children stay local.
+			if (candidate.kind === "publish" && metadataOf(candidate.op)?.hojaIssue == null) publishing.add(candidate.taskId);
+		}
 	}
 	return { candidates, rejected };
 }
