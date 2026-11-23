@@ -6,6 +6,21 @@ Release metadata is kept in `package.json`, `update-manifest.json`, and this fil
 
 ### Added
 
+- Work registration (HOJA-757, `.pi/lib/runtime/work-registration.ts`). Real session traces showed 18 of 91
+  working prompts registered as tasks, no sub-issue ever created, and users typing "please update your task". Each
+  user-authored prompt now carries one line telling the agent how to register it: create a task, activate an open
+  one, or decide root vs child when a new request arrives mid-task. Once per turn at `agent_before_settle`, a turn
+  whose acting work left the focused task unreconciled (or did work with no task) is continued with a reminder to
+  complete it with evidence or add a note. It never blocks a tool, and harness-injected turns
+  (`<task-notification>` and similar) are not treated as requests. Guarded by `.pi/test/runtime/work-registration.test.ts`.
+
+### Changed
+
+- Hoja publication files a child of a task this chat filed as a sub-issue of its parent's issue by default;
+  `metadata.hoja: "local"` keeps a mechanical step out, and children of unfiled or adopted parents stay local.
+  Before, children stayed local unless promoted, and agents never promoted one. `HOJA_RULE` and the TaskManage
+  prompt guidance are rewritten as a four-step registration protocol (HOJA-757).
+
 - The `tern` tool now checks which pane runtime actually exists instead of failing every call with
   `spawn tern ENOENT`. Detection resolves an absolute path (the pane's inherited `PATH` is not a
   user's `PATH`, which is what made an installed `tern` invisible) and reports herdr as a pane-only
